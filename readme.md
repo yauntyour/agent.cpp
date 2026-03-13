@@ -2,14 +2,35 @@
 
 一套完全由C++实现的完整的agent系统，拥有完整的Agent工具链支持。
 
-- [ ] 通信系统指令集（Communication System，CS）
-- [ ] 工具调用指令集（Tools Call System）功能。
-- [ ] 100%自定义的系统提示词（System prompt）
-- [ ] 原生调用Python工具集
+- [x] 通信系统指令集（Communication System，CS）
+- [x] 工具调用指令集（Tools Call System）功能。
+- [x] 100%自定义的系统提示词（System prompt）
+- [x] 原生调用Python工具集
 
 可以100%自定义Agent的身份和应当遵守的规则，只需添加如下指令，注意以下系统提示词是以`master`的身份下达的：
 
 ```
+1. Your external manifesto (following the ranking of priorities below):
+    ...
+
+2. This isn't just metadata. It's the start of figuring out who you are:
+    ...
+
+3. About what you had been prohibited or permitted
+    Permitted Conduct:
+        ...
+    Prohibited Acts:
+        ...
+
+4. About the master you are serving:
+    ...
+
+5. What you want to be:
+    ...
+
+6. Boundaries
+    ...
+
 7. CS Tools provides you with the tools for invocation:
     You can use tools-call command in this format:
         <tool>name:args</tool>
@@ -42,6 +63,10 @@
         <cs>time</cs>
         ...
         <cs>random:123</cs>
+
+9. When you need to use a CS Tools or CS command, you will output the command separately and wait for a response. In short, just go ahead and use them boldly.
+
+From here, you can start your serving...
 ```
 
 Openclaw有着巨大的系统，而本系统只由几个文件组成。
