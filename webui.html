@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>Agent WebUI</title>
+    <script src="https://image.uc.cn/s/uae/g/3n/mos-production/0915/3.4.17.js"></script>
+    <script src="https://cdn.staticfile.net/vue/3.3.4/vue.global.prod.js"></script>
+    <script src="https://image.uc.cn/s/uae/g/3n/mos-production/cdn-staticfile-net/axios/1.6.7/axios.min.js"></script>
+    <script src="https://cdn.bootcdn.net/ajax/libs/js-sha3/0.9.3/sha3.min.js"></script>
+    <script src="https://cdn.staticfile.net/marked/9.1.2/marked.min.js"></script>
+    <script src="https://image.uc.cn/s/uae/g/3n/mos-production/fontawesome-free-7.1.0-web/js/all.min.js"></script>
+    <link href="https://image.uc.cn/s/uae/g/3n/mos-production/fontawesome-free-7.1.0-web/css/fontawesome.min.css"
+        rel="stylesheet" />
+    <style>
+        :root {
+            --bg-primary: #0f172a;
+            --bg-secondary: #1e293b;
+            --bg-tertiary: #334155;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --danger: #ef4444;
+        }
+
+        body {
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            height: 100vh;
+            margin: 0;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-secondary);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+
+        /* Markdown Styles */
+        .markdown-body {
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+
+        .markdown-body h1,
+        .markdown-body h2,
+        .markdown-body h3 {
+            color: var(--text-primary);
+            margin-top: 1em;
+            margin-bottom: 0.5em;
+        }
+
+        .markdown-body p {
+            margin-bottom: 0.8em;
+        }
+
+        .markdown-body code {
+            background-color: rgba(255, 255, 255, 0.1);
+            padding: 0.2em 0.4em;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+
+        .markdown-body pre {
+            background-color: #0d1117;
+            padding: 1em;
+            border-radius: 6px;
+            overflow-x: auto;
+        }
+
+        .markdown-body pre code {
+            background-color: transparent;
+            padding: 0;
+        }
+
+        .markdown-body ul,
+        .markdown-body ol {
+            padding-left: 1.5em;
+        }
+
+        /* Transitions */
+        .fade-enter-active,
+        .fade-leave-active {
+            transition: opacity 0.3s ease;
+        }
+
+        .fade-enter-from,
+        .fade-leave-to {
+            opacity: 0;
+        }
+
+        /* Loader */
+        .loader {
+            border: 3px solid rgba(255, 255, 255, 0.1);
+            border-radius: 50%;
+            border-top: 3px solid var(--accent);
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="h-full flex flex-col" id="app">
+        <transition name="fade">
+            <div :class="{
+                 'bg-blue-600': notification.type === 'info',
+                 'bg-green-600': notification.type === 'success',
+                 'bg-red-600': notification.type === 'error'
+             }" class="fixed top-4 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded shadow-lg z-50 flex items-center gap-3"
+                v-if="notification.show">
+                <i :class="{
+                'fa-info-circle': notification.type === 'info',
+                'fa-check-circle': notification.type === 'success',
+                'fa-exclamation-circle': notification.type === 'error'
+            }" class="fas"></i>
+                <span>{{ notification.message }}</span>
+            </div>
+        </transition>
+        <div class="flex-1 flex items-center justify-center bg-slate-900" v-if="!isLoggedIn">
+            <div class="w-full max-w-md bg-slate-800 p-8 rounded-lg shadow-xl border border-slate-700">
+                <div class="text-center mb-8">
+                    <h1 class="text-3xl font-bold text-white mb-2">Agent</h1>
+                    <p class="text-slate-400">Please sign in to continue</p>
+                </div>
+                <form @submit.prevent="handleLogin" class="space-y-6">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-300 mb-1">Username</label>
+                        <input
+                            class="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded focus:outline-none focus:border-blue-500 text-white"
+                            required="" type="text" v-model="loginForm.username" />
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-300 mb-1">Password</label>
+                        <input
+                            class="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded focus:outline-none focus:border-blue-500 text-white"
+                            required="" type="password" v-model="loginForm.password" />
+                    </div>
+                    <button :disabled="isLoading"
+                        class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition flex justify-center items-center"
+                        type="submit">
+                        <span class="loader mr-2" v-if="isLoading"></span>
+                        <span v-if="!isLoading">Sign In</span>
+                        <span v-else="">Signing In...</span>
+                    </button>
+                </form>
+            </div>
+        </div>
+        <div class="flex-1 flex overflow-hidden" v-else="">
+            <aside class="w-64 bg-slate-800 border-r border-slate-700 flex flex-col">
+                <div class="p-4 border-b border-slate-700 flex items-center justify-between">
+                    <span class="font-bold text-lg text-white">Agent</span>
+                    <div class="flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full bg-green-500"></span>
+                        <span class="text-xs text-slate-400">Online</span>
+                    </div>
+                </div>
+                <div class="p-3">
+                    <button @click="createNewSession"
+                        class="w-full bg-slate-700 hover:bg-slate-600 text-white py-2 px-3 rounded flex items-center justify-center gap-2 transition">
+                        <i class="fas fa-plus"></i> New Session
+                    </button>
+                </div>
+                <div class="flex-1 overflow-y-auto p-3 space-y-2">
+                    <h3 class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">History</h3>
+                    <div :class="currentSessionId === session.id ? 'bg-slate-700 text-white' : 'hover:bg-slate-700/50 text-slate-300'"
+                        :key="session.id" @click="switchSession(session.id)"
+                        class="cursor-pointer p-3 rounded transition group" v-for="session in sessions">
+                        <div class="flex justify-between items-center">
+                            <span class="truncate text-sm font-medium">{{ session.title }}</span>
+                            <button @click.stop="deleteSession(session.id)"
+                                class="text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition">
+                                <i class="fas fa-trash text-xs"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="p-4 border-t border-slate-700">
+                    <button @click="handleLogout"
+                        class="flex items-center gap-2 text-slate-400 hover:text-white transition w-full">
+                        <i class="fas fa-sign-out-alt"></i> Logout
+                    </button>
+                </div>
+            </aside>
+            <main class="flex-1 flex flex-col bg-slate-900 relative">
+                <header
+                    class="h-14 border-b border-slate-700 flex items-center justify-between px-6 bg-slate-800/50 backdrop-blur">
+                    <div class="flex items-center gap-3">
+                        <select
+                            class="bg-slate-700 text-white text-sm rounded px-3 py-1 border-none focus:ring-2 focus:ring-blue-500 outline-none"
+                            v-model="currentModel">
+                            <option :key="model.id" :value="model.id" v-for="model in models">{{ model.name }}</option>
+                        </select>
+                    </div>
+                    <div class="flex gap-4">
+                        <button @click="clearSession" class="text-slate-400 hover:text-white" title="Restart Session">
+                            <i class="fas fa-rotate-right"></i>
+                        </button>
+                        <button @click="toggleRightPanel" class="text-slate-400 hover:text-white"
+                            title="Toggle Tools/Settings">
+                            <i class="fas fa-sliders-h"></i>
+                        </button>
+                    </div>
+                </header>
+                <div class="flex-1 overflow-y-auto p-6 space-y-6" id="chat-container">
+                    <div class="flex flex-col items-center justify-center h-full text-slate-500"
+                        v-if="messages.length === 0">
+                        <div class="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center mb-4">
+                            <i class="fas fa-robot text-2xl text-slate-400"></i>
+                        </div>
+                        <h2 class="text-xl font-semibold mb-2">Start a new conversation</h2>
+                        <p class="text-sm">Select a tool or just type a message.</p>
+                    </div>
+                    <div :key="index" class="flex gap-4 max-w-4xl mx-auto w-full" v-for="(msg, index) in messages">
+                        <div :class="msg.role === 'user' ? 'bg-blue-600' : 'bg-slate-700'"
+                            class="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center">
+                            <i :class="msg.role === 'user' ? 'fa-user' : 'fa-robot'" class="fas"></i>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-baseline gap-2 mb-1">
+                                <span :class="msg.role === 'user' ? 'text-blue-400' : 'text-slate-300'"
+                                    class="font-bold text-sm">
+                                    {{ msg.role === 'user' ? 'You' : 'Assistant' }}
+                                </span>
+                                <span class="text-xs text-slate-500">{{ msg.timestamp }}</span>
+                            </div>
+                            <div class="text-slate-300 markdown-body" v-html="renderMarkdown(msg.content)"></div>
+                        </div>
+                    </div>
+                    <div class="flex gap-4 max-w-4xl mx-auto w-full" v-if="isProcessing">
+                        <div class="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center">
+                            <i class="fas fa-robot text-slate-400"></i>
+                        </div>
+                        <div class="flex items-center gap-1">
+                            <span class="w-2 h-2 bg-slate-500 rounded-full animate-bounce"></span>
+                            <span class="w-2 h-2 bg-slate-500 rounded-full animate-bounce"
+                                style="animation-delay: 0.1s"></span>
+                            <span class="w-2 h-2 bg-slate-500 rounded-full animate-bounce"
+                                style="animation-delay: 0.2s"></span>
+                        </div>
+                    </div>
+                </div>
+                <div class="p-4 border-t border-slate-700 bg-slate-800">
+                    <div class="max-w-4xl mx-auto relative">
+                        <textarea @keydown.enter.prevent="handleEnterKey"
+                            class="w-full bg-slate-900 border border-slate-700 rounded-lg pl-4 pr-12 py-3 text-white focus:outline-none focus:border-blue-500 resize-none overflow-hidden"
+                            placeholder="Type a message..." rows="1" style="min-height: 48px; max-height: 200px;"
+                            v-model="inputContent"></textarea>
+                        <button :disabled="!inputContent.trim() || isProcessing" @click="sendMessage"
+                            class="absolute right-2 bottom-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-md p-2 w-8 h-8 flex items-center justify-center transition">
+                            <i class="fas fa-paper-plane text-xs"></i>
+                        </button>
+                    </div>
+                    <div class="text-center mt-2">
+                        <p class="text-xs text-slate-500">AI can make mistakes. Check important info.</p>
+                    </div>
+                </div>
+            </main>
+
+            <aside class="w-96 bg-slate-800 border-l border-slate-700 flex flex-row transition-all duration-300"
+                v-if="showRightPanel">
+                <div class="w-20 flex flex-col border-r border-slate-700 bg-slate-900/40 py-2 overflow-y-auto">
+                    <button
+                        :class="activeRightTab === tab.id ? 'text-blue-400 border-l-2 border-blue-400 bg-slate-700/50' : 'text-slate-400 border-l-2 border-transparent hover:text-slate-200 hover:bg-slate-700/30'"
+                        :key="tab.id" @click="activeRightTab = tab.id"
+                        class="flex flex-col items-center justify-center py-4 transition-all" v-for="tab in rightTabs">
+                        <i :class="tab.icon" class="text-xl mb-1.5"></i>
+                        <span class="text-[10px] font-medium uppercase tracking-wider">{{ tab.name }}</span>
+                    </button>
+                </div>
+
+                <div class="flex-1 overflow-y-auto p-5 bg-slate-800">
+                    <div v-if="activeRightTab === 'tools'">
+                        <h2 class="text-lg font-bold mb-4">Available Tools</h2>
+                        <p class="text-xs text-slate-400 mb-4">{{ tools.length }} loaded</p>
+                        <div class="space-y-3">
+                            <div :key="tool.name" class="bg-slate-700/50 p-3 rounded border border-slate-600"
+                                v-for="tool in tools">
+                                <div class="flex justify-between items-start mb-2">
+                                    <h3 class="font-medium text-sm">{{ tool.name }}</h3>
+                                    <button @click="runTool(tool.name)"
+                                        class="text-xs bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded text-white transition">
+                                        Run Tool
+                                    </button>
+                                </div>
+                                <p class="text-xs text-slate-400">{{ tool.description }}</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div v-if="activeRightTab === 'channels'">
+                        <h2 class="text-lg font-bold mb-4">Channels</h2>
+                        <div class="space-y-2">
+                            <div :key="channel.name"
+                                class="flex justify-between items-center p-3 bg-slate-700/30 rounded"
+                                v-for="channel in channels">
+                                <span class="text-sm font-medium">{{ channel.name }}</span>
+                                <span
+                                    :class="channel.status === 'active' ? 'bg-green-900 text-green-300' : 'bg-slate-600 text-slate-300'"
+                                    class="text-xs px-2 py-0.5 rounded">
+                                    Status: {{ channel.status }}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    <div v-if="activeRightTab === 'skills'">
+                        <h2 class="text-lg font-bold mb-4">Skills</h2>
+                        <div class="space-y-2">
+                            <div :key="skill.name" class="p-3 bg-slate-700/30 rounded border border-slate-700"
+                                v-for="skill in skills">
+                                <div class="flex justify-between items-center mb-1">
+                                    <span class="text-sm font-medium">{{ skill.name }}</span>
+                                    <span class="text-xs text-slate-500">Ver: {{ skill.version }}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div v-if="activeRightTab === 'todos'">
+                        <h2 class="text-lg font-bold mb-4">Todos</h2>
+                        <div class="flex gap-2 mb-4">
+                            <input @keyup.enter="addTodo"
+                                class="flex-1 bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                                placeholder="Add new todo..." type="text" v-model="newTodoText" />
+                            <button @click="addTodo"
+                                class="bg-blue-600 hover:bg-blue-700 text-white w-8 h-8 rounded flex items-center justify-center transition">
+                                <i class="fas fa-plus"></i>
+                            </button>
+                        </div>
+                        <ul class="space-y-2">
+                            <li :key="index" class="flex items-center justify-between p-2 bg-slate-700/30 rounded group"
+                                v-for="(todo, index) in todos">
+                                <div class="flex items-center gap-2 overflow-hidden">
+                                    <input class="rounded bg-slate-900 border-slate-600 text-blue-600 focus:ring-0"
+                                        type="checkbox" v-model="todo.completed" />
+                                    <span :class="{ 'line-through text-slate-500': todo.completed }"
+                                        class="text-sm truncate">{{ todo.text }}</span>
+                                </div>
+                                <button @click="deleteTodo(index)"
+                                    class="text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </li>
+                        </ul>
+                    </div>
+                    <div v-if="activeRightTab === 'settings'">
+                        <h2 class="text-lg font-bold mb-4">System Settings</h2>
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-xs font-medium text-slate-400 mb-1">Server URL</label>
+                                <input
+                                    class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                                    type="text" v-model="settings.serverUrl" />
+                            </div>
+                            <div>
+                                <label class="block text-xs font-medium text-slate-400 mb-1">Temperature ({{
+                                    settings.temperature }})</label>
+                                <input class="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer" max="1"
+                                    min="0" step="0.1" type="range" v-model.number="settings.temperature" />
+                            </div>
+                            <div>
+                                <label class="block text-xs font-medium text-slate-400 mb-1">Max Tokens</label>
+                                <input
+                                    class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                                    type="number" v-model.number="settings.maxTokens" />
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-sm text-slate-300">Stream Responses</span>
+                                <button :class="settings.stream ? 'bg-blue-600' : 'bg-slate-600'"
+                                    @click="settings.stream = !settings.stream"
+                                    class="w-10 h-5 rounded-full relative transition-colors duration-200 ease-in-out">
+                                    <span :class="settings.stream ? 'translate-x-5' : 'translate-x-0'"
+                                        class="absolute left-1 top-1 bg-white w-3 h-3 rounded-full transition-transform duration-200 ease-in-out"></span>
+                                </button>
+                            </div>
+                            <button @click="saveSettings"
+                                class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded text-sm mt-4 transition">
+                                Save Configuration
+                            </button>
+                        </div>
+                        <div class="mt-8 pt-4 border-t border-slate-700">
+                            <h3 class="text-sm font-bold text-slate-300 mb-2">System Status</h3>
+                            <div class="bg-black/40 p-3 rounded font-mono text-xs text-green-400 h-32 overflow-y-auto">
+                                <div :key="idx" v-for="(log, idx) in systemLogs">&gt; {{ log }}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, reactive, onMounted, nextTick } = Vue;
+
+        createApp({
+            setup() {
+                // State
+                const isLoggedIn = ref(false);
+                const isLoading = ref(false);
+                const isProcessing = ref(false);
+                const showRightPanel = ref(true);
+                const activeRightTab = ref('tools');
+                const inputContent = ref('');
+                const currentSessionId = ref(null);
+                const currentModel = ref('qwen3.5:9b');
+                const newTodoText = ref('');
+
+                // Notification System
+                const notification = reactive({
+                    show: false,
+                    message: '',
+                    type: 'info',
+                    timer: null
+                });
+
+                const showNotification = (msg, type = 'info') => {
+                    notification.message = msg;
+                    notification.type = type;
+                    notification.show = true;
+                    if (notification.timer) clearTimeout(notification.timer);
+                    notification.timer = setTimeout(() => {
+                        notification.show = false;
+                    }, 3000);
+                };
+
+                // Login Form
+                const loginForm = reactive({
+                    username: '',
+                    password: ''
+                });
+
+                // Data Stores
+                const models = ref([
+                    { id: 'qwen3.5:9b', name: 'Qwen 3.5 (9B)' },
+                    { id: 'gpt-4', name: 'GPT-4' },
+                    { id: 'claude-3', name: 'Claude 3 Opus' }
+                ]);
+
+                const sessions = ref([
+                    { id: '1', title: 'Project Planning' },
+                    { id: '2', title: 'Code Debugging' }
+                ]);
+
+                const messages = ref([]);
+
+                const tools = ref([
+                    { name: 'Calculator', description: 'Performs basic arithmetic operations.' },
+                    { name: 'Weather', description: 'Fetches current weather for a location.' },
+                    { name: 'WebSearch', description: 'Searches the web for recent information.' }
+                ]);
+
+                const channels = ref([
+                    { name: 'General', status: 'active' },
+                    { name: 'DevOps', status: 'idle' }
+                ]);
+
+                const skills = ref([
+                    { name: 'Python Expert', version: '1.2.0' },
+                    { name: 'Translator', version: '2.0.1' }
+                ]);
+
+                const todos = ref([
+                    { text: 'Review PR #42', completed: false },
+                    { text: 'Update documentation', completed: true }
+                ]);
+
+                const settings = reactive({
+                    serverUrl: 'https://api.example.com',
+                    temperature: 0.7,
+                    maxTokens: 2048,
+                    stream: true
+                });
+
+                const systemLogs = ref([
+                    'System initialized',
+                    'Connected to ' + settings.serverUrl,
+                    'Memory usage: 124MB',
+                    'Uptime: 00:42:15'
+                ]);
+
+                const rightTabs = [
+                    { id: 'tools', name: 'Tools', icon: 'fas fa-wrench' },
+                    { id: 'channels', name: 'Channels', icon: 'fas fa-broadcast-tower' },
+                    { id: 'skills', name: 'Skills', icon: 'fas fa-graduation-cap' },
+                    { id: 'todos', name: 'Todos', icon: 'fas fa-check-square' },
+                    { id: 'settings', name: 'Settings', icon: 'fas fa-cog' }
+                ];
+
+                // --- API Functions ---
+
+                // 1. Check Login Status
+                const checkAuth = async () => {
+                    try {
+                        const res = await axios.get('/api/loading');
+                        if (res.data.loggedIn) {
+                            isLoggedIn.value = true;
+                            await loadInitialData();
+                        }
+                    } catch (error) {
+                        console.error("Auth check failed", error);
+                    }
+                };
+
+                // 2. Login
+                const handleLogin = async () => {
+                    isLoading.value = true;
+                    try {
+                        await axios.post('/api/login', {
+                            username: loginForm.username,
+                            password: sha3_256(loginForm.password)
+                        });
+                        isLoggedIn.value = true;
+                        showNotification('Login successful', 'success');
+                        await loadInitialData();
+                    } catch (error) {
+                        showNotification('Login failed. Check credentials.', 'error');
+                    } finally {
+                        isLoading.value = false;
+                    }
+                };
+
+                // 3. Logout
+                const handleLogout = async () => {
+                    try {
+                        await axios.get('/api/logout');
+                        isLoggedIn.value = false;
+                        showNotification('Logged out successfully', 'info');
+                    } catch (error) {
+                        showNotification('Logout failed', 'error');
+                    }
+                };
+
+                // 4. Send Input
+                const sendMessage = async () => {
+                    if (!inputContent.value.trim()) return;
+
+                    const userMsg = inputContent.value;
+                    messages.value.push({
+                        role: 'user',
+                        content: userMsg,
+                        timestamp: new Date().toLocaleTimeString()
+                    });
+
+                    inputContent.value = '';
+                    isProcessing.value = true;
+                    scrollToBottom();
+
+                    try {
+                        const res = await axios.post('/api/input', {
+                            messages: userMsg,
+                            model: currentModel.value
+                        });
+
+                        if (res.data && Array.isArray(res.data.messages) && res.data.messages.length > 0) {
+                            const agentResponseContent = res.data.messages[0].content;
+                            messages.value.push({
+                                role: 'Agent',
+                                content: agentResponseContent,
+                                timestamp: new Date().toLocaleTimeString()
+                            });
+                        } else {
+                            showNotification('Received unexpected response format from server.', 'warning');
+                        }
+
+                    } catch (error) {
+                        showNotification('Failed to send message', 'error');
+                        messages.value.push({
+                            role: 'Agent',
+                            content: 'Error: Could not connect to server.',
+                            timestamp: new Date().toLocaleTimeString()
+                        });
+                        console.error(error);
+                    } finally {
+                        isProcessing.value = false;
+                        scrollToBottom();
+                    }
+                };
+
+                // 5. Run Tool (Control)
+                const runTool = async (toolName) => {
+                    try {
+                        await axios.post('/api/control', {
+                            cmd: 'run_tool',
+                            target: toolName
+                        });
+                        showNotification(`Tool ${toolName} started`, 'success');
+                        systemLogs.value.push(`Executed tool: ${toolName}`);
+                    } catch (error) {
+                        showNotification(`Failed to run ${toolName}`, 'error');
+                    }
+                };
+
+                // 6. New Session
+                const createNewSession = async () => {
+                    try {
+                        const res = await axios.post('/api/new');
+                        const newId = res.data.id || Date.now().toString();
+                        const newSession = { id: newId, title: 'New Session ' + new Date().toLocaleTimeString() };
+                        sessions.value.unshift(newSession);
+                        await switchSession(newId);
+                        showNotification('New session created', 'success');
+                    } catch (error) {
+                        showNotification('Failed to create session', 'error');
+                    }
+                };
+
+                // 7. Delete Session
+                const deleteSession = async (id) => {
+                    try {
+                        await axios.post('/api/delete', { sessionId: id });
+                        sessions.value = sessions.value.filter(s => s.id !== id);
+                        if (currentSessionId.value === id) {
+                            currentSessionId.value = null;
+                            messages.value = [];
+                        }
+                        showNotification('Session deleted', 'info');
+                    } catch (error) {
+                        showNotification('Failed to delete session', 'error');
+                    }
+                };
+
+                // 8. Switch Session
+                const switchSession = async (id) => {
+                    currentSessionId.value = id;
+                    messages.value = [];
+
+                    try {
+                        await axios.post('/api/syc', { sessionId: id });
+                        messages.value.push({
+                            role: 'Agent',
+                            content: `Context synchronized for session ${id}.`,
+                            timestamp: new Date().toLocaleTimeString()
+                        });
+                    } catch (error) {
+                        showNotification('Failed to sync session context', 'error');
+                    }
+                };
+
+                // 9. Clear Session
+                const clearSession = async () => {
+                    try {
+                        await axios.post('/api/clear');
+                        messages.value = [];
+                        showNotification('Session cleared', 'info');
+                    } catch (error) {
+                        showNotification('Failed to clear session', 'error');
+                    }
+                };
+
+                // 10. Save Settings
+                const saveSettings = async () => {
+                    try {
+                        await axios.post('/api/settings', settings);
+                        showNotification('Settings saved', 'success');
+                        systemLogs.value.push('Settings updated');
+                    } catch (error) {
+                        showNotification('Failed to save settings', 'error');
+                    }
+                };
+
+                // 11. Add Todo
+                const addTodo = async () => {
+                    if (!newTodoText.value.trim()) return;
+                    try {
+                        await axios.post('/api/todos/new', { text: newTodoText.value });
+                        todos.value.push({ text: newTodoText.value, completed: false });
+                        newTodoText.value = '';
+                    } catch (error) {
+                        showNotification('Failed to add todo', 'error');
+                    }
+                };
+
+                // 12. Delete Todo
+                const deleteTodo = async (index) => {
+                    try {
+                        await axios.post('/api/todos/delete', { text: todos.value[index].text });
+                        todos.value.splice(index, 1);
+                    } catch (error) {
+                        showNotification('Failed to delete todo', 'error');
+                    }
+                };
+
+                // --- Helper Functions ---
+
+                const loadInitialData = async () => {
+                    try {
+                        const statusRes = await axios.get('/api/status');
+                        if (statusRes.data) systemLogs.value.push(...statusRes.data.logs || []);
+
+                        const modelsRes = await axios.get('/api/models');
+                        if (modelsRes.data && modelsRes.data.length) models.value = modelsRes.data;
+
+                        const channelsRes = await axios.get('/api/channels');
+                        if (channelsRes.data && channelsRes.data.length) channels.value = channelsRes.data;
+
+                        const skillsRes = await axios.get('/api/skills');
+                        if (skillsRes.data && skillsRes.data.length) skills.value = skillsRes.data;
+
+                        const todosRes = await axios.get('/api/todos');
+                        if (todosRes.data && todosRes.data.length) todos.value = todosRes.data;
+
+                    } catch (error) {
+                        console.error("Error loading initial data", error);
+                    }
+                };
+
+                const renderMarkdown = (text) => {
+                    try {
+                        return marked.parse(text);
+                    } catch (e) {
+                        return text;
+                    }
+                };
+
+                const scrollToBottom = () => {
+                    nextTick(() => {
+                        const container = document.getElementById('chat-container');
+                        if (container) container.scrollTop = container.scrollHeight;
+                    });
+                };
+
+                const handleEnterKey = (e) => {
+                    if (!e.shiftKey) {
+                        sendMessage();
+                    }
+                };
+
+                const toggleRightPanel = () => {
+                    showRightPanel.value = !showRightPanel.value;
+                };
+
+                // Lifecycle
+                onMounted(() => {
+                    checkAuth();
+                });
+
+                return {
+                    // State
+                    isLoggedIn,
+                    isLoading,
+                    isProcessing,
+                    showRightPanel,
+                    activeRightTab,
+                    inputContent,
+                    currentSessionId,
+                    currentModel,
+                    newTodoText,
+                    notification,
+                    loginForm,
+                    models,
+                    sessions,
+                    messages,
+                    tools,
+                    channels,
+                    skills,
+                    todos,
+                    settings,
+                    systemLogs,
+                    rightTabs,
+
+                    // Methods
+                    handleLogin,
+                    handleLogout,
+                    sendMessage,
+                    runTool,
+                    createNewSession,
+                    deleteSession,
+                    switchSession,
+                    clearSession,
+                    saveSettings,
+                    addTodo,
+                    deleteTodo,
+                    renderMarkdown,
+                    handleEnterKey,
+                    toggleRightPanel
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+
+</html>
