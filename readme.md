@@ -1,4 +1,4 @@
-#agent.cpp：极致轻量、完全可控的 C++ Agent 系统
+# agent.cpp：极致轻量、完全可控的 C++ Agent 系统
 
 **agent.cpp** 是一个完全透明、高度可控的 C++ 实现的完整 Agent 系统，具备完整的 Agent 工具链支持。与庞大的 Openclaw 系统相比，agent.cpp 仅依赖于几个核心文件组成的通信系统和工具系统，内存占用极低，仅为 **0.6 ~ 3-6 MB**，可轻松部署在单片机等资源受限的环境中，仅需提供 Asio 和 JSON 依赖。
 
