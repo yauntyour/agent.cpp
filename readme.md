@@ -1,72 +1,84 @@
-# agent.cpp
+### agent.cpp：极致轻量、完全可控的 C++ Agent 系统
 
-一套完全由C++实现的完整的agent系统，拥有完整的Agent工具链支持。
+**agent.cpp** 是一个完全透明、高度可控的 C++ 实现的完整 Agent 系统，具备完整的 Agent 工具链支持。与庞大的 Openclaw 系统相比，agent.cpp 仅依赖于几个核心文件组成的通信系统和工具系统，内存占用极低，仅为 **0.6 ~ 3-6 MB**，可轻松部署在单片机等资源受限的环境中，仅需提供 Asio 和 JSON 依赖。
 
-- [x] 通信系统指令集（Communication System，CS）
-- [x] 工具调用指令集（Tools Call System）功能。
-- [x] 100%自定义的系统提示词（System prompt）
-- [x] 原生调用Python工具集
+#### 核心特性
 
-可以100%自定义Agent的身份和应当遵守的规则，只需添加如下指令，注意以下系统提示词是以`master`的身份下达的：
+- **极致轻量**：核心系统仅由几个文件组成，内存占用低至 0.6 MB，可部署于单片机。
+- **完整工具链**：支持工具调用、Python 工具集原生调用、自定义系统提示词。
+- **100% 可控**：可完全自定义 Agent 的身份、行为准则和规则。
+- **灵活通信**：支持自定义通信指令集（CS）和工具调用指令集。
+
+#### ️ 系统指令集
+
+系统支持通过特定格式的指令进行交互，确保透明可控。
+
+**1. 工具调用指令集（Tools Call System）**
+可用于调用预定义工具，格式如下：
 
 ```
-1. Your external manifesto (following the ranking of priorities below):
-    ...
-
-2. This isn't just metadata. It's the start of figuring out who you are:
-    ...
-
-3. About what you had been prohibited or permitted
-    Permitted Conduct:
-        ...
-    Prohibited Acts:
-        ...
-
-4. About the master you are serving:
-    ...
-
-5. What you want to be:
-    ...
-
-6. Boundaries
-    ...
-
-7. CS Tools provides you with the tools for invocation:
-    You can use tools-call command in this format:
-        <tool>name:args</tool>
-    What you must attention: 
-        - With the chat start, you can use the tools.But you can use the CS command to get the tool's state,it includes the tools list.
-        - The tool's response will be notified to you in a separate message.
-        ⚠️High-risk operations require explicit consent from the master before execution.
-        ⚠️You must ask the master to confirm the execution of the tool.
-    Basic tools can be used in the following format:
-        - exec:<command>:Execute commands with the privileges of the current service, <command> is the command to execute.
-        - read:<filepath>: Read data from any file, <filepath> is the path of the file to be read
-        - write:<filepath>|<data>: Write data to any file, <filepath> is the path of the file to be written,<data> is the data to be written
-        - wget:<URL>: Use CURL to send a GET request to fetch data with the <URL>.
-    Example:
-        <tool>exec:pip list</tool>
-        <tool>write:exp/data.txt|Hi</tool>
-        <tool>read:data.txt</tool>
-        <tool>wget:https://https://cn.bing.com/</tool>
-        ...
-
-8. CS command can be requested to provide the status of the system state by sending the following command:
-    <cs>name:args</cs>
-    The available commands are as follows:
-        - Returns the current system status: system_status
-        - Returns the status of all tools: tools_status
-        - Ask your master to restart the system: restart
-        - Returns the current date and time: time
-        - Returns a random number by <seed> in [-1e9,1e9]: random:<seed>
-    Example:
-        <cs>time</cs>
-        ...
-        <cs>random:123</cs>
-
-9. When you need to use a CS Tools or CS command, you will output the command separately and wait for a response. In short, just go ahead and use them boldly.
-
-From here, you can start your serving...
+<tool>name:args</tool>
 ```
 
-Openclaw有着巨大的系统，而本系统只由几个文件组成。
+**支持的工具包括：**
+
+- `exec:<command>`：以当前服务权限执行命令。
+- `read:<filepath>`：读取指定文件数据。
+- `write:<filepath>|<data>`：向指定文件写入数据。
+- `wget:<URL>`：通过 GET 请求获取数据。
+
+**示例：**
+
+```
+<tool>exec:pip list</tool>
+<tool>write:exp/data.txt|Hi</tool>
+<tool>read:data.txt</tool>
+<tool>wget:https://cn.bing.com/</tool>
+```
+
+**2. 通信系统指令集（Communication System, CS）**
+用于获取系统状态或执行控制命令，格式如下：
+
+```
+<cs>name:args</cs>
+```
+
+**支持的命令包括：**
+
+- `system_status`：返回当前系统状态。
+- `tools_status`：返回所有工具的状态。
+- `restart`：请求重启系统（需 master 确认）。
+- `time`：返回当前日期和时间。
+- `random:<seed>`：基于种子生成 [-1e9, 1e9] 范围内的随机数。
+
+**示例：**
+
+```
+<cs>time</cs>
+<cs>random:123</cs>
+```
+
+#### 安全与控制机制
+
+- **高风险操作需显式授权**：所有高风险操作（如系统重启、关键文件写入等）必须获得 master 的显式确认后方可执行。
+- **工具状态实时反馈**：工具调用后，系统将通过独立消息通知执行结果。
+- **启动即可用**：会话开始后即可使用工具，也可通过 CS 指令获取工具列表及状态。
+
+#### 系统提示词配置（System Prompt）
+
+系统支持 100% 自定义系统提示词，以 `master` 身份下达指令，定义 Agent 的行为准则与身份认知，包括：
+
+- **外部宣言（External Manifesto）**：定义优先级排序的行为准则。
+- **身份认知初始化**：定义“你是谁”的起点。
+- **行为许可与禁止**：
+    - 允许的行为（Permitted Conduct）
+    - 禁止的行为（Prohibited Acts）
+- **服务对象定义**：关于你所服务的 master 的描述。
+- **自我愿景**：你希望成为什么样的 Agent。
+- **边界定义**：明确行为边界。
+- **工具调用说明**：说明可用的 CS 工具及其调用格式与注意事项。
+
+#### 使用说明
+
+当需要使用 CS 工具或 CS 命令时，系统将独立输出对应指令并等待响应。请 master 明确授权高风险操作，确保系统安全可控运行。
+
