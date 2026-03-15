@@ -1,12 +1,3 @@
-/**
- * @author Yauntyour (yauntyour@outlook.com)
- * @brief
- * @version 1.0
- * @date 2026-03-14
- *
- * @copyright Copyright (c) 2026
- *
- */
 #include <iostream>
 #include <string>
 #include <memory>
@@ -17,128 +8,126 @@
 #include <vector>
 #include <cstdlib>
 #include <mutex>
+#include <format>
+#include <filesystem>
 #include <nlohmann/json.hpp>
-
 #include "servic.cpp/servic.hpp"
-#include "servic.cpp/router.hpp"
+#include "servic.cpp/router/router.hpp"
 #include "agent.hpp"
 #include "servic.cpp/tiny_sha.h"
 
 using json = nlohmann::json;
+namespace fs = std::filesystem;
 
 namespace app
 {
-    std::string loadagent()
-    {
-        try
-        {
-            return tool_unit::readFile("D:\\Developments\\CXX\\Agent.cpp\\agent.txt");
-        }
-        catch (const std::exception &e)
-        {
-            std::cerr << "Load agent.txt fail:" << e.what() << '\n';
-        }
-        return "";
-    }
-    static std::string Admin_name;
+    static json setting = json::parse(tool_unit::readFile("D:\\Developments\\CXX\\Agent.cpp\\setting.json"));
     static std::string Admin_call;
-    static std::string Admin_password;
-    static std::string system_prompt = loadagent();
-    LLMProviders::OllamaClient client("http://localhost:11434");
+    static std::string system_prompt;
+    LLMProviders::OllamaClient client(setting["ollama_server"].get_ref<std::string &>());
 
     static std::mutex ctx_lock;
-    static std::string Agent_session_context = system_prompt;
+    static std::string Agent_session_context;
+    std::vector<std::string> get_all_files(const std::string &root_dir)
+    {
+        std::vector<std::string> files;
+
+        // 检查目录是否存在
+        if (!fs::exists(root_dir) || !fs::is_directory(root_dir))
+        {
+            std::cerr << "无效目录: " << root_dir << std::endl;
+            return files;
+        }
+
+        // recursive_directory_iterator 会递归遍历子目录
+        // directory_iterator 只遍历当前目录
+        for (const auto &entry : fs::recursive_directory_iterator(root_dir))
+        {
+            if (entry.is_regular_file())
+            { // 确保是普通文件，排除目录、符号链接等
+                files.push_back(entry.path().string());
+            }
+        }
+
+        return files;
+    }
+    auto file_parse(const std::string &file_path)
+    {
+        fs::path p(file_path);
+        return std::make_pair(p.filename().string(), p.extension().string());
+    }
     std::string to_hex_string(const uint8_t *hash, size_t len)
     {
         std::stringstream ss;
         for (size_t i = 0; i < len; i++)
         {
+            // 以 16 进制、2位宽度、不足补0 的格式写入
             ss << std::hex << std::setw(2) << std::setfill('0') << (int)hash[i];
         }
         return ss.str();
     }
-    int init_password(const std::string &name, const std::string &password)
+    int init_app(const std::string &password = "")
     {
-        Admin_name = name;
-        Admin_call = name + ":";
-        uint8_t password_hash[SHA3_256_DIGEST_SIZE];
-        if (!SHA3_256((const uint8_t *)password.c_str(), password.length(), password_hash))
+        if (password != "")
         {
-            return 1;
+            uint8_t password_hash[SHA3_256_DIGEST_SIZE];
+            if (!SHA3_256((const uint8_t *)password.c_str(), password.length(), password_hash))
+            {
+                return 1;
+            }
+            setting["password"] = to_hex_string(password_hash, SHA3_256_DIGEST_SIZE);
         }
-        Admin_password = to_hex_string(password_hash, SHA3_256_DIGEST_SIZE);
+        Admin_call = setting["name"].get<std::string>() + ":";
+        system_prompt = tool_unit::readFile(setting["prompt_path"].get_ref<std::string &>());
+        Agent_session_context = system_prompt;
         return 0;
     }
 
-    // 会话状态结构
+    static json tools_list = json::array();
+
     struct SessionContext
     {
-        std::string model = "qwen3.5:9b";
-        std::vector<json> messages;
+        json messages = json::array();
+        ;
         bool thinking = false;
         std::string session_id;
-        std::time_t created_at;
-
-        SessionContext() : session_id(generate_uuid()), created_at(std::time(nullptr)) {}
-
-        static std::string generate_uuid()
+        SessionContext()
         {
-            static std::random_device rd;
-            static std::mt19937 gen(rd());
-            std::uniform_int_distribution<> dis(0, 15);
-            const char *hex = "0123456789abcdef";
-            std::string uuid;
-            for (int i = 0; i < 32; ++i)
-            {
-                if (i == 8 || i == 12 || i == 16 || i == 20)
-                    uuid += "-";
-                uuid += hex[dis(gen)];
-            }
-            return uuid;
+            session_id = std::to_string(std::time(nullptr));
+        }
+        SessionContext(const std::string &session_id) : session_id(session_id)
+        {
         }
     };
 
-    // 全局会话管理
     class SessionManager
     {
-
-    private:
-        std::unordered_map<std::string, std::shared_ptr<SessionContext>> sessions;
-        std::unordered_map<std::string, std::shared_ptr<SessionContext>> archived_sessions;
-
     public:
-        std::shared_ptr<SessionContext> get_or_create(const std::string &id)
+        std::unordered_map<std::string, std::shared_ptr<SessionContext>> sessions;
+        std::string current_session_id = "";
+        std::shared_ptr<SessionContext> get(const std::string &id)
         {
             auto it = sessions.find(id);
             if (it != sessions.end())
             {
                 return it->second;
             }
-            auto ctx = std::make_shared<SessionContext>();
-            sessions[id] = ctx;
-            current_session_id = id;
-            return ctx;
+            return nullptr;
         }
-
-        void clear_current()
+        std::shared_ptr<SessionContext> create()
         {
-            if (!current_session_id.empty())
-            {
-                sessions.erase(current_session_id);
-                current_session_id.clear();
-            }
+            auto session = std::make_shared<SessionContext>();
+            sessions[session->session_id] = session;
+            current_session_id = session->session_id;
+            return session;
         }
-
-        void new_session(const std::string &old_id_hint = "")
+        std::shared_ptr<SessionContext> get_current()
         {
-            if (!old_id_hint.empty() && sessions.count(old_id_hint))
+            if (current_session_id == "")
             {
-                archived_sessions[old_id_hint] = sessions[old_id_hint];
+                return create();
             }
-            auto new_ctx = std::make_shared<SessionContext>();
-            std::string new_id = new_ctx->session_id;
-            sessions[new_id] = new_ctx;
-            current_session_id = new_id;
+            return get(current_session_id);
         }
 
         std::vector<std::string> list_sessions() const
@@ -150,12 +139,86 @@ namespace app
             }
             return result;
         }
+        void clear_current()
+        {
+            auto ses = get_current();
+            ses->messages.clear();
+        }
 
-        std::string current_session_id;
+        void remove_session(const std::string &id)
+        {
+            sessions.erase(id);
+        }
+        void change_session(const std::string &id)
+        {
+            current_session_id = id;
+        }
+        SessionManager()
+        {
+            try
+            {
+                auto load_sessions = get_all_files(setting["workspace"].get_ref<std::string &>() + "/sessions");
+                for (auto &session : load_sessions)
+                {
+                    auto [name, ext] = file_parse(session);
+                    if (ext == ".json")
+                    {
+                        auto ses_obj = std::make_shared<SessionContext>(name);
+                        ses_obj->messages = json::parse(tool_unit::readFile(session));
+                        sessions[name] = ses_obj;
+                    }
+                }
+            }
+            catch (const std::exception &e)
+            {
+                std::cerr << e.what() << '\n';
+            }
+        }
+        ~SessionManager()
+        {
+            try
+            {
+                for (auto &ses : sessions)
+                {
+                    tool_unit::appendFile("D:\\Developments\\CXX\\Agent.cpp\\sessions\\" + ses.first + ".json", ses.second->messages.dump());
+                }
+            }
+            catch (const std::exception &e)
+            {
+                std::cerr << e.what() << '\n';
+            }
+        }
     };
 
-    SessionManager g_session_manager;
+    SessionManager agent_session_manager;
 
+    int scan_tools()
+    {
+        try
+        {
+            auto tools = get_all_files(setting["workspace"].get_ref<std::string &>() + "/tools");
+            for (auto &tool : tools)
+            {
+                auto [name, ext] = file_parse(tool);
+                if (ext == ".md")
+                {
+                    std::ifstream file(tool);
+                    std::string description;
+                    std::getline(file, description, '\n');
+                    tools_list.push_back(json{
+                        {"name", name},
+                        {"description", description},
+                    });
+                }
+            }
+        }
+        catch (const std::exception &e)
+        {
+            std::cerr << e.what() << '\n';
+            return 1;
+        }
+        return 0;
+    }
     // HTTP 响应构造函数
     std::string build_http_response(int status_code, const std::string &content_type, const std::string &body, bool cors = true)
     {
@@ -174,32 +237,33 @@ namespace app
         return oss.str();
     }
 
-    // 流式响应包装器（用于SSE）
-    std::string build_sse_chunk(const std::string &data)
-    {
-        std::ostringstream oss;
-        oss << "data: " << data << "\n\n";
-        return oss.str();
-    }
-
     // API 处理函数声明
-    int handle_root(std::string &input, std::string &output);
-    int handle_api_list(std::string &input, std::string &output);
-    int handle_status(std::string &input, std::string &output);
-    int handle_control(std::string &input, std::string &output);
-    int handle_input_stream(std::string &input, std::string &output);
-    int handle_sync_context(std::string &input, std::string &output);
-    int handle_clear_session(std::string &input, std::string &output);
-    int handle_models(std::string &input, std::string &output);
-    int handle_new_session(std::string &input, std::string &output);
-    int handle_delete_frontend_session(std::string &input, std::string &output);
-    int handle_settings(std::string &input, std::string &output);
-    int handle_loading_page(std::string &input, std::string &output);
-    int handle_logout(std::string &input, std::string &output);
-    int handle_login(std::string &input, std::string &output);
-    int handle_channels_list(std::string &input, std::string &output);
-    int handle_skills_list(std::string &input, std::string &output);
-    int handle_todos_list(std::string &input, std::string &output);
+    int handle_root(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+    int handle_api_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+    int handle_status(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+    int handle_control(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+    int handle_input_stream(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+    int handle_session_clear(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+    int handle_models(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+    int handle_new_session(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+    int handle_delete_session(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+    int handle_settings(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+
+    int handle_loading_page(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+    int handle_logout(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+    int handle_login(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+
+    int handle_channels_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+    int handle_tools_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+    int handle_todos_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+    int handle_session_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+
+    int handle_channels_setting(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+    int handle_tools_setting(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+    int handle_todos_setting(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+    int handle_todos_delete(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+    int handle_todos_new(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+    int handle_session_set(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
 
     // 路由注册函数
     void register_routes(rt::router &router)
@@ -207,67 +271,54 @@ namespace app
         router.on("/", handle_root);
         router.on("/api", handle_api_list);
         router.on("/api/status", handle_status);
+        router.on("/api/models", handle_models);
+        router.on("/api/settings", handle_settings);
+
         router.on("/api/control", handle_control);
         router.on("/api/input", handle_input_stream);
-        router.on("/api/syc", handle_sync_context);
-        router.on("/api/clear", handle_clear_session);
-        router.on("/api/models", handle_models);
+
+        router.on("/api/session", handle_session_list);
         router.on("/api/new", handle_new_session);
-        router.on("/api/delete", handle_delete_frontend_session);
-        router.on("/api/settings", handle_settings);
-        router.on("/api/loading", handle_loading_page);
-        router.on("/api/logout", handle_logout);
+        router.on("/api/clear", handle_session_clear);
+        router.on("/api/delete", handle_delete_session);
+        router.on("/api/session/set", handle_session_set);
+
         router.on("/api/login", handle_login);
+        router.on("/api/logout", handle_logout);
+        router.on("/api/loading", handle_loading_page);
+
         router.on("/api/channels", handle_channels_list);
-        router.on("/api/skills", handle_skills_list);
+        router.on("/api/tools", handle_tools_list);
         router.on("/api/todos", handle_todos_list);
 
-        // 动态路由模式，这里简化处理
-        router.on("/api/channels/<name>", [](std::string &input, std::string &output) -> int
-                  {
-            output = build_http_response(200, "application/json", R"({"status":"ok","channel":"default"})");
-            return rt::FLAG_DONE; });
-
-        router.on("/api/skills/<name>", [](std::string &input, std::string &output) -> int
-                  {
-            output = build_http_response(200, "application/json", R"({"status":"ok","skill":"active"})");
-            return rt::FLAG_DONE; });
-
-        router.on("/api/todos/<name>", [](std::string &input, std::string &output) -> int
-                  {
-            output = build_http_response(200, "application/json", R"({"status":"ok","todo":{"done":false}})");
-            return rt::FLAG_DONE; });
-
-        router.on("/api/todos/new", [](std::string &input, std::string &output) -> int
-                  {
-            output = build_http_response(200, "application/json", R"({"status":"created"})");
-            return rt::FLAG_DONE; });
-
-        router.on("/api/todos/delete", [](std::string &input, std::string &output) -> int
-                  {
-            output = build_http_response(200, "application/json", R"({"status":"deleted"})");
-            return rt::FLAG_DONE; });
+        // 动态路由模式
+        router.on("/api/channels/:name", handle_channels_setting);
+        router.on("/api/tools/:name", handle_tools_setting);
+        router.on("/api/todos/:name", handle_todos_setting);
+        router.on("/api/todos/new", handle_todos_new);
+        router.on("/api/todos/delete", handle_todos_delete);
     }
 
     // 实现各API接口
 
-    int handle_root(std::string &input, std::string &output)
+    int handle_root(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
         std::string html;
         try
         {
-            html = tool_unit::readFile("D:\\Developments\\CXX\\Agent.cpp\\webui.html");
+            html = tool_unit::readFile(setting["webui"].get_ref<std::string &>());
         }
         catch (const std::exception &e)
         {
-            html = "<h1>Welcome to AI Assistant</h1><p>Error: ";
+            html = "<h1>Welcome to AI Assistant</h1>\n<p>Error: ";
             html += e.what();
+            html += "</p>";
         }
         output = build_http_response(200, "text/html", html);
         return rt::FLAG_DONE;
     }
 
-    int handle_api_list(std::string &input, std::string &output)
+    int handle_api_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
         json api_list = {
             {"/", "GET", "返回WebUI页面"},
@@ -292,11 +343,11 @@ namespace app
             {"/api/todos/<name>", "GET/POST", "查询或设置待办事项"},
             {"/api/todos/new", "POST", "新增待办事项"},
             {"/api/todos/delete", "POST", "删除待办事项"}};
-        output = build_http_response(200, "application/json", api_list.dump(2));
+        output = build_http_response(200, "application/json", api_list.dump());
         return rt::FLAG_DONE;
     }
 
-    int handle_status(std::string &input, std::string &output)
+    int handle_status(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
         try
         {
@@ -314,7 +365,7 @@ namespace app
         }
     }
 
-    int handle_control(std::string &input, std::string &output)
+    int handle_control(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
         try
         {
@@ -326,14 +377,8 @@ namespace app
             }
             std::string body = input.substr(header_end + 4);
             json request = json::parse(body);
-            std::string cmd = request.value("cmd", "");
-
-            if (cmd == "restart")
-            {
-                g_session_manager.clear_current();
-            }
-
-            json response = {{"result", "success"}, {"executed", cmd}};
+            // 执行控制指令
+            json response = {{"result", "success"}, {"executed", "null"}};
             output = build_http_response(200, "application/json", response.dump());
             return rt::FLAG_DONE;
         }
@@ -345,10 +390,11 @@ namespace app
         }
     }
 
-    int handle_input_stream(std::string &input, std::string &output)
+    int handle_input_stream(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
         json req;
         std::string model;
+        auto ses = agent_session_manager.get_current();
         try
         {
             size_t header_end = input.find("\r\n\r\n");
@@ -363,8 +409,7 @@ namespace app
             std::string user_message = request["messages"].get<std::string>();
             model = request["model"].get<std::string>();
 
-            auto session = g_session_manager.get_or_create(g_session_manager.current_session_id);
-            session->messages.push_back({{"type", "request"}, {"content", user_message}});
+            ses->messages.push_back(Admin_call + user_message);
 
             ctx_lock.lock();
             req = {
@@ -404,41 +449,31 @@ namespace app
         ctx_lock.lock();
         Agent_session_context += current;
         ctx_lock.unlock();
+        ses->messages.push_back("context:" + current);
         output = build_http_response(200, "application/json", json{{"model", model}, {"messages", {{{"type", "response"}, {"content", current}}}}, {"stream", true}, {"think", false}}.dump());
         return rt::FLAG_DONE;
     }
 
-    int handle_sync_context(std::string &input, std::string &output)
-    {
-        auto session = g_session_manager.get_or_create(g_session_manager.current_session_id);
-        json resp = {
-            {"session_id", session->session_id},
-            {"model", session->model},
-            {"messages", session->messages},
-            {"thinking", session->thinking}};
-        output = build_http_response(200, "application/json", resp.dump());
-        return rt::FLAG_DONE;
-    }
-
-    int handle_clear_session(std::string &input, std::string &output)
+    int handle_session_clear(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
         ctx_lock.lock();
         Agent_session_context = system_prompt;
         ctx_lock.unlock();
-        g_session_manager.clear_current();
+
+        agent_session_manager.clear_current();
+
         json resp = {{"status", "cleared"}};
         output = build_http_response(200, "application/json", resp.dump());
         return rt::FLAG_DONE;
     }
 
-    int handle_models(std::string &input, std::string &output)
+    int handle_models(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
         try
         {
             std::string result;
             net_unit::CURL_get(curl_easy_init(), "http://localhost:11434/api/tags", result);
-            json response = json::parse(result);
-            output = build_http_response(200, "application/json", response.dump());
+            output = build_http_response(200, "application/json", result);
             return rt::FLAG_DONE;
         }
         catch (...)
@@ -447,61 +482,82 @@ namespace app
             return rt::FLAG_ERROR;
         }
     }
-
-    int handle_new_session(std::string &input, std::string &output)
+    int handle_session_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
-        g_session_manager.new_session();
         json resp = {
-            {"status", "created"},
-            {"new_session_id", g_session_manager.current_session_id}};
+            {"session_list", agent_session_manager.list_sessions()}};
         output = build_http_response(200, "application/json", resp.dump());
         return rt::FLAG_DONE;
     }
-
-    int handle_delete_frontend_session(std::string &input, std::string &output)
+    int handle_new_session(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
-        // 简化实现：仅清空内存中的会话
-        g_session_manager.clear_current();
-        json resp = {{"status", "frontend_deleted"}};
+        ctx_lock.lock();
+        Agent_session_context = system_prompt;
+        ctx_lock.unlock();
+
+        auto new_session = agent_session_manager.create();
+        agent_session_manager.current_session_id = new_session->session_id;
+
+        json resp = {{"status", "OK"}, {"session_id", new_session->session_id}};
         output = build_http_response(200, "application/json", resp.dump());
         return rt::FLAG_DONE;
     }
 
-    int handle_settings(std::string &input, std::string &output)
+    int handle_delete_session(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
         try
         {
             size_t header_end = input.find("\r\n\r\n");
             std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
-            json settings = json::parse(body);
+            json request = json::parse(body);
 
-            // 此处可持久化到配置文件
-            json resp = {{"status", "updated"}, {"settings", settings}};
+            agent_session_manager.remove_session(request["session_id"]);
+
+            json resp = {{"status", "deleted"}};
             output = build_http_response(200, "application/json", resp.dump());
             return rt::FLAG_DONE;
         }
         catch (...)
         {
-            output = build_http_response(400, "text/plain", "Invalid JSON");
+            output = build_http_response(500, "text/plain", "Cannot delete session.");
             return rt::FLAG_ERROR;
         }
     }
 
-    int handle_loading_page(std::string &input, std::string &output)
+    int handle_settings(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+    {
+        try
+        {
+            size_t header_end = input.find("\r\n\r\n");
+            std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
+
+            json input_setting = json::parse(body);
+            setting["stream"] = input_setting["stream"];
+            output = build_http_response(200, "application/json", "{\"status\": \"OK\"}");
+            return rt::FLAG_DONE;
+        }
+        catch (...)
+        {
+            output = build_http_response(500, "text/plain", "Settings saved failed.");
+            return rt::FLAG_ERROR;
+        }
+    }
+
+    int handle_loading_page(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
         std::string html = R"(<!DOCTYPE html><html><head><title>Loading...</title></head><body><h2>Please Login</h2><form action="/api/login" method="post">User: <input type="text" name="user"><br>Pass: <input type="password" name="pass"><br><input type="submit" value="Login"></form></body></html>)";
         output = build_http_response(200, "text/html", html);
         return rt::FLAG_DONE;
     }
 
-    int handle_logout(std::string &input, std::string &output)
+    int handle_logout(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
-        g_session_manager.clear_current();
+        // 删除 token
         output = build_http_response(200, "text/plain", "Logged out.");
         return rt::FLAG_DONE;
     }
 
-    int handle_login(std::string &input, std::string &output)
+    int handle_login(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
         try
         {
@@ -522,11 +578,11 @@ namespace app
             size_t pass_end = body.find('"', pass_start);
             std::string password = body.substr(pass_start, pass_end - pass_start);
 
-            std::cout << "Admin:" << Admin_password << std::endl;
-            std::cout << " Login:" << username << " sha3-256:" << password << std::endl;
+            std::cout << "Login: " << username << " " << password << std::endl;
+            std::cout << "Password: " << setting["password"].get_ref<std::string &>() << std::endl;
 
             // 简单验证逻辑
-            if (username == "admin" && password == Admin_password)
+            if (username == setting["name"].get_ref<std::string &>() && password == setting["password"].get_ref<std::string &>())
             {
                 json resp = {{"token", "fake-jwt-token"}, {"user", username}};
                 output = build_http_response(200, "application/json", resp.dump());
@@ -544,7 +600,7 @@ namespace app
         }
     }
 
-    int handle_channels_list(std::string &input, std::string &output)
+    int handle_channels_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
         json channels = json::array();
         channels.push_back({{"name", "general"}, {"status", "active"}, {"user_count", 1}});
@@ -552,17 +608,20 @@ namespace app
         return rt::FLAG_DONE;
     }
 
-    int handle_skills_list(std::string &input, std::string &output)
+    int handle_tools_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
-        json skills = {
-            {"writing", true},
-            {"analysis", true},
-            {"coding", true}};
-        output = build_http_response(200, "application/json", skills.dump());
+        if (scan_tools())
+        {
+            output = build_http_response(200, "application/json", "{}");
+        }
+        else
+        {
+            output = build_http_response(200, "application/json", tools_list.dump());
+        }
         return rt::FLAG_DONE;
     }
 
-    int handle_todos_list(std::string &input, std::string &output)
+    int handle_todos_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
         json todos = json::array();
         todos.push_back({{"id", 1}, {"title", "Complete report"}, {"done", false}});
@@ -570,13 +629,52 @@ namespace app
         return rt::FLAG_DONE;
     }
 
+    int handle_channels_setting(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+    {
+        return 0;
+    }
+    int handle_tools_setting(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+    {
+        return 0;
+    }
+    int handle_todos_setting(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+    {
+        return 0;
+    }
+    int handle_todos_delete(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+    {
+        return 0;
+    }
+    int handle_todos_new(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+    {
+        return 0;
+    }
+    int handle_session_set(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+    {
+        try
+        {
+            size_t header_end = input.find("\r\n\r\n");
+            std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
+            json request = json::parse(body);
+            agent_session_manager.change_session(request["session_id"]);
+            json resp = {{"status", "done"}, {"messages", agent_session_manager.get_current()->messages}};
+            output = build_http_response(200, "application/json", resp.dump());
+            return rt::FLAG_DONE;
+        }
+        catch (const std::exception &e)
+        {
+            json resp = {{"status", "failed"}};
+            output = build_http_response(200, "application/json", resp.dump());
+            return rt::FLAG_ERROR;
+        }
+    }
 } // namespace app
 
 int main(int argc, char *argv[])
 {
     try
     {
-        app::init_password("admin", "admin");
+        app::init_app("88888888");
 
         boost::asio::io_context io_context;
         rt::router router;
@@ -589,6 +687,5 @@ int main(int argc, char *argv[])
         std::cerr << "Fatal error: " << e.what() << '\n';
         return 1;
     }
-
     return 0;
 }

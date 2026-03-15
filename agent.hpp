@@ -1,12 +1,3 @@
-/**
- * @author Yauntyour (yauntyour@outlook.com)
- * @brief
- * @version 1.0
- * @date 2026-03-14
- *
- * @copyright Copyright (c) 2026
- *
- */
 #pragma once
 #ifndef __AGENT__H__
 #define __AGENT__H__
@@ -188,6 +179,20 @@ namespace net_unit
 
 namespace tool_unit
 {
+    void appendFile(const std::string &path, const std::string &content)
+    {
+        std::ofstream file(path, std::ios::app);
+        if (!file.is_open())
+        {
+            throw "Fail to open/create file:'" + path + "'";
+        }
+        file.write(content.data(), content.size());
+        if (file.fail())
+        {
+            throw "Fail append to file:'" + path + "'";
+        }
+        file.close();
+    }
     std::string exec(const std::string &cmd)
     {
         FILE *pipe = popen(cmd.c_str(), "r");
@@ -225,6 +230,10 @@ namespace tool_unit
             throw "Error: Could not create the file:" + path;
         }
         file.write(content.data(), content.size());
+        if (file.fail())
+        {
+            throw "Fail append to file:'" + path + "'";
+        }
         file.close();
     }
     std::string wget(const char *URL)
@@ -324,6 +333,7 @@ namespace LLMProviders
         CURL *curl_;
 
     public:
+        explicit OllamaClient() = default;
         explicit OllamaClient(const std::string &base_url = "http://localhost:11434")
             : base_url_(base_url), curl_(curl_easy_init()) {}
 
