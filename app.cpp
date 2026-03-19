@@ -21,8 +21,8 @@ namespace fs = std::filesystem;
 
 namespace app
 {
-    static json setting = json::parse(tool_unit::readFile("D:\\Developments\\CXX\\Agent.cpp\\setting.json"));
-    static json::array_t tools_setting = json::parse(tool_unit::readFile("D:\\Developments\\CXX\\Agent.cpp\\tools/tools.json"));
+    static json setting = json::parse(tool_unit::readFile("setting.json"));
+    static json::array_t tools_setting = json::parse(tool_unit::readFile("tools/tools.json"));
     static std::string Admin_call;
     static std::string system_prompt;
     LLMProviders::OllamaClient client(setting["ollama_server"].get_ref<std::string &>());
@@ -182,7 +182,7 @@ namespace app
                 for (auto &ses : sessions)
                 {
                     std::cout << "Saving session: " << ses.first << std::endl;
-                    tool_unit::writeFile("D:\\Developments\\CXX\\Agent.cpp\\sessions\\" + ses.first + ".json", ses.second->messages.dump());
+                    tool_unit::writeFile("sessions\\" + ses.first + ".json", ses.second->messages.dump());
                 }
             }
             catch (const std::exception &e)
@@ -651,7 +651,7 @@ namespace app
     {
         try
         {
-            json::array_t todos = json::parse(tool_unit::readFile("D:\\Developments\\CXX\\Agent.cpp\\todos.json"));
+            json::array_t todos = json::parse(tool_unit::readFile("todos.json"));
             output = build_http_response(200, "application/json", json(todos).dump());
             return rt::FLAG_DONE;
         }
@@ -693,13 +693,13 @@ namespace app
             std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
             json request = json::parse(body);
             std::string id = params.count("id") ? params.at("id") : "unknown";
-            json::array_t todos = json::parse(tool_unit::readFile("D:\\Developments\\CXX\\Agent.cpp\\todos.json"));
+            json::array_t todos = json::parse(tool_unit::readFile("todos.json"));
             for (auto &todo : todos)
             {
                 if (todo["id"].get_ref<std::string &>() == id)
                 {
                     todo = request;
-                    tool_unit::writeFile("D:\\Developments\\CXX\\Agent.cpp\\todos.json", json(todos).dump());
+                    tool_unit::writeFile("todos.json", json(todos).dump());
                     output = build_http_response(200, "application/json", "{}");
                     return rt::FLAG_DONE;
                 }
@@ -717,11 +717,11 @@ namespace app
     int handle_todos_delete(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
         std::string id = params.count("id") ? params.at("id") : "unknown";
-        json::array_t todos = json::parse(tool_unit::readFile("D:\\Developments\\CXX\\Agent.cpp\\todos.json"));
+        json::array_t todos = json::parse(tool_unit::readFile("todos.json"));
         todos.erase(std::remove_if(todos.begin(), todos.end(), [&](const json &todo)
                                    { return todo["id"].get_ref<const std::string &>() == id; }),
                     todos.end());
-        tool_unit::writeFile("D:\\Developments\\CXX\\Agent.cpp\\todos.json", json(todos).dump());
+        tool_unit::writeFile("todos.json", json(todos).dump());
         output = build_http_response(200, "application/json", "{}");
         return rt::FLAG_DONE;
     }
@@ -733,9 +733,9 @@ namespace app
             std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
             json request = json::parse(body);
 
-            json::array_t todos = json::parse(tool_unit::readFile("D:\\Developments\\CXX\\Agent.cpp\\todos.json"));
+            json::array_t todos = json::parse(tool_unit::readFile("todos.json"));
             todos.push_back(request);
-            tool_unit::writeFile("D:\\Developments\\CXX\\Agent.cpp\\todos.json", json(todos).dump());
+            tool_unit::writeFile("todos.json", json(todos).dump());
             output = build_http_response(200, "application/json", request.dump());
             return rt::FLAG_DONE;
         }

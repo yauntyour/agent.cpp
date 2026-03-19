@@ -31,6 +31,7 @@
 
 ```
 <tool>exec:pip list</tool>
+<tool>Image:test.jpg</tool>
 <tool>write:exp/data.txt|Hi</tool>
 <tool>read:data.txt</tool>
 <tool>wget:https://cn.bing.com/</tool>
