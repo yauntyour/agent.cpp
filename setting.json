@@ -1,0 +1,11 @@
+{
+    "name": "Yauntyours",
+    "password": "",
+    "agent_nickname": "曦儿",
+    "workspace": "D:\\Developments\\CXX\\Agent.cpp\\",
+    "ollama_server": "http://localhost:11434",
+    "ollama_default_model": "qwen3.5:9b",
+    "prompt_path": "D:\\Developments\\CXX\\Agent.cpp\\agent.txt",
+    "webui": "D:\\Developments\\CXX\\Agent.cpp\\webui.html",
+    "stream": false
+}

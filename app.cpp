@@ -22,6 +22,7 @@ namespace fs = std::filesystem;
 namespace app
 {
     static json setting = json::parse(tool_unit::readFile("D:\\Developments\\CXX\\Agent.cpp\\setting.json"));
+    static json::array_t tools_setting = json::parse(tool_unit::readFile("D:\\Developments\\CXX\\Agent.cpp\\tools/tools.json"));
     static std::string Admin_call;
     static std::string system_prompt;
     LLMProviders::OllamaClient client(setting["ollama_server"].get_ref<std::string &>());
@@ -54,7 +55,7 @@ namespace app
     auto file_parse(const std::string &file_path)
     {
         fs::path p(file_path);
-        return std::make_pair(p.filename().string(), p.extension().string());
+        return std::make_pair(p.stem().string(), p.extension().string());
     }
     std::string to_hex_string(const uint8_t *hash, size_t len)
     {
@@ -180,7 +181,8 @@ namespace app
             {
                 for (auto &ses : sessions)
                 {
-                    tool_unit::appendFile("D:\\Developments\\CXX\\Agent.cpp\\sessions\\" + ses.first + ".json", ses.second->messages.dump());
+                    std::cout << "Saving session: " << ses.first << std::endl;
+                    tool_unit::writeFile("D:\\Developments\\CXX\\Agent.cpp\\sessions\\" + ses.first + ".json", ses.second->messages.dump());
                 }
             }
             catch (const std::exception &e)
@@ -196,6 +198,7 @@ namespace app
     {
         try
         {
+            tools_list.clear();
             auto tools = get_all_files(setting["workspace"].get_ref<std::string &>() + "/tools");
             for (auto &tool : tools)
             {
@@ -291,12 +294,14 @@ namespace app
         router.on("/api/tools", handle_tools_list);
         router.on("/api/todos", handle_todos_list);
 
-        // 动态路由模式
+        // auto router
         router.on("/api/channels/:name", handle_channels_setting);
         router.on("/api/tools/:name", handle_tools_setting);
-        router.on("/api/todos/:name", handle_todos_setting);
+
+        // todos
+        router.on("/api/todos/:id", handle_todos_setting);
         router.on("/api/todos/new", handle_todos_new);
-        router.on("/api/todos/delete", handle_todos_delete);
+        router.on("/api/todos/delete/:id", handle_todos_delete);
     }
 
     // 实现各API接口
@@ -317,7 +322,6 @@ namespace app
         output = build_http_response(200, "text/html", html);
         return rt::FLAG_DONE;
     }
-
     int handle_api_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
         json api_list = {
@@ -346,7 +350,6 @@ namespace app
         output = build_http_response(200, "application/json", api_list.dump());
         return rt::FLAG_DONE;
     }
-
     int handle_status(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
         try
@@ -364,7 +367,6 @@ namespace app
             return rt::FLAG_ERROR;
         }
     }
-
     int handle_control(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
         try
@@ -389,12 +391,11 @@ namespace app
             return rt::FLAG_ERROR;
         }
     }
-
     int handle_input_stream(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
         json req;
         std::string model;
-        auto ses = agent_session_manager.get_current();
+        bool is_webui = true;
         try
         {
             size_t header_end = input.find("\r\n\r\n");
@@ -408,8 +409,16 @@ namespace app
 
             std::string user_message = request["messages"].get<std::string>();
             model = request["model"].get<std::string>();
+            if (model == "default")
+            {
+                model = setting["ollama_default_model"];
+            }
 
-            ses->messages.push_back(Admin_call + user_message);
+            if (request["channel"] == nullptr)
+            {
+                agent_session_manager.get_current()->messages.push_back(Admin_call + user_message);
+                is_webui = false;
+            }
 
             ctx_lock.lock();
             req = {
@@ -421,6 +430,14 @@ namespace app
                 {"stream", true},
                 {"think", false}};
             ctx_lock.unlock();
+            req["images"] = json::array();
+            if (request["images"] != nullptr)
+            {
+                for (auto &image : request["images"])
+                {
+                    req["images"].push_back(std::move(image.get_ref<std::string &>()));
+                }
+            }
         }
         catch (const std::exception &e)
         {
@@ -432,6 +449,7 @@ namespace app
         std::string response;
         std::string thinking;
         client.stream_generate(req, response, thinking);
+        req["images"].clear();
         std::string current = "\r\n" + thinking + "\r\n" + response + "\r\n";
         std::string sys_out;
         bool tool_flag = tool_unit::tools_scan(response, sys_out);
@@ -441,6 +459,16 @@ namespace app
             printf("Trigger command invocation at cs:%d tool: %d\n", cs_flag, tool_flag);
             current += sys_out;
             req["prompt"] = req["prompt"].get<std::string>() + current;
+
+            if (!tool_unit::image_queue.empty())
+            {
+                for (auto &img : tool_unit::image_queue)
+                {
+                    req["images"].push_back(std::move(img));
+                }
+                tool_unit::image_queue.clear();
+            }
+
             response.clear();
             thinking.clear();
             client.stream_generate(req, response, thinking);
@@ -449,11 +477,18 @@ namespace app
         ctx_lock.lock();
         Agent_session_context += current;
         ctx_lock.unlock();
-        ses->messages.push_back("context:" + current);
+        if (is_webui)
+        {
+            agent_session_manager.get_current()->messages.push_back("context:" + current);
+        }
+
+        size_t ctx_length = Agent_session_context.length();
+
+        current += std::format("\r\n[context length now: {}]", ctx_length);
+
         output = build_http_response(200, "application/json", json{{"model", model}, {"messages", {{{"type", "response"}, {"content", current}}}}, {"stream", true}, {"think", false}}.dump());
         return rt::FLAG_DONE;
     }
-
     int handle_session_clear(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
         ctx_lock.lock();
@@ -466,7 +501,6 @@ namespace app
         output = build_http_response(200, "application/json", resp.dump());
         return rt::FLAG_DONE;
     }
-
     int handle_models(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
         try
@@ -502,7 +536,6 @@ namespace app
         output = build_http_response(200, "application/json", resp.dump());
         return rt::FLAG_DONE;
     }
-
     int handle_delete_session(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
         try
@@ -523,7 +556,6 @@ namespace app
             return rt::FLAG_ERROR;
         }
     }
-
     int handle_settings(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
         try
@@ -542,21 +574,18 @@ namespace app
             return rt::FLAG_ERROR;
         }
     }
-
     int handle_loading_page(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
         std::string html = R"(<!DOCTYPE html><html><head><title>Loading...</title></head><body><h2>Please Login</h2><form action="/api/login" method="post">User: <input type="text" name="user"><br>Pass: <input type="password" name="pass"><br><input type="submit" value="Login"></form></body></html>)";
         output = build_http_response(200, "text/html", html);
         return rt::FLAG_DONE;
     }
-
     int handle_logout(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
         // 删除 token
         output = build_http_response(200, "text/plain", "Logged out.");
         return rt::FLAG_DONE;
     }
-
     int handle_login(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
         try
@@ -599,7 +628,6 @@ namespace app
             return rt::FLAG_ERROR;
         }
     }
-
     int handle_channels_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
         json channels = json::array();
@@ -607,7 +635,6 @@ namespace app
         output = build_http_response(200, "application/json", channels.dump());
         return rt::FLAG_DONE;
     }
-
     int handle_tools_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
         if (scan_tools())
@@ -620,39 +647,112 @@ namespace app
         }
         return rt::FLAG_DONE;
     }
-
     int handle_todos_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
-        json todos = json::array();
-        todos.push_back({{"id", 1}, {"title", "Complete report"}, {"done", false}});
-        output = build_http_response(200, "application/json", todos.dump());
-        return rt::FLAG_DONE;
+        try
+        {
+            json::array_t todos = json::parse(tool_unit::readFile("D:\\Developments\\CXX\\Agent.cpp\\todos.json"));
+            output = build_http_response(200, "application/json", json(todos).dump());
+            return rt::FLAG_DONE;
+        }
+        catch (const std::exception &e)
+        {
+            output = build_http_response(500, "application/json", "[]");
+            std::cerr << e.what() << '\n';
+            return rt::FLAG_ERROR;
+        }
     }
-
     int handle_channels_setting(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
         return 0;
     }
     int handle_tools_setting(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
+        if (params.size() > 0)
+        {
+            std::string name = params.count("name") ? params.at("name") : "unknown";
+            for (auto &tool : tools_setting)
+            {
+                if (tool["name"].get_ref<std::string &>() == name)
+                {
+                    output = build_http_response(200, "application/json", tool.dump());
+                }
+            }
+        }
+        else
+        {
+            output = build_http_response(400, "application/json", "{}");
+        }
         return 0;
     }
     int handle_todos_setting(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
+        try
+        {
+            size_t header_end = input.find("\r\n\r\n");
+            std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
+            json request = json::parse(body);
+            std::string id = params.count("id") ? params.at("id") : "unknown";
+            json::array_t todos = json::parse(tool_unit::readFile("D:\\Developments\\CXX\\Agent.cpp\\todos.json"));
+            for (auto &todo : todos)
+            {
+                if (todo["id"].get_ref<std::string &>() == id)
+                {
+                    todo = request;
+                    tool_unit::writeFile("D:\\Developments\\CXX\\Agent.cpp\\todos.json", json(todos).dump());
+                    output = build_http_response(200, "application/json", "{}");
+                    return rt::FLAG_DONE;
+                }
+            }
+            output = build_http_response(404, "application/json", "{}");
+        }
+        catch (const std::exception &e)
+        {
+            std::cerr << e.what() << '\n';
+            output = build_http_response(500, "application/json", "{}");
+            return rt::FLAG_ERROR;
+        }
         return 0;
     }
     int handle_todos_delete(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
-        return 0;
+        std::string id = params.count("id") ? params.at("id") : "unknown";
+        json::array_t todos = json::parse(tool_unit::readFile("D:\\Developments\\CXX\\Agent.cpp\\todos.json"));
+        todos.erase(std::remove_if(todos.begin(), todos.end(), [&](const json &todo)
+                                   { return todo["id"].get_ref<const std::string &>() == id; }),
+                    todos.end());
+        tool_unit::writeFile("D:\\Developments\\CXX\\Agent.cpp\\todos.json", json(todos).dump());
+        output = build_http_response(200, "application/json", "{}");
+        return rt::FLAG_DONE;
     }
     int handle_todos_new(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
-        return 0;
+        try
+        {
+            size_t header_end = input.find("\r\n\r\n");
+            std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
+            json request = json::parse(body);
+
+            json::array_t todos = json::parse(tool_unit::readFile("D:\\Developments\\CXX\\Agent.cpp\\todos.json"));
+            todos.push_back(request);
+            tool_unit::writeFile("D:\\Developments\\CXX\\Agent.cpp\\todos.json", json(todos).dump());
+            output = build_http_response(200, "application/json", request.dump());
+            return rt::FLAG_DONE;
+        }
+        catch (const std::exception &e)
+        {
+            std::cerr << e.what() << '\n';
+            return rt::FLAG_ERROR;
+        }
     }
     int handle_session_set(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
         try
         {
+            ctx_lock.lock();
+            Agent_session_context = system_prompt;
+            ctx_lock.unlock();
+
             size_t header_end = input.find("\r\n\r\n");
             std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
             json request = json::parse(body);

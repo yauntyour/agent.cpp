@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>Chat WebUI</title>
+    <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚀</text></svg>">
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://image.uc.cn/s/uae/g/3n/mos-production/fontawesome-free-7.1.0-web/js/all.min.js"></script>
+    <link href="https://image.uc.cn/s/uae/g/3n/mos-production/fontawesome-free-7.1.0-web/css/fontawesome.min.css"
+        rel="stylesheet" />
+    <script src="https://image.uc.cn/s/uae/g/3n/mos-production/cdn-staticfile-net/axios/1.6.7/axios.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.bootcdn.net/ajax/libs/js-sha3/0.9.3/sha3.min.js"></script>
+    <style>
+        /* --- 滚动条优化 --- */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+
+        /* --- 基础开关样式 --- */
+        .toggle-checkbox:checked {
+            right: 0;
+            border-color: #2563eb;
+        }
+
+        .toggle-checkbox:checked+.toggle-label {
+            background-color: #2563eb;
+        }
+
+        /* --- 消息气泡与响应美化 --- */
+        .message-bubble {
+            word-wrap: break-word;
+            word-break: break-word;
+            overflow-wrap: break-word;
+            min-width: 0;
+        }
+
+        /* --- 核心：Markdown 颜色优化 --- */
+        .prose {
+            color: #ffffff !important;
+            /* 普通消息文字设为纯白 */
+            max-width: none;
+            line-height: 1.6;
+        }
+
+        /* 链接颜色 */
+        .prose a {
+            color: #60a5fa;
+            text-decoration: underline;
+        }
+
+        /* 引用块样式 (Blockquote) */
+        .prose blockquote {
+            border-left: 4px solid #3b82f6;
+            background-color: #1e293b;
+            color: #cbd5e1;
+            padding: 0.5rem 1rem;
+            margin: 1rem 0;
+            font-style: italic;
+        }
+
+        /* 列表点号颜色 */
+        .prose ul>li::marker,
+        .prose ol>li::marker {
+            color: #60a5fa;
+        }
+
+        /* 粗体字优化 */
+        .prose strong {
+            color: #60a5fa;
+            /* 粗体稍微带点蓝色，更显眼 */
+            font-weight: 700;
+        }
+
+        /* 代码块容器 */
+        .prose pre {
+            background-color: #020617 !important;
+            padding: 1.25em 1em;
+            border-radius: 0.75rem;
+            overflow-x: auto;
+            margin: 1.2em 0;
+            position: relative;
+            border: 1px solid #334155;
+        }
+
+        /* 行内代码样式 */
+        .prose code {
+            color: #fbbf24;
+            /* 行内代码使用琥珀色，对比度高 */
+            background-color: #1e293b;
+            padding: 0.2em 0.4em;
+            border-radius: 0.25em;
+            font-family: 'Fira Code', 'Consolas', monospace;
+            font-size: 0.9em;
+        }
+
+        /* 预格式化块内的代码文字 */
+        .prose pre code {
+            background-color: transparent;
+            padding: 0;
+            color: #e2e8f0;
+        }
+
+        /* 复制按钮样式 */
+        .copy-btn {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: #1e293b;
+            color: #94a3b8;
+            border: 1px solid #334155;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.2s;
+            opacity: 0;
+        }
+
+        .prose pre:hover .copy-btn {
+            opacity: 1;
+        }
+
+        .copy-btn:hover {
+            background: #334155;
+            color: #ffffff;
+        }
+
+        /* --- 其他 UI 组件 --- */
+        .loader {
+            border: 3px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 3px solid #3498db;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        .toast-enter {
+            animation: slideIn 0.3s ease-out forwards;
+        }
+    </style>
+</head>
+
+<body class="bg-slate-900 text-slate-200 font-sans h-screen overflow-hidden flex flex-col">
+    <div class="fixed inset-0 bg-slate-900 z-50 flex items-center justify-center" id="login-screen">
+        <div class="bg-slate-800 p-8 rounded-lg shadow-2xl w-full max-w-md border border-slate-700">
+            <div class="text-center mb-6">
+                <i class="fa-solid fa-robot text-4xl text-blue-600 mb-2"></i>
+                <h1 class="text-2xl font-bold text-white">Login</h1>
+                <p class="text-slate-400 text-sm">Please sign in to continue</p>
+            </div>
+            <form class="space-y-4" id="login-form">
+                <div>
+                    <label class="block text-sm font-medium text-slate-300 mb-1">Username</label>
+                    <input
+                        class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-600 transition"
+                        id="username" placeholder="admin" required="" type="text" />
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-300 mb-1">Password</label>
+                    <input
+                        class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-600 transition"
+                        id="password" placeholder="••••••••" required="" type="password" />
+                </div>
+                <button
+                    class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition duration-200 flex justify-center items-center"
+                    type="submit">
+                    <span id="login-btn-text">Login</span>
+                    <div class="loader ml-2 hidden" id="login-spinner"></div>
+                </button>
+            </form>
+            <div class="mt-4 text-red-400 text-sm text-center hidden" id="login-error"></div>
+        </div>
+    </div>
+
+    <div class="flex h-full hidden" id="main-interface">
+        <aside class="w-64 bg-slate-800 border-r border-slate-700 flex flex-col flex-shrink-0">
+            <div class="p-4 border-b border-slate-700 flex justify-between items-center">
+                <h2 class="font-bold text-lg text-white">Sessions</h2>
+                <button class="text-blue-400 hover:text-blue-300 transition" id="new-session-btn" title="New Session">
+                    <i class="fa-solid fa-plus"></i>
+                </button>
+            </div>
+            <div class="flex-1 overflow-y-auto p-2 space-y-1" id="session-list"></div>
+            <div class="p-4 border-t border-slate-700">
+                <div class="flex items-center space-x-3 mb-3">
+                    <div class="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white">
+                        <i class="fa-solid fa-user"></i>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-sm font-medium text-white truncate" id="current-user-display">User</p>
+                    </div>
+                </div>
+                <button class="w-full bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm py-1.5 rounded transition"
+                    id="logout-btn">
+                    <i class="fa-solid fa-right-from-bracket mr-2"></i>Logout
+                </button>
+            </div>
+        </aside>
+
+        <main class="flex-1 flex flex-col min-w-0 bg-slate-900 overflow-hidden">
+            <header
+                class="h-14 bg-slate-800 border-b border-slate-700 flex items-center justify-between px-4 flex-shrink-0 z-40">
+                <div class="relative inline-block text-left">
+                    <button type="button" id="model-dropdown-btn"
+                        class="flex items-center space-x-2 px-2 py-1 rounded hover:bg-slate-700 transition-colors focus:outline-none">
+                        <span class="w-2 h-2 rounded-full bg-slate-500" id="connection-status-dot"></span>
+                        <span class="text-sm text-slate-300" id="model-name-display">Model: Loading...</span>
+                        <i class="fa-solid fa-chevron-down text-xs text-slate-400 ml-1"></i>
+                    </button>
+                    <div id="model-dropdown-menu"
+                        class="absolute left-0 mt-2 w-56 rounded-md shadow-lg bg-slate-800 border border-slate-700 hidden z-50">
+                        <div class="py-1 max-h-60 overflow-y-auto" id="model-dropdown-list"></div>
+                    </div>
+                </div>
+                <div class="text-xs text-slate-500" id="current-session-id-display">Session: -</div>
+            </header>
+
+            <div class="flex-1 overflow-y-auto p-4 space-y-4" id="messages-container">
+                <div class="flex justify-center mt-10">
+                    <div class="text-center text-slate-500">
+                        <i class="fa-solid fa-comments text-4xl mb-3 opacity-50"></i>
+                        <p>Select a session or start a new conversation.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-4 bg-slate-800 border-t border-slate-700 flex-shrink-0">
+                <div
+                    class="relative bg-slate-900 rounded-lg border border-slate-700 focus-within:border-blue-600 transition">
+                    <textarea
+                        class="w-full bg-transparent text-white p-3 pr-12 resize-none focus:outline-none max-h-48 overflow-y-auto"
+                        id="user-input" placeholder="Type a message..." rows="1"></textarea>
+                    <button class="absolute right-2 bottom-2 text-blue-500 hover:text-blue-400 p-1 rounded transition"
+                        id="send-btn" title="send-btn">
+                        <i class="fa-solid fa-paper-plane text-xl"></i>
+                    </button>
+                </div>
+                <div class="flex justify-between items-center mt-2 px-1">
+                    <div class="flex items-center">
+                        <div
+                            class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
+                            <input
+                                class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer border-slate-300 transition-all duration-300 left-0 top-0"
+                                id="think-toggle" name="toggle" type="checkbox">
+                            <label
+                                class="toggle-label block overflow-hidden h-5 rounded-full bg-slate-600 cursor-pointer transition-colors duration-300"
+                                for="think-toggle"></label>
+                        </div>
+                        <span class="text-xs text-slate-400">Deep Think</span>
+                    </div>
+                    <div class="text-xs text-slate-500" id="input-hint">Press Enter to send</div>
+                </div>
+            </div>
+        </main>
+
+        <aside class="w-80 bg-slate-800 border-l border-slate-700 flex flex-col flex-shrink-0">
+            <div class="flex border-b border-slate-700">
+                <button
+                    class="flex-1 py-3 text-sm font-medium text-blue-400 border-b-2 border-blue-500 focus:outline-none hover:bg-slate-700 transition tab-btn"
+                    data-tab="settings">Settings</button>
+                <button
+                    class="flex-1 py-3 text-sm font-medium text-slate-400 hover:text-slate-200 focus:outline-none hover:bg-slate-700 transition tab-btn"
+                    data-tab="tools">Tools</button>
+                <button
+                    class="flex-1 py-3 text-sm font-medium text-slate-400 hover:text-slate-200 focus:outline-none hover:bg-slate-700 transition tab-btn"
+                    data-tab="todos">Todos</button>
+                <button
+                    class="flex-1 py-3 text-sm font-medium text-slate-400 hover:text-slate-200 focus:outline-none hover:bg-slate-700 transition tab-btn"
+                    data-tab="channels">Channels</button>
+            </div>
+            <div class="tab-content flex-1 overflow-y-auto p-4 space-y-6" id="tab-settings">
+                <div>
+                    <h3 class="text-sm font-bold text-white uppercase tracking-wider mb-3">General</h3>
+                    <div class="flex items-center justify-between mb-4">
+                        <span class="text-sm text-slate-300">Stream Response</span>
+                        <div class="relative inline-block w-10 align-middle select-none">
+                            <input
+                                class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer border-slate-300 transition-all duration-300 left-0 top-0"
+                                id="stream-toggle" type="checkbox">
+                            <label
+                                class="toggle-label block overflow-hidden h-5 rounded-full bg-slate-600 cursor-pointer transition-colors duration-300"
+                                for="stream-toggle"></label>
+                        </div>
+                    </div>
+                </div>
+                <div>
+                    <h3 class="text-sm font-bold text-white uppercase tracking-wider mb-3">System Logs</h3>
+                    <div class="bg-slate-900 p-2 rounded h-48 overflow-y-auto text-xs font-mono text-slate-400 space-y-1"
+                        id="system-logs">
+                        <div class="text-green-500">[System] UI Initialized</div>
+                    </div>
+                </div>
+            </div>
+            <div class="tab-content flex-1 overflow-y-auto p-4 hidden" id="tab-tools">
+                <div class="space-y-3" id="tools-list"></div>
+            </div>
+            <div class="tab-content flex-1 overflow-y-auto p-4 hidden flex flex-col" id="tab-todos">
+                <div class="flex mb-4">
+                    <input
+                        class="flex-1 bg-slate-900 border border-slate-700 rounded-l px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-600"
+                        id="new-todo-input" placeholder="Add new todo..." type="text" />
+                    <button class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-r text-sm transition"
+                        id="add-todo-btn" title="add-todo-btn">
+                        <i class="fa-solid fa-plus"></i>
+                    </button>
+                </div>
+                <div class="space-y-2 flex-1" id="todos-list"></div>
+            </div>
+            <div class="tab-content flex-1 overflow-y-auto p-4 hidden" id="tab-channels">
+                <div class="space-y-2" id="channels-list"></div>
+            </div>
+        </aside>
+    </div>
+
+    <div class="fixed top-5 right-5 z-50 flex flex-col space-y-3" id="toast-container"></div>
+
+    <script>
+        // --- State Management ---
+        const state = {
+            token: localStorage.getItem('token') || null,
+            user: localStorage.getItem('user') || null,
+            sessions: [],
+            currentSessionId: null,
+            messages: [],
+            settings: { stream: false, ollama_default_model: "" },
+            models: [],
+            currentModel: null,
+            thinkMode: false,
+            activeTab: 'settings',
+            tools: [],
+            todos: [],
+            channels: [],
+            isTyping: false
+        };
+
+        const API_BASE = '/api';
+
+        // --- DOM Elements ---
+        const els = {
+            loginScreen: document.getElementById('login-screen'),
+            loginForm: document.getElementById('login-form'),
+            loginBtnText: document.getElementById('login-btn-text'),
+            loginSpinner: document.getElementById('login-spinner'),
+            loginError: document.getElementById('login-error'),
+            mainInterface: document.getElementById('main-interface'),
+            sessionList: document.getElementById('session-list'),
+            newSessionBtn: document.getElementById('new-session-btn'),
+            messagesContainer: document.getElementById('messages-container'),
+            userInput: document.getElementById('user-input'),
+            sendBtn: document.getElementById('send-btn'),
+            thinkToggle: document.getElementById('think-toggle'),
+            streamToggle: document.getElementById('stream-toggle'),
+            tabBtns: document.querySelectorAll('.tab-btn'),
+            tabContents: document.querySelectorAll('.tab-content'),
+            currentUserDisplay: document.getElementById('current-user-display'),
+            logoutBtn: document.getElementById('logout-btn'),
+            systemLogs: document.getElementById('system-logs'),
+            toolsList: document.getElementById('tools-list'),
+            todosList: document.getElementById('todos-list'),
+            newTodoInput: document.getElementById('new-todo-input'),
+            addTodoBtn: document.getElementById('add-todo-btn'),
+            channelsList: document.getElementById('channels-list'),
+            currentSessionIdDisplay: document.getElementById('current-session-id-display'),
+            modelDropdownBtn: document.getElementById('model-dropdown-btn'),
+            modelDropdownMenu: document.getElementById('model-dropdown-menu'),
+            modelDropdownList: document.getElementById('model-dropdown-list'),
+            modelNameDisplay: document.getElementById('model-name-display'),
+            connectionStatusDot: document.getElementById('connection-status-dot')
+        };
+
+        // --- Utilities ---
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            let icon = '<i class="fa-solid fa-circle-info text-blue-400"></i>';
+            if (type === 'success') icon = '<i class="fa-solid fa-circle-check text-green-400"></i>';
+            else if (type === 'error') icon = '<i class="fa-solid fa-circle-exclamation text-red-400"></i>';
+
+            toast.className = `bg-slate-700 text-white px-4 py-3 rounded shadow-lg flex items-center space-x-3 min-w-[300px] toast-enter border border-slate-600`;
+            toast.innerHTML = `${icon}<span class="text-sm font-medium">${message}</span>`;
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateX(100%)';
+                toast.style.transition = 'all 0.3s ease-in';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        function log(msg, type = 'info') {
+            const time = new Date().toLocaleTimeString();
+            const div = document.createElement('div');
+            div.textContent = `[${time}] ${msg}`;
+            div.className = type === 'error' ? 'text-red-400' : (type === 'success' ? 'text-green-400' : 'text-slate-400');
+            els.systemLogs.appendChild(div);
+            els.systemLogs.scrollTop = els.systemLogs.scrollHeight;
+        }
+
+        // --- NEW: 代码块复制功能 ---
+        function attachCopyButtons(container) {
+            const preBlocks = container.querySelectorAll('pre');
+            preBlocks.forEach(pre => {
+                // 如果已经有按钮了就不重复添加
+                if (pre.querySelector('.copy-btn')) return;
+
+                const btn = document.createElement('button');
+                btn.className = 'copy-btn';
+                btn.innerText = 'Copy';
+
+                btn.onclick = () => {
+                    const code = pre.querySelector('code').innerText;
+                    navigator.clipboard.writeText(code).then(() => {
+                        btn.innerText = 'Copied!';
+                        btn.classList.add('text-green-400');
+                        setTimeout(() => {
+                            btn.innerText = 'Copy';
+                            btn.classList.remove('text-green-400');
+                        }, 2000);
+                    });
+                };
+                pre.appendChild(btn);
+            });
+        }
+
+        // --- API Service ---
+        const api = axios.create({ baseURL: API_BASE, headers: { 'Content-Type': 'application/json' } });
+        api.interceptors.request.use(config => {
+            if (state.token) config.headers['Authorization'] = `Bearer ${state.token}`;
+            return config;
+        });
+
+        api.interceptors.response.use(response => response, error => {
+            if (error.response && error.response.status === 401) { logout(); }
+            return Promise.reject(error);
+        });
+
+        // --- Core Functions ---
+        async function init() {
+            if (state.token) {
+                els.loginScreen.classList.add('hidden');
+                els.mainInterface.classList.remove('hidden');
+                els.currentUserDisplay.textContent = state.user;
+                await getModels();
+                await loadSessions();
+                await loadSettings();
+                await loadTools();
+                await loadTodos();
+                await loadChannels();
+            }
+        }
+
+        async function login(username, password) {
+            try {
+                els.loginBtnText.classList.add('hidden');
+                els.loginSpinner.classList.remove('hidden');
+                const response = await api.post('/login', { username, password: sha3_256(password) });
+                if (response.data.token) {
+                    state.token = response.data.token;
+                    state.user = response.data.user;
+                    localStorage.setItem('token', state.token);
+                    localStorage.setItem('user', state.user);
+                    location.reload();
+                }
+            } catch (error) {
+                els.loginError.textContent = 'Invalid credentials';
+                els.loginError.classList.remove('hidden');
+            } finally {
+                els.loginBtnText.classList.remove('hidden');
+                els.loginSpinner.classList.add('hidden');
+            }
+        }
+
+        function logout() {
+            localStorage.clear();
+            location.reload();
+        }
+
+        async function getModels() {
+            try {
+                const response = await api.get('/models');
+                state.models = (response.data.models || []).map(m => typeof m === 'string' ? { name: m, available: true } : m);
+                renderModels();
+            } catch (error) { log('Failed to load models', 'error'); }
+        }
+
+        function renderModels() {
+            els.modelDropdownList.innerHTML = '';
+            if (!state.currentModel && state.models.length > 0) {
+                const model_has_selected = false;
+                for (const model of state.models) {
+                    if (model.name === state.settings.ollama_default_model) {
+                        selectModel(model.name, true);
+                        model_has_selected = true;
+                        break;
+                    }
+                }
+                if (!model_has_selected) {
+                    selectModel(state.models[0].name, state.models[0].available !== false);
+                }
+                log(`Default Model: ${state.settings.ollama_default_model}`, 'success');
+                log(`Selected Model: ${state.currentModel}`, 'success');
+            }
+            state.models.forEach(model => {
+                const isAvailable = model.available !== false;
+                const btn = document.createElement('button');
+                btn.className = `w-full flex items-center space-x-2 px-4 py-2 text-sm ${isAvailable ? 'text-slate-300 hover:bg-slate-700' : 'text-slate-500 cursor-not-allowed'}`;
+                btn.onclick = () => isAvailable && (selectModel(model.name, true), els.modelDropdownMenu.classList.add('hidden'));
+                btn.innerHTML = `<span class="w-2 h-2 rounded-full ${isAvailable ? 'bg-green-500' : 'bg-red-500'}"></span><span>${model.name}</span>`;
+                els.modelDropdownList.appendChild(btn);
+            });
+        }
+
+        function selectModel(name, ok) {
+            state.currentModel = name;
+            els.modelNameDisplay.textContent = `Model: ${name}`;
+            els.connectionStatusDot.className = `w-2 h-2 rounded-full ${ok ? 'bg-green-500' : 'bg-red-500'}`;
+        }
+
+        async function loadSessions() {
+            const res = await api.get('/session');
+            state.sessions = res.data.session_list || [];
+            renderSessions();
+        }
+
+        function renderSessions() {
+            els.sessionList.innerHTML = '';
+            state.sessions.forEach(id => {
+                const isActive = id === state.currentSessionId;
+                const div = document.createElement('div');
+                div.className = `p-3 rounded cursor-pointer flex justify-between items-center group ${isActive ? 'bg-blue-600 text-white' : 'hover:bg-slate-700 text-slate-300'}`;
+                div.onclick = () => switchSession(id);
+                div.innerHTML = `<div class="truncate text-sm font-medium">${new Date(parseInt(id)).toLocaleString()}</div>`;
+                els.sessionList.appendChild(div);
+            });
+        }
+
+        async function switchSession(id) {
+            const res = await api.post('/session/set', { session_id: id });
+            state.currentSessionId = id;
+            els.currentSessionIdDisplay.textContent = `Session: ${id}`;
+            state.messages = (res.data.messages || []).map(m => ({ role: m.startsWith('User') ? 'user' : 'ai', content: m }));
+            renderMessages();
+        }
+
+        async function sendMessage() {
+            const content = els.userInput.value.trim();
+            if (!content || state.isTyping || !state.currentSessionId) return;
+
+            addMessageToUI('user', content);
+            els.userInput.value = '';
+            state.isTyping = true;
+
+            const aiMessageId = Date.now();
+            addMessageToUI('ai', '<span class="typing">Thinking...</span>', aiMessageId);
+
+            try {
+                const res = await api.post('/input', { messages: content, model: state.currentModel, think: state.thinkMode });
+                const aiContent = res.data.messages[0].content;
+                const messageEl = document.querySelector(`#msg-${aiMessageId} .prose`);
+
+                if (state.settings.stream) {
+                    simulateTyping(messageEl, aiContent);
+                } else {
+                    messageEl.innerHTML = marked.parse(aiContent);
+                    attachCopyButtons(messageEl); // 静态渲染后绑定按钮
+                }
+            } catch (error) {
+                document.querySelector(`#msg-${aiMessageId} .prose`).innerHTML = '<span class="text-red-400">Error.</span>';
+            } finally {
+                state.isTyping = false;
+            }
+        }
+
+        function simulateTyping(el, text) {
+            el.innerHTML = '';
+            let i = 0;
+            const interval = setInterval(() => {
+                el.innerHTML = marked.parse(text.substring(0, i));
+                els.messagesContainer.scrollTop = els.messagesContainer.scrollHeight;
+                i += 3;
+                if (i > text.length) {
+                    clearInterval(interval);
+                    el.innerHTML = marked.parse(text);
+                    attachCopyButtons(el); // 动态渲染结束后绑定按钮
+                }
+            }, 15);
+        }
+
+        function addMessageToUI(role, content, id = null) {
+            const div = document.createElement('div');
+            div.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'}`;
+            if (id) div.id = `msg-${id}`;
+
+            const bubbleClass = role === 'user' ? 'bg-blue-600 text-white' : 'bg-slate-800 border border-slate-700 text-slate-200';
+
+            // --- 自定义 Emoji 逻辑 ---
+            const emoji = role === 'user' ? '⭐' : '💖';
+
+            div.innerHTML = `
+        <div class="flex max-w-[85%] ${role === 'user' ? 'flex-row-reverse space-x-reverse' : 'flex-row'} items-start space-x-3 min-w-0">
+            <div class="w-8 h-8 rounded flex-shrink-0 flex items-center justify-center ${role === 'user' ? 'bg-blue-500' : 'bg-slate-700'} text-lg">
+                ${emoji}
+            </div>
+            <div class="${bubbleClass} px-4 py-2 rounded-lg shadow-md message-bubble">
+                <div class="prose prose-sm">
+                    ${role === 'user' ? content.replace(/\n/g, '<br>') : marked.parse(content)}
+                </div>
+            </div>
+        </div>
+    `;
+            els.messagesContainer.appendChild(div);
+            els.messagesContainer.scrollTop = els.messagesContainer.scrollHeight;
+
+            if (role === 'ai' && !id) {
+                attachCopyButtons(div.querySelector('.prose'));
+            }
+        }
+
+        function renderMessages() {
+            els.messagesContainer.innerHTML = '';
+            state.messages.forEach(m => addMessageToUI(m.role, m.content));
+        }
+
+        // --- 剩下的基础逻辑 (Settings/Todos/etc) ---
+        async function loadSettings() {
+            const response = await api.get('/models');
+            state.settings.ollama_default_model = response.data.ollama_default_model;
+            state.settings.stream = response.data.stream;
+            els.streamToggle.checked = state.settings.stream;
+        }
+        els.streamToggle.onchange = (e) => state.settings.stream = e.target.checked;
+        els.thinkToggle.onchange = (e) => state.thinkMode = e.target.checked;
+        els.newSessionBtn.onclick = async () => {
+            const res = await api.post('/new');
+            if (res.data.status === 'OK') {
+                state.sessions.push(res.data.session_id);
+                switchSession(res.data.session_id);
+                renderSessions();
+            }
+        };
+
+        els.tabBtns.forEach(btn => {
+            btn.onclick = () => {
+                els.tabBtns.forEach(b => b.classList.replace('text-blue-400', 'text-slate-400'));
+                btn.classList.replace('text-slate-400', 'text-blue-400');
+                els.tabContents.forEach(c => c.classList.add('hidden'));
+                document.getElementById(`tab-${btn.dataset.tab}`).classList.remove('hidden');
+            };
+        });
+
+        els.userInput.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } };
+        els.sendBtn.onclick = sendMessage;
+        els.loginForm.onsubmit = (e) => { e.preventDefault(); login(els.username.value, els.password.value); };
+        els.modelDropdownBtn.onclick = (e) => { e.stopPropagation(); els.modelDropdownMenu.classList.toggle('hidden'); };
+        document.onclick = () => els.modelDropdownMenu.classList.add('hidden');
+        els.logoutBtn.onclick = logout;
+
+        async function loadTools() { const res = await api.get('/tools'); state.tools = res.data || []; renderTools(); }
+        function renderTools() {
+            els.toolsList.innerHTML = state.tools.map(t => `<div class="bg-slate-900 p-2 rounded border border-slate-700"><div class="text-blue-400 text-sm">${t.name}</div><div class="text-xs text-slate-500">${t.description}</div></div>`).join('');
+        }
+
+        async function loadTodos() { const res = await api.get('/todos'); state.todos = res.data || []; renderTodos(); }
+        async function deleteTodo(id) {
+            if (!confirm('Are you sure to delete this todo?')) return;
+            try {
+                await api.get(`/todos/delete/${id}`);
+                state.todos = state.todos.filter(t => t.id != id);
+                renderTodos();
+            } catch (error) {
+                log(`Fail to delete todo:${id}, ${error}`, 'error');
+            }
+        }
+        els.addTodoBtn.onclick = async () => {
+            try {
+                const response = await api.post('/todos/new', { id: String(Date.now()), done: false, content: els.newTodoInput.value });
+                state.todos.push(response.data);
+                renderTodos();
+                els.newTodoInput.value = '';
+            } catch (error) {
+                log(`Fail to new todo, ${error}`, 'error');
+            }
+        }
+        async function doneTodo(id, isDone) {
+            const currentDone = !isDone;
+            try {
+                const todo = state.todos.find(t => t.id == id);
+                todo.done = currentDone;
+                await api.post(`/todos/${id}`, todo);
+                renderTodos();
+            } catch (error) {
+                log(`Fail to set todo:${id}, ${error}`, 'error');
+            }
+        }
+        function escapeHtml(text) {
+            if (!text) return '';
+            return text
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+        function renderTodos() {
+            if (!state.todos || state.todos.length === 0) {
+                els.todosList.innerHTML = '<div class="text-gray-500 text-sm p-4 text-center">暂无待办事项</div>';
+                return;
+            }
+
+            els.todosList.innerHTML = state.todos.map(t => {
+                const isDone = t.done;
+                const displayDesc = t.content || 'null';
+
+                const textClass = isDone ? "text-gray-500 line-through decoration-gray-500" : "text-white";
+                const bgClass = isDone ? "bg-slate-900/50" : "bg-slate-900";
+
+                return `
+            <div class="flex items-center justify-between ${bgClass} p-3 rounded-lg text-sm mb-2 transition-all duration-200 border border-slate-800 hover:border-slate-700">
+                <div class="flex items-center gap-3 flex-1 overflow-hidden cursor-pointer" onclick="doneTodo(${t.id}, ${isDone})">
+                    <div class="flex-shrink-0 w-5 h-5 rounded border flex items-center justify-center transition-colors ${isDone ? 'bg-green-600 border-green-600' : 'border-gray-500 hover:border-gray-400'}">
+                        ${isDone ? '<svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>' : ''}
+                    </div>
+                    
+                    <span class="flex-1 overflow-hidden">
+                        ${displayDesc ? `<p class="text-gray-400 truncate text-xs ${isDone ? 'opacity-50' : 'opacity-100'}">${escapeHtml(displayDesc)}</p>` : ''}
+                    </span>
+                </div>
+                
+                <button 
+                    onclick="event.stopPropagation(); deleteTodo(${t.id})" 
+                    class="ml-2 px-3 py-1.5 bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white rounded text-xs transition-all border border-red-900/50"
+                >
+                    Delete
+                </button>
+            </div>
+        `;
+            }).join('');
+        }
+
+        async function loadChannels() { const res = await api.get('/channels'); state.channels = res.data || []; renderChannels(); }
+        function renderChannels() {
+            els.channelsList.innerHTML = state.channels.map(c => `<div class="p-2 hover:bg-slate-700 rounded cursor-pointer text-sm"># ${c.name}</div>`).join('');
+        }
+
+        init();
+    </script>
+</body>
+
+</html>

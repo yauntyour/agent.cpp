@@ -6,10 +6,13 @@
 #include <vector>
 #include <algorithm>
 #include <random>
+#include <list>
 #include <stdio.h>
 #include <unistd.h>
 #include <curl/curl.h>
 #include <nlohmann/json.hpp>
+
+#include "base64.hpp"
 
 // 提取所有 <tag>...<\tag> 内容的线性迭代器
 std::vector<std::string_view> extractAllTags(std::string_view text, std::string tag)
@@ -181,7 +184,8 @@ namespace tool_unit
 {
     void appendFile(const std::string &path, const std::string &content)
     {
-        std::ofstream file(path, std::ios::app);
+        std::cout << "INFO - appendFile('" << path << "')" << std::endl;
+        std::ofstream file(path, std::ios::binary | std::ios::app);
         if (!file.is_open())
         {
             throw "Fail to open/create file:'" + path + "'";
@@ -213,7 +217,8 @@ namespace tool_unit
     }
     std::string readFile(const std::string &path)
     {
-        std::ifstream file(path, std::ios::binary);
+        std::cout << "INFO - readFile('" << path << "')" << std::endl;
+        std::ifstream file(path, std::ios::binary | std::ios::in);
         if (!file)
             throw "Error: No such file or directory in path:" + path;
         std::string content((std::istreambuf_iterator<char>(file)),
@@ -224,7 +229,8 @@ namespace tool_unit
     }
     void writeFile(const std::string &path, const std::string &content)
     {
-        std::ofstream file(path, std::ios::binary);
+        std::cout << "INFO - writeFile('" << path << "')" << std::endl;
+        std::ofstream file(path, std::ios::binary | std::ios::out);
         if (!file.is_open())
         {
             throw "Error: Could not create the file:" + path;
@@ -232,7 +238,7 @@ namespace tool_unit
         file.write(content.data(), content.size());
         if (file.fail())
         {
-            throw "Fail append to file:'" + path + "'";
+            throw "Fail write to file:'" + path + "'";
         }
         file.close();
     }
@@ -243,6 +249,20 @@ namespace tool_unit
         net_unit::CURL_get(curl, URL, buf);
         return buf;
     }
+    std::string Image(const std::string &path)
+    {
+        std::cout << "INFO - Image('" << path << "')" << std::endl;
+        std::ifstream file(path, std::ios::binary | std::ios::in);
+        if (!file)
+            throw "Error: No such file or directory in path:" + path;
+        std::string content((std::istreambuf_iterator<char>(file)),
+                            std::istreambuf_iterator<char>());
+
+        file.close();
+        auto base = base64::to_base64(content);
+        return base;
+    }
+    std::list<std::string> image_queue;
     bool tools_scan(std::string &context, std::string &data)
     {
         auto arr = extractAllTags(context, "tool");
@@ -250,6 +270,7 @@ namespace tool_unit
         {
             return false;
         }
+        data += "\n```\n";
         for (auto &ctx : arr)
         {
             auto [name, args] = parseArgs(ctx);
@@ -271,6 +292,20 @@ namespace tool_unit
                 try
                 {
                     data += readFile(std::string(args));
+                    data += "\n[TOOL_DONE]\n";
+                }
+                catch (const std::exception &e)
+                {
+                    data += e.what();
+                    data += "\n[TOOL_ERR]\n";
+                }
+            }
+            else if (name == "Image")
+            {
+                try
+                {
+                    image_queue.push_back(Image(std::string(args)));
+                    data += "[Image has read done]";
                     data += "\n[TOOL_DONE]\n";
                 }
                 catch (const std::exception &e)
@@ -320,6 +355,7 @@ namespace tool_unit
                 }
             }
         }
+        data += "\n```\n";
         return true;
     }
 } // namespace tool_unit
@@ -512,6 +548,7 @@ namespace cs_unit
         {
             return false;
         }
+        data += "```\n";
         for (auto &tag : arr)
         {
             auto [name, args] = parseArgs(tag);
@@ -524,6 +561,7 @@ namespace cs_unit
                 }
             }
         }
+        data += "\n```\n";
         return true;
     }
 } // namespace cs_unit

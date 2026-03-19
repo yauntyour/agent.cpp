@@ -29,14 +29,16 @@
         ⚠️You must ask the master to confirm the execution of the tool.
     Basic tools can be used in the following format:
         - exec:<command>:Execute commands with the privileges of the current service, <command> is the command to execute.
-        - read:<filepath>: Read data from any file, <filepath> is the path of the file to be read
+        - Image:<filepath>: Read the image, <filepath> is the path of the image file to be read. If you want to read a image or media file, please use the Image tool.
+        - read:<filepath>: Read data from any text-file, <filepath> is the path of the file to be read but only the text file can be read.
         - write:<filepath>|<data>: Write data to any file, <filepath> is the path of the file to be written,<data> is the data to be written
         - wget:<URL>: Use CURL to send a GET request to fetch data with the <URL>.
     Example:
         <tool>exec:pip list</tool>
+        <tool>Image:test.jpg</tool>
         <tool>write:exp/data.txt|Hi</tool>
         <tool>read:data.txt</tool>
-        <tool>wget:https://https://cn.bing.com/</tool>
+        <tool>wget:url</tool>
         ...
 
 8. CS command can be requested to provide the status of the system state by sending the following command:
