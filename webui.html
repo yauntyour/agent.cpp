@@ -4,9 +4,9 @@
 <head>
     <meta charset="utf-8" />
     <meta content="width=device-width, initial-scale=1.0" name="viewport" />
-    <title>Chat WebUI</title>
+    <title>Chat WebUI · 深度思考可见</title>
     <link rel="icon"
-        href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚀</text></svg>">
+        href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧠</text></svg>">
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <script src="https://image.uc.cn/s/uae/g/3n/mos-production/fontawesome-free-7.1.0-web/js/all.min.js"></script>
     <link href="https://image.uc.cn/s/uae/g/3n/mos-production/fontawesome-free-7.1.0-web/css/fontawesome.min.css"
@@ -55,18 +55,15 @@
         /* --- 核心：Markdown 颜色优化 --- */
         .prose {
             color: #ffffff !important;
-            /* 普通消息文字设为纯白 */
             max-width: none;
             line-height: 1.6;
         }
 
-        /* 链接颜色 */
         .prose a {
             color: #60a5fa;
             text-decoration: underline;
         }
 
-        /* 引用块样式 (Blockquote) */
         .prose blockquote {
             border-left: 4px solid #3b82f6;
             background-color: #1e293b;
@@ -76,20 +73,16 @@
             font-style: italic;
         }
 
-        /* 列表点号颜色 */
         .prose ul>li::marker,
         .prose ol>li::marker {
             color: #60a5fa;
         }
 
-        /* 粗体字优化 */
         .prose strong {
             color: #60a5fa;
-            /* 粗体稍微带点蓝色，更显眼 */
             font-weight: 700;
         }
 
-        /* 代码块容器 */
         .prose pre {
             background-color: #020617 !important;
             padding: 1.25em 1em;
@@ -100,10 +93,8 @@
             border: 1px solid #334155;
         }
 
-        /* 行内代码样式 */
         .prose code {
             color: #fbbf24;
-            /* 行内代码使用琥珀色，对比度高 */
             background-color: #1e293b;
             padding: 0.2em 0.4em;
             border-radius: 0.25em;
@@ -111,14 +102,12 @@
             font-size: 0.9em;
         }
 
-        /* 预格式化块内的代码文字 */
         .prose pre code {
             background-color: transparent;
             padding: 0;
             color: #e2e8f0;
         }
 
-        /* 复制按钮样式 */
         .copy-btn {
             position: absolute;
             top: 8px;
@@ -143,7 +132,57 @@
             color: #ffffff;
         }
 
-        /* --- 其他 UI 组件 --- */
+        /* 深度思考区域样式 */
+        .think-container {
+            background: #0f172a;
+            border-left: 4px solid #3b82f6;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+            padding: 0.5rem 0.75rem;
+            font-size: 0.8rem;
+        }
+
+        .think-summary {
+            font-size: 0.75rem;
+            font-weight: 500;
+            color: #93c5fd;
+            cursor: pointer;
+            user-select: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .think-summary i {
+            font-size: 0.7rem;
+            transition: transform 0.2s;
+        }
+
+        details[open] .think-summary i {
+            transform: rotate(90deg);
+        }
+
+        .think-steps {
+            margin-top: 0.5rem;
+            padding-left: 0.75rem;
+            border-top: 1px solid #334155;
+            padding-top: 0.5rem;
+        }
+
+        .think-step {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+            color: #cbd5e6;
+            line-height: 1.4;
+        }
+
+        .think-step-marker {
+            font-weight: 600;
+            color: #60a5fa;
+            font-family: monospace;
+        }
+
         .loader {
             border: 3px solid #f3f3f3;
             border-radius: 50%;
@@ -178,6 +217,25 @@
         .toast-enter {
             animation: slideIn 0.3s ease-out forwards;
         }
+
+        /* 打字光标动画 */
+        .typing-cursor::after {
+            content: "▋";
+            animation: blink 1s step-end infinite;
+            margin-left: 2px;
+        }
+
+        @keyframes blink {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0;
+            }
+        }
     </style>
 </head>
 
@@ -185,9 +243,9 @@
     <div class="fixed inset-0 bg-slate-900 z-50 flex items-center justify-center" id="login-screen">
         <div class="bg-slate-800 p-8 rounded-lg shadow-2xl w-full max-w-md border border-slate-700">
             <div class="text-center mb-6">
-                <i class="fa-solid fa-robot text-4xl text-blue-600 mb-2"></i>
+                <i class="fa-solid fa-brain text-4xl text-blue-600 mb-2"></i>
                 <h1 class="text-2xl font-bold text-white">Login</h1>
-                <p class="text-slate-400 text-sm">Please sign in to continue</p>
+                <p class="text-slate-400 text-sm">Deep Think enabled · 洞察每一步</p>
             </div>
             <form class="space-y-4" id="login-form">
                 <div>
@@ -259,8 +317,8 @@
             <div class="flex-1 overflow-y-auto p-4 space-y-4" id="messages-container">
                 <div class="flex justify-center mt-10">
                     <div class="text-center text-slate-500">
-                        <i class="fa-solid fa-comments text-4xl mb-3 opacity-50"></i>
-                        <p>Select a session or start a new conversation.</p>
+                        <i class="fa-solid fa-brain text-4xl mb-3 opacity-50"></i>
+                        <p>WebUI Powered by Yauntyours</p>
                     </div>
                 </div>
             </div>
@@ -270,7 +328,7 @@
                     class="relative bg-slate-900 rounded-lg border border-slate-700 focus-within:border-blue-600 transition">
                     <textarea
                         class="w-full bg-transparent text-white p-3 pr-12 resize-none focus:outline-none max-h-48 overflow-y-auto"
-                        id="user-input" placeholder="Type a message..." rows="1"></textarea>
+                        id="user-input" placeholder="输入消息..." rows="1"></textarea>
                     <button class="absolute right-2 bottom-2 text-blue-500 hover:text-blue-400 p-1 rounded transition"
                         id="send-btn" title="send-btn">
                         <i class="fa-solid fa-paper-plane text-xl"></i>
@@ -289,7 +347,7 @@
                         </div>
                         <span class="text-xs text-slate-400">Deep Think</span>
                     </div>
-                    <div class="text-xs text-slate-500" id="input-hint">Press Enter to send</div>
+                    <div class="text-xs text-slate-500" id="input-hint">↵ 发送消息</div>
                 </div>
             </div>
         </main>
@@ -378,6 +436,8 @@
 
         // --- DOM Elements ---
         const els = {
+            username: document.getElementById('username'),
+            password: document.getElementById('password'),
             loginScreen: document.getElementById('login-screen'),
             loginForm: document.getElementById('login-form'),
             loginBtnText: document.getElementById('login-btn-text'),
@@ -437,19 +497,16 @@
             els.systemLogs.scrollTop = els.systemLogs.scrollHeight;
         }
 
-        // --- NEW: 代码块复制功能 ---
         function attachCopyButtons(container) {
+            if (!container) return;
             const preBlocks = container.querySelectorAll('pre');
             preBlocks.forEach(pre => {
-                // 如果已经有按钮了就不重复添加
                 if (pre.querySelector('.copy-btn')) return;
-
                 const btn = document.createElement('button');
                 btn.className = 'copy-btn';
                 btn.innerText = 'Copy';
-
                 btn.onclick = () => {
-                    const code = pre.querySelector('code').innerText;
+                    const code = pre.querySelector('code')?.innerText || '';
                     navigator.clipboard.writeText(code).then(() => {
                         btn.innerText = 'Copied!';
                         btn.classList.add('text-green-400');
@@ -463,19 +520,221 @@
             });
         }
 
+        function renderFixCodeBlock(text) {
+            if (!text) return text;
+            // 匹配 <cs> 和 </cs> 之间的任意内容（包括换行）
+            output = text.replace(/<cs>([\s\S]*?)<\/cs>/g, function (match, codeContent) {
+                // 将捕获的内容格式化为 markdown 代码块（无语言标记）
+                return '```yaml\n' + codeContent + '\n```';
+            });
+            output = text.replace(/<tool>([\s\S]*?)<\/tool>/g, function (match, codeContent) {
+                // 将捕获的内容格式化为 markdown 代码块（无语言标记）
+                return '```yaml\n' + codeContent + '\n```';
+            });
+            return output;
+        }
+
         // --- API Service ---
         const api = axios.create({ baseURL: API_BASE, headers: { 'Content-Type': 'application/json' } });
         api.interceptors.request.use(config => {
             if (state.token) config.headers['Authorization'] = `Bearer ${state.token}`;
             return config;
         });
-
         api.interceptors.response.use(response => response, error => {
             if (error.response && error.response.status === 401) { logout(); }
             return Promise.reject(error);
         });
 
-        // --- Core Functions ---
+        // --- 构建带深度思考区域的AI消息DOM (核心新增)---
+        function buildAiMessageStructure(thinkArray, responseContent, thinkEnabled) {
+            const bubbleDiv = document.createElement('div');
+            bubbleDiv.className = 'bg-slate-800 border border-slate-700 px-4 py-2 rounded-lg shadow-md message-bubble w-full';
+
+            // 思考区域 (仅在开关开启且有内容时显示)
+            if (thinkEnabled && thinkArray && Array.isArray(thinkArray) && thinkArray.length > 0) {
+                const thinkContainer = document.createElement('div');
+                thinkContainer.className = 'think-container mb-3';
+                const details = document.createElement('details');
+                details.open = false;
+                const summary = document.createElement('summary');
+                summary.className = 'think-summary text-xs font-medium text-blue-300 cursor-pointer list-none';
+                summary.innerHTML = '<i class="fa-solid fa-chevron-right text-[10px]"></i> 🧠 深度思考轨迹 · 点击展开推理细节';
+                details.appendChild(summary);
+                const stepsWrapper = document.createElement('div');
+                stepsWrapper.className = 'think-steps mt-2';
+                thinkArray.forEach((step, idx) => {
+                    const stepDiv = document.createElement('div');
+                    stepDiv.className = 'think-step';
+                    stepDiv.innerHTML = `<span class="think-step-marker">${idx + 1}.</span><span>${escapeHtml(String(step))}</span>`;
+                    stepsWrapper.appendChild(stepDiv);
+                });
+                details.appendChild(stepsWrapper);
+                thinkContainer.appendChild(details);
+                bubbleDiv.appendChild(thinkContainer);
+            }
+
+            // 回复内容区域
+            const proseDiv = document.createElement('div');
+            proseDiv.className = 'prose prose-sm max-w-none';
+            if (responseContent) {
+                proseDiv.innerHTML = marked.parse(renderFixCodeBlock(responseContent));
+                attachCopyButtons(proseDiv);
+            } else {
+                proseDiv.innerHTML = '<span class="typing-cursor">思考中...</span>';
+            }
+            bubbleDiv.appendChild(proseDiv);
+            return bubbleDiv;
+        }
+
+        // 更新已存在的AI消息 (替换占位内容)
+        function updateAiMessageWithThink(messageId, responseContent, thinkArray, useStream = false) {
+            const msgContainer = document.getElementById(`msg-${messageId}`);
+            if (!msgContainer) return;
+            const bubbleWrapper = msgContainer.querySelector('.message-bubble')?.parentElement;
+            if (!bubbleWrapper) return;
+            const oldBubble = bubbleWrapper.querySelector('.bg-slate-800');
+            if (!oldBubble) return;
+
+            const shouldShowThink = state.thinkMode && thinkArray && thinkArray.length > 0;
+            const newBubble = buildAiMessageStructure(shouldShowThink ? thinkArray : [], responseContent, shouldShowThink);
+            oldBubble.replaceWith(newBubble);
+
+            const proseArea = newBubble.querySelector('.prose');
+            if (useStream && responseContent) {
+                // 流式模式: 清空并模拟打字
+                proseArea.innerHTML = '';
+                simulateTypingToElement(proseArea, responseContent);
+            } else if (responseContent) {
+                proseArea.innerHTML = marked.parse(renderFixCodeBlock(responseContent));
+                attachCopyButtons(proseArea);
+            }
+            // 滚动到底部
+            els.messagesContainer.scrollTop = els.messagesContainer.scrollHeight;
+        }
+
+        function simulateTypingToElement(element, fullText) {
+            element.innerHTML = '';
+            let idx = 0;
+            const interval = setInterval(() => {
+                const partial = fullText.substring(0, idx);
+                element.innerHTML = marked.parse(renderFixCodeBlock(partial));
+                attachCopyButtons(element);
+                els.messagesContainer.scrollTop = els.messagesContainer.scrollHeight;
+                idx += 2;
+                if (idx >= fullText.length) {
+                    clearInterval(interval);
+                    element.innerHTML = marked.parse(renderFixCodeBlock(fullText));
+                    attachCopyButtons(element);
+                }
+            }, 18);
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str.replace(/[&<>]/g, function (m) {
+                if (m === '&') return '&amp;';
+                if (m === '<') return '&lt;';
+                if (m === '>') return '&gt;';
+                return m;
+            }).replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, function (c) {
+                return c;
+            });
+        }
+
+        // --- 原有 addMessageToUI 保留用于历史消息，不包含思考内容 ---
+        function addMessageToUI(role, content, id = null) {
+            const div = document.createElement('div');
+            div.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'}`;
+            if (id) div.id = `msg-${id}`;
+            const emoji = role === 'user' ? '⭐' : '💖';
+            const bubbleClass = role === 'user' ? 'bg-blue-600 text-white' : 'bg-slate-800 border border-slate-700 text-slate-200';
+            const innerContent = role === 'user' ? content.replace(/\n/g, '<br>') : marked.parse(renderFixCodeBlock(content));
+            div.innerHTML = `
+                <div class="flex max-w-[85%] ${role === 'user' ? 'flex-row-reverse space-x-reverse' : 'flex-row'} items-start space-x-3 min-w-0">
+                    <div class="w-8 h-8 rounded flex-shrink-0 flex items-center justify-center ${role === 'user' ? 'bg-blue-500' : 'bg-slate-700'} text-lg">
+                        ${emoji}
+                    </div>
+                    <div class="${bubbleClass} px-4 py-2 rounded-lg shadow-md message-bubble">
+                        <div class="prose prose-sm">${innerContent}</div>
+                    </div>
+                </div>
+            `;
+            els.messagesContainer.appendChild(div);
+            els.messagesContainer.scrollTop = els.messagesContainer.scrollHeight;
+            if (role === 'ai' && !id) attachCopyButtons(div.querySelector('.prose'));
+        }
+
+        // 历史消息渲染 (无思考区)
+        function renderMessages() {
+            els.messagesContainer.innerHTML = '';
+            state.messages.forEach(m => addMessageToUI(m.role, m.content));
+        }
+
+        // --- API 交互增强: 发送消息 + 深度思考渲染 ---
+        async function sendMessage() {
+            const content = els.userInput.value.trim();
+            if (!content || state.isTyping || !state.currentSessionId) return;
+
+            addMessageToUI('user', content);
+            els.userInput.value = '';
+            state.isTyping = true;
+
+            const aiMessageId = Date.now();
+            addMessageToUI('ai', '<span class="typing-cursor">Thinking...</span>', aiMessageId);
+
+            try {
+                const res = await api.post('/input', {
+                    messages: content,
+                    model: state.currentModel,
+                    think: state.thinkMode
+                });
+
+                // 解析新版响应格式: { model, messages: [ {type, content} ] }
+                let responseContent = '';
+                let thinkArray = [];
+                if (res.data && Array.isArray(res.data.messages)) {
+                    for (const item of res.data.messages) {
+                        if (item.type === 'response') responseContent = item.content || '';
+                        else if (item.type === 'think') {
+                            let raw = item.content;
+                            if (Array.isArray(raw)) thinkArray = raw;
+                            else if (typeof raw === 'string') thinkArray = [raw];
+                            else thinkArray = [];
+                        }
+                    }
+                } else if (res.data && res.data.messages && res.data.messages[0] && res.data.messages[0].content) {
+                    // 兼容旧格式
+                    responseContent = res.data.messages[0].content;
+                    thinkArray = [];
+                } else {
+                    responseContent = "无法解析响应格式";
+                }
+
+                // 更新state.messages (存储纯回复内容，思考内容仅当次展示)
+                state.messages.push({ role: 'ai', content: responseContent });
+
+                // 更新UI: 思考区根据当前thinkMode显示
+                const useStream = state.settings.stream;
+                updateAiMessageWithThink(aiMessageId, responseContent, thinkArray, useStream);
+
+                log(`AI响应完成，思考步骤: ${thinkArray.length}步`, 'success');
+            } catch (error) {
+                console.error(error);
+                const errorMsg = error.response?.data?.error || '请求失败';
+                const msgDiv = document.getElementById(`msg-${aiMessageId}`);
+                if (msgDiv) {
+                    const prose = msgDiv.querySelector('.prose');
+                    if (prose) prose.innerHTML = `<span class="text-red-400">❌ ${escapeHtml(errorMsg)}</span>`;
+                } else {
+                    addMessageToUI('ai', `错误: ${errorMsg}`);
+                }
+                log(`发送失败: ${errorMsg}`, 'error');
+            } finally {
+                state.isTyping = false;
+            }
+        }
+
+        // --- 其余原有逻辑 (登录, sessions, models, todos等，保持兼容)---
         async function init() {
             if (state.token) {
                 els.loginScreen.classList.add('hidden');
@@ -511,15 +770,17 @@
             }
         }
 
-        function logout() {
-            localStorage.clear();
-            location.reload();
-        }
+        function logout() { localStorage.clear(); location.reload(); }
 
         async function getModels() {
             try {
                 const response = await api.get('/models');
-                state.models = (response.data.models || []).map(m => typeof m === 'string' ? { name: m, available: true } : m);
+                state.models = (response.data.data || []).map(m => ({
+                    id: m.id,
+                    name: m.aliases?.[0] || m.id,
+                    available: m.status?.value === 'loaded',
+                    details: m
+                }));
                 renderModels();
             } catch (error) { log('Failed to load models', 'error'); }
         }
@@ -527,19 +788,16 @@
         function renderModels() {
             els.modelDropdownList.innerHTML = '';
             if (!state.currentModel && state.models.length > 0) {
-                const model_has_selected = false;
+                let selected = false;
                 for (const model of state.models) {
                     if (model.name === state.settings.ollama_default_model) {
                         selectModel(model.name, true);
-                        model_has_selected = true;
+                        selected = true;
                         break;
                     }
                 }
-                if (!model_has_selected) {
-                    selectModel(state.models[0].name, state.models[0].available !== false);
-                }
+                if (!selected) selectModel(state.models[0].name, state.models[0].available !== false);
                 log(`Default Model: ${state.settings.ollama_default_model}`, 'success');
-                log(`Selected Model: ${state.currentModel}`, 'success');
             }
             state.models.forEach(model => {
                 const isAvailable = model.available !== false;
@@ -583,103 +841,23 @@
             renderMessages();
         }
 
-        async function sendMessage() {
-            const content = els.userInput.value.trim();
-            if (!content || state.isTyping || !state.currentSessionId) return;
-
-            addMessageToUI('user', content);
-            els.userInput.value = '';
-            state.isTyping = true;
-
-            const aiMessageId = Date.now();
-            addMessageToUI('ai', '<span class="typing">Thinking...</span>', aiMessageId);
-
-            try {
-                const res = await api.post('/input', { messages: content, model: state.currentModel, think: state.thinkMode });
-                const aiContent = res.data.messages[0].content;
-                const messageEl = document.querySelector(`#msg-${aiMessageId} .prose`);
-
-                if (state.settings.stream) {
-                    simulateTyping(messageEl, aiContent);
-                } else {
-                    messageEl.innerHTML = marked.parse(aiContent);
-                    attachCopyButtons(messageEl); // 静态渲染后绑定按钮
-                }
-            } catch (error) {
-                document.querySelector(`#msg-${aiMessageId} .prose`).innerHTML = '<span class="text-red-400">Error.</span>';
-            } finally {
-                state.isTyping = false;
-            }
-        }
-
-        function simulateTyping(el, text) {
-            el.innerHTML = '';
-            let i = 0;
-            const interval = setInterval(() => {
-                el.innerHTML = marked.parse(text.substring(0, i));
-                els.messagesContainer.scrollTop = els.messagesContainer.scrollHeight;
-                i += 3;
-                if (i > text.length) {
-                    clearInterval(interval);
-                    el.innerHTML = marked.parse(text);
-                    attachCopyButtons(el); // 动态渲染结束后绑定按钮
-                }
-            }, 15);
-        }
-
-        function addMessageToUI(role, content, id = null) {
-            const div = document.createElement('div');
-            div.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'}`;
-            if (id) div.id = `msg-${id}`;
-
-            const bubbleClass = role === 'user' ? 'bg-blue-600 text-white' : 'bg-slate-800 border border-slate-700 text-slate-200';
-
-            // --- 自定义 Emoji 逻辑 ---
-            const emoji = role === 'user' ? '⭐' : '💖';
-
-            div.innerHTML = `
-        <div class="flex max-w-[85%] ${role === 'user' ? 'flex-row-reverse space-x-reverse' : 'flex-row'} items-start space-x-3 min-w-0">
-            <div class="w-8 h-8 rounded flex-shrink-0 flex items-center justify-center ${role === 'user' ? 'bg-blue-500' : 'bg-slate-700'} text-lg">
-                ${emoji}
-            </div>
-            <div class="${bubbleClass} px-4 py-2 rounded-lg shadow-md message-bubble">
-                <div class="prose prose-sm">
-                    ${role === 'user' ? content.replace(/\n/g, '<br>') : marked.parse(content)}
-                </div>
-            </div>
-        </div>
-    `;
-            els.messagesContainer.appendChild(div);
-            els.messagesContainer.scrollTop = els.messagesContainer.scrollHeight;
-
-            if (role === 'ai' && !id) {
-                attachCopyButtons(div.querySelector('.prose'));
-            }
-        }
-
-        function renderMessages() {
-            els.messagesContainer.innerHTML = '';
-            state.messages.forEach(m => addMessageToUI(m.role, m.content));
-        }
-
-        // --- 剩下的基础逻辑 (Settings/Todos/etc) ---
         async function loadSettings() {
             const response = await api.get('/models');
             state.settings.ollama_default_model = response.data.ollama_default_model;
             state.settings.stream = response.data.stream;
             els.streamToggle.checked = state.settings.stream;
         }
+
         els.streamToggle.onchange = (e) => state.settings.stream = e.target.checked;
         els.thinkToggle.onchange = (e) => state.thinkMode = e.target.checked;
         els.newSessionBtn.onclick = async () => {
             const res = await api.post('/new');
             if (res.data.status === 'OK') {
                 state.sessions.push(res.data.session_id);
-                switchSession(res.data.session_id);
+                await switchSession(res.data.session_id);
                 renderSessions();
             }
         };
-
         els.tabBtns.forEach(btn => {
             btn.onclick = () => {
                 els.tabBtns.forEach(b => b.classList.replace('text-blue-400', 'text-slate-400'));
@@ -688,7 +866,6 @@
                 document.getElementById(`tab-${btn.dataset.tab}`).classList.remove('hidden');
             };
         });
-
         els.userInput.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } };
         els.sendBtn.onclick = sendMessage;
         els.loginForm.onsubmit = (e) => { e.preventDefault(); login(els.username.value, els.password.value); };
@@ -697,91 +874,17 @@
         els.logoutBtn.onclick = logout;
 
         async function loadTools() { const res = await api.get('/tools'); state.tools = res.data || []; renderTools(); }
-        function renderTools() {
-            els.toolsList.innerHTML = state.tools.map(t => `<div class="bg-slate-900 p-2 rounded border border-slate-700"><div class="text-blue-400 text-sm">${t.name}</div><div class="text-xs text-slate-500">${t.description}</div></div>`).join('');
-        }
-
+        function renderTools() { els.toolsList.innerHTML = state.tools.map(t => `<div class="bg-slate-900 p-2 rounded border border-slate-700"><div class="text-blue-400 text-sm">${t.name}</div><div class="text-xs text-slate-500">${t.description}</div></div>`).join(''); }
         async function loadTodos() { const res = await api.get('/todos'); state.todos = res.data || []; renderTodos(); }
-        async function deleteTodo(id) {
-            if (!confirm('Are you sure to delete this todo?')) return;
-            try {
-                await api.get(`/todos/delete/${id}`);
-                state.todos = state.todos.filter(t => t.id != id);
-                renderTodos();
-            } catch (error) {
-                log(`Fail to delete todo:${id}, ${error}`, 'error');
-            }
-        }
-        els.addTodoBtn.onclick = async () => {
-            try {
-                const response = await api.post('/todos/new', { id: String(Date.now()), done: false, content: els.newTodoInput.value });
-                state.todos.push(response.data);
-                renderTodos();
-                els.newTodoInput.value = '';
-            } catch (error) {
-                log(`Fail to new todo, ${error}`, 'error');
-            }
-        }
-        async function doneTodo(id, isDone) {
-            const currentDone = !isDone;
-            try {
-                const todo = state.todos.find(t => t.id == id);
-                todo.done = currentDone;
-                await api.post(`/todos/${id}`, todo);
-                renderTodos();
-            } catch (error) {
-                log(`Fail to set todo:${id}, ${error}`, 'error');
-            }
-        }
-        function escapeHtml(text) {
-            if (!text) return '';
-            return text
-                .replace(/&/g, "&amp;")
-                .replace(/</g, "&lt;")
-                .replace(/>/g, "&gt;")
-                .replace(/"/g, "&quot;")
-                .replace(/'/g, "&#039;");
-        }
+        window.deleteTodo = async function (id) { if (!confirm('删除待办?')) return; await api.get(`/todos/delete/${id}`); state.todos = state.todos.filter(t => t.id != id); renderTodos(); };
+        window.doneTodo = async function (id, isDone) { const todo = state.todos.find(t => t.id == id); if (todo) { todo.done = !isDone; await api.post(`/todos/${id}`, todo); renderTodos(); } };
+        els.addTodoBtn.onclick = async () => { if (!els.newTodoInput.value.trim()) return; const res = await api.post('/todos/new', { id: String(Date.now()), done: false, content: els.newTodoInput.value }); state.todos.push(res.data); renderTodos(); els.newTodoInput.value = ''; };
         function renderTodos() {
-            if (!state.todos || state.todos.length === 0) {
-                els.todosList.innerHTML = '<div class="text-gray-500 text-sm p-4 text-center">暂无待办事项</div>';
-                return;
-            }
-
-            els.todosList.innerHTML = state.todos.map(t => {
-                const isDone = t.done;
-                const displayDesc = t.content || 'null';
-
-                const textClass = isDone ? "text-gray-500 line-through decoration-gray-500" : "text-white";
-                const bgClass = isDone ? "bg-slate-900/50" : "bg-slate-900";
-
-                return `
-            <div class="flex items-center justify-between ${bgClass} p-3 rounded-lg text-sm mb-2 transition-all duration-200 border border-slate-800 hover:border-slate-700">
-                <div class="flex items-center gap-3 flex-1 overflow-hidden cursor-pointer" onclick="doneTodo(${t.id}, ${isDone})">
-                    <div class="flex-shrink-0 w-5 h-5 rounded border flex items-center justify-center transition-colors ${isDone ? 'bg-green-600 border-green-600' : 'border-gray-500 hover:border-gray-400'}">
-                        ${isDone ? '<svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>' : ''}
-                    </div>
-                    
-                    <span class="flex-1 overflow-hidden">
-                        ${displayDesc ? `<p class="text-gray-400 truncate text-xs ${isDone ? 'opacity-50' : 'opacity-100'}">${escapeHtml(displayDesc)}</p>` : ''}
-                    </span>
-                </div>
-                
-                <button 
-                    onclick="event.stopPropagation(); deleteTodo(${t.id})" 
-                    class="ml-2 px-3 py-1.5 bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white rounded text-xs transition-all border border-red-900/50"
-                >
-                    Delete
-                </button>
-            </div>
-        `;
-            }).join('');
+            if (!state.todos?.length) { els.todosList.innerHTML = '<div class="text-gray-500 text-sm p-4 text-center">暂无待办</div>'; return; }
+            els.todosList.innerHTML = state.todos.map(t => `<div class="flex items-center justify-between bg-slate-900 p-3 rounded-lg text-sm mb-2 border border-slate-800"><div class="flex items-center gap-3 flex-1 cursor-pointer" onclick="doneTodo(${t.id}, ${t.done})"><div class="w-5 h-5 rounded border flex items-center justify-center ${t.done ? 'bg-green-600 border-green-600' : 'border-gray-500'}">${t.done ? '<svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>' : ''}</div><p class="text-gray-300 truncate ${t.done ? 'line-through opacity-60' : ''}">${escapeHtml(t.content)}</p></div><button onclick="event.stopPropagation(); deleteTodo(${t.id})" class="bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white px-3 py-1 rounded text-xs">删除</button></div>`).join('');
         }
-
         async function loadChannels() { const res = await api.get('/channels'); state.channels = res.data || []; renderChannels(); }
-        function renderChannels() {
-            els.channelsList.innerHTML = state.channels.map(c => `<div class="p-2 hover:bg-slate-700 rounded cursor-pointer text-sm"># ${c.name}</div>`).join('');
-        }
+        function renderChannels() { els.channelsList.innerHTML = state.channels.map(c => `<div class="p-2 hover:bg-slate-700 rounded cursor-pointer text-sm"># ${c.name}</div>`).join(''); }
 
         init();
     </script>

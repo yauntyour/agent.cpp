@@ -362,6 +362,51 @@ namespace tool_unit
 
 namespace LLMProviders
 {
+    /**
+     * @brief 专为本地 llama.cpp 服务器设计的客户端
+     * @note  llama.cpp 默认端口通常是 8080，API 接口兼容 OpenAI 格式
+     */
+    class LlamaClient
+    {
+    private:
+        std::string base_url_; // 例如: "http://localhost:8080"
+        CURL *curl_;
+
+    public:
+        explicit LlamaClient(const std::string &base_url = "http://localhost:8080")
+            : base_url_(base_url), curl_(curl_easy_init())
+        {
+        }
+
+        ~LlamaClient()
+        {
+            if (curl_)
+            {
+                curl_easy_cleanup(curl_);
+            }
+        }
+
+        bool generate(const nlohmann::json &request, nlohmann::json &response)
+        {
+            std::string buf;
+            std::string url = base_url_ + "/chat/completions";
+
+            if (!net_unit::CURL_post(curl_, url.c_str(), request.dump(), buf, "Content-Type: application/json"))
+            {
+                return false;
+            }
+            try
+            {
+                response = nlohmann::json::parse(buf);
+                return true;
+            }
+            catch (...)
+            {
+                return false;
+            }
+        }
+    };
+
     class OllamaClient
     {
     private:

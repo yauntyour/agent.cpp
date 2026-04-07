@@ -21,14 +21,15 @@ namespace fs = std::filesystem;
 
 namespace app
 {
-    static json setting = json::parse(tool_unit::readFile("setting.json"));
-    static json::array_t tools_setting = json::parse(tool_unit::readFile("tools/tools.json"));
-    static std::string Admin_call;
+    static json setting = json::parse(tool_unit::readFile("D:\\Developments\\CXX\\Agent.cpp\\setting.json"));
+    static json::array_t tools_setting = json::parse(tool_unit::readFile("D:\\Developments\\CXX\\Agent.cpp\\tools/tools.json"));
+    static std::string Admin;
     static std::string system_prompt;
-    LLMProviders::OllamaClient client(setting["ollama_server"].get_ref<std::string &>());
+    static size_t im_token_len = sizeof("<|im_start|>\n<|im_end|>") - 1;
+    LLMProviders::LlamaClient client(setting["server_address"].get_ref<std::string &>());
 
     static std::mutex ctx_lock;
-    static std::string Agent_session_context;
+    static json Agent_session_context = json::array();
     std::vector<std::string> get_all_files(const std::string &root_dir)
     {
         std::vector<std::string> files;
@@ -78,9 +79,13 @@ namespace app
             }
             setting["password"] = to_hex_string(password_hash, SHA3_256_DIGEST_SIZE);
         }
-        Admin_call = setting["name"].get<std::string>() + ":";
+        Admin = setting["name"].get<std::string>();
         system_prompt = tool_unit::readFile(setting["prompt_path"].get_ref<std::string &>());
-        Agent_session_context = system_prompt;
+        Agent_session_context.push_back(
+            {
+                {"role", "system"},
+                {"content", system_prompt},
+            });
         return 0;
     }
 
@@ -182,7 +187,7 @@ namespace app
                 for (auto &ses : sessions)
                 {
                     std::cout << "Saving session: " << ses.first << std::endl;
-                    tool_unit::writeFile("sessions\\" + ses.first + ".json", ses.second->messages.dump());
+                    tool_unit::writeFile("D:\\Developments\\CXX\\Agent.cpp\\sessions\\" + ses.first + ".json", ses.second->messages.dump());
                 }
             }
             catch (const std::exception &e)
@@ -395,7 +400,9 @@ namespace app
     {
         json req;
         std::string model;
-        bool is_webui = true;
+        bool is_webui = false;
+        bool think_mode = false;
+        size_t images_size = 0;
         try
         {
             size_t header_end = input.find("\r\n\r\n");
@@ -411,33 +418,41 @@ namespace app
             model = request["model"].get<std::string>();
             if (model == "default")
             {
-                model = setting["ollama_default_model"];
+                model = setting["model"];
             }
 
+            auto session_ptr = agent_session_manager.get_current();
             if (request["channel"] == nullptr)
             {
-                agent_session_manager.get_current()->messages.push_back(Admin_call + user_message);
-                is_webui = false;
+                session_ptr->messages.push_back(Admin + ":" + user_message);
+                is_webui = true;
             }
 
-            ctx_lock.lock();
-            req = {
-                {"model", model},
-                {
-                    "prompt",
-                    Agent_session_context + Admin_call + user_message,
-                },
-                {"stream", true},
-                {"think", false}};
-            ctx_lock.unlock();
-            req["images"] = json::array();
+            json contents = json::array();
+            contents.push_back({{"type", "text"},
+                                {"text", user_message}});
             if (request["images"] != nullptr)
             {
                 for (auto &image : request["images"])
                 {
-                    req["images"].push_back(std::move(image.get_ref<std::string &>()));
+                    images_size += image.get_ref<std::string &>().size();
+                    contents.push_back({{"type", "image_url"},
+                                        {"image_url", {{"url", "data:image/jpeg;base64," + std::move(image.get_ref<std::string &>())}}}});
                 }
             }
+            ctx_lock.lock();
+            Agent_session_context.push_back({{"role", "user"},
+                                             {"content", std::move(contents)}});
+            ctx_lock.unlock();
+            think_mode = request["think"].get<bool>();
+            req = {
+                {"model", model},
+                {
+                    "messages",
+                    Agent_session_context,
+                },
+                {"stream", false},
+                {"think", think_mode}};
         }
         catch (const std::exception &e)
         {
@@ -446,53 +461,85 @@ namespace app
             return rt::FLAG_ERROR;
         }
 
-        std::string response;
-        std::string thinking;
-        client.stream_generate(req, response, thinking);
-        req["images"].clear();
-        std::string current = "\r\n" + thinking + "\r\n" + response + "\r\n";
+        json response;
+        json thinkings = json::array();
+
+        client.generate(req, response);
+        auto choices = response["choices"][0];
+
+        std::string current = "\r\n" + choices["message"]["content"].get<std::string>();
+        ctx_lock.lock();
+        Agent_session_context.push_back({{"role", setting["agent_nickname"]},
+                                         {"content", current}});
+        ctx_lock.unlock();
+        if (think_mode)
+        {
+            thinkings.push_back(choices["message"]["reasoning_content"].get<std::string>());
+        }
+
+        json sys_outs = json::array();
         std::string sys_out;
-        bool tool_flag = tool_unit::tools_scan(response, sys_out);
-        bool cs_flag = cs_unit::cs_scan(response, sys_out);
+        bool tool_flag = tool_unit::tools_scan(current, sys_out);
+        bool cs_flag = cs_unit::cs_scan(current, sys_out);
         if (cs_flag | tool_flag)
         {
             printf("Trigger command invocation at cs:%d tool: %d\n", cs_flag, tool_flag);
-            current += sys_out;
-            req["prompt"] = req["prompt"].get<std::string>() + current;
+            current += "\r\n" + sys_out;
+            sys_outs.push_back({{"type", "text"},
+                                {"text", sys_out}});
 
             if (!tool_unit::image_queue.empty())
             {
                 for (auto &img : tool_unit::image_queue)
                 {
-                    req["images"].push_back(std::move(img));
+                    images_size += img.size();
+                    sys_outs.push_back({{"type", "image_url"},
+                                        {"image_url", {{"url", "data:image/jpeg;base64," + std::move(img)}}}});
                 }
                 tool_unit::image_queue.clear();
             }
-
+            ctx_lock.lock();
+            Agent_session_context.push_back({{"role", "system"},
+                                             {"content", sys_outs}});
+            ctx_lock.unlock();
+            req.clear();
+            req = {
+                {"model", model},
+                {
+                    "messages",
+                    Agent_session_context,
+                },
+                {"stream", false},
+                {"think", think_mode}};
             response.clear();
-            thinking.clear();
-            client.stream_generate(req, response, thinking);
-            current += thinking + "\r\n" + response + "\r\n";
+            client.generate(req, response);
+            auto choices = response["choices"][0];
+            current += "\r\n" + choices["message"]["content"].get<std::string>();
+            thinkings.push_back(choices["message"]["reasoning_content"].get<std::string>());
+            ctx_lock.lock();
+            Agent_session_context.push_back({{"role", setting["agent_nickname"]},
+                                             {"content", choices["message"]["content"].get<std::string>()}});
+            ctx_lock.unlock();
         }
-        ctx_lock.lock();
-        Agent_session_context += current;
-        ctx_lock.unlock();
         if (is_webui)
         {
             agent_session_manager.get_current()->messages.push_back("context:" + current);
         }
+        size_t ctx_length = Agent_session_context.dump().length() + Agent_session_context.size() * im_token_len - images_size;
+        current += "\r\n" + std::format("\r\n[Number of characters (including im-tokens, excluding media file size): {}]", ctx_length);
 
-        size_t ctx_length = Agent_session_context.length();
-
-        current += std::format("\r\n[context length now: {}]", ctx_length);
-
-        output = build_http_response(200, "application/json", json{{"model", model}, {"messages", {{{"type", "response"}, {"content", current}}}}, {"stream", true}, {"think", false}}.dump());
+        output = build_http_response(200, "application/json", json{{"model", model}, {"messages", {{{"type", "response"}, {"content", current}}, {{"type", "think"}, {"content", thinkings}}}}, {"stream", false}, {"think", false}}.dump());
         return rt::FLAG_DONE;
     }
     int handle_session_clear(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
         ctx_lock.lock();
-        Agent_session_context = system_prompt;
+        Agent_session_context.clear();
+        Agent_session_context.push_back(
+            {
+                {"role", "system"},
+                {"content", system_prompt},
+            });
         ctx_lock.unlock();
 
         agent_session_manager.clear_current();
@@ -526,7 +573,12 @@ namespace app
     int handle_new_session(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
         ctx_lock.lock();
-        Agent_session_context = system_prompt;
+        Agent_session_context.clear();
+        Agent_session_context.push_back(
+            {
+                {"role", "system"},
+                {"content", system_prompt},
+            });
         ctx_lock.unlock();
 
         auto new_session = agent_session_manager.create();
@@ -651,7 +703,7 @@ namespace app
     {
         try
         {
-            json::array_t todos = json::parse(tool_unit::readFile("todos.json"));
+            json::array_t todos = json::parse(tool_unit::readFile("D:\\Developments\\CXX\\Agent.cpp\\todos.json"));
             output = build_http_response(200, "application/json", json(todos).dump());
             return rt::FLAG_DONE;
         }
@@ -693,13 +745,13 @@ namespace app
             std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
             json request = json::parse(body);
             std::string id = params.count("id") ? params.at("id") : "unknown";
-            json::array_t todos = json::parse(tool_unit::readFile("todos.json"));
+            json::array_t todos = json::parse(tool_unit::readFile("D:\\Developments\\CXX\\Agent.cpp\\todos.json"));
             for (auto &todo : todos)
             {
                 if (todo["id"].get_ref<std::string &>() == id)
                 {
                     todo = request;
-                    tool_unit::writeFile("todos.json", json(todos).dump());
+                    tool_unit::writeFile("D:\\Developments\\CXX\\Agent.cpp\\todos.json", json(todos).dump());
                     output = build_http_response(200, "application/json", "{}");
                     return rt::FLAG_DONE;
                 }
@@ -717,11 +769,11 @@ namespace app
     int handle_todos_delete(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
     {
         std::string id = params.count("id") ? params.at("id") : "unknown";
-        json::array_t todos = json::parse(tool_unit::readFile("todos.json"));
+        json::array_t todos = json::parse(tool_unit::readFile("D:\\Developments\\CXX\\Agent.cpp\\todos.json"));
         todos.erase(std::remove_if(todos.begin(), todos.end(), [&](const json &todo)
                                    { return todo["id"].get_ref<const std::string &>() == id; }),
                     todos.end());
-        tool_unit::writeFile("todos.json", json(todos).dump());
+        tool_unit::writeFile("D:\\Developments\\CXX\\Agent.cpp\\todos.json", json(todos).dump());
         output = build_http_response(200, "application/json", "{}");
         return rt::FLAG_DONE;
     }
@@ -733,9 +785,9 @@ namespace app
             std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
             json request = json::parse(body);
 
-            json::array_t todos = json::parse(tool_unit::readFile("todos.json"));
+            json::array_t todos = json::parse(tool_unit::readFile("D:\\Developments\\CXX\\Agent.cpp\\todos.json"));
             todos.push_back(request);
-            tool_unit::writeFile("todos.json", json(todos).dump());
+            tool_unit::writeFile("D:\\Developments\\CXX\\Agent.cpp\\todos.json", json(todos).dump());
             output = build_http_response(200, "application/json", request.dump());
             return rt::FLAG_DONE;
         }
@@ -750,7 +802,12 @@ namespace app
         try
         {
             ctx_lock.lock();
-            Agent_session_context = system_prompt;
+            Agent_session_context.clear();
+            Agent_session_context.push_back(
+                {
+                    {"role", "system"},
+                    {"content", system_prompt},
+                });
             ctx_lock.unlock();
 
             size_t header_end = input.find("\r\n\r\n");

@@ -3,8 +3,8 @@
     "password": "",
     "agent_nickname": "曦儿",
     "workspace": "D:\\Developments\\CXX\\Agent.cpp\\",
-    "ollama_server": "http://localhost:11434",
-    "ollama_default_model": "qwen3.5:9b",
+    "server_address": "http://localhost:11434",
+    "model": "ugemma4:latest",
     "prompt_path": "D:\\Developments\\CXX\\Agent.cpp\\agent.txt",
     "webui": "D:\\Developments\\CXX\\Agent.cpp\\webui.html",
     "stream": false
