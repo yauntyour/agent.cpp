@@ -1,10 +1,10 @@
 {
-    "name": "Yauntyours",
-    "agent_nickname": "曦儿",
-    "workspace": "D:\\Developments\\CXX\\Agent.cpp\\",
+    "name": "user",
+    "agent_nickname": "nick",
+    "workspace": ".",
     "server_address": "http://localhost:11434",
-    "model": "uGemma4",
-    "prompt_path": "D:\\Developments\\CXX\\Agent.cpp\\agent.txt",
+    "model": "name",
+    "prompt_path": "agent.txt",
     "stream": false,
     "max_mpc_rounds": 10,
     "max_context": 128000,
@@ -13,7 +13,7 @@
             "name": "Telegram",
             "status": "active",
             "user_count": 1,
-            "path": "D:\\Developments\\CXX\\Agent.cpp\\sys/tg_bot.py"
+            "path": "sys/tg_bot.py"
         }
     ]
 }
