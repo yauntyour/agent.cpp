@@ -678,7 +678,7 @@ namespace run_unit
     {
         nlohmann::json messages = nlohmann::json::array();
         nlohmann::json memory = {{"keywords", ""}, {"abstracts", ""}};
-
+        bool loaded = false;
         bool thinking = false;
         std::string session_id;
         SessionContext()
@@ -711,13 +711,48 @@ namespace run_unit
     {
     public:
         std::unordered_map<std::string, std::shared_ptr<SessionContext>> sessions;
-        std::string current_session_id = "";
+        std::string current_session_id;
         std::string workspace = "";
         std::shared_ptr<SessionContext> get(const std::string &id)
         {
             auto it = sessions.find(id);
             if (it != sessions.end())
             {
+                if (it->second->loaded == false)
+                {
+                    try
+                    {
+                        it->second->messages = nlohmann::json::parse(tool_unit::readFile(workspace + "/sessions/" + it->second->session_id + ".json"));
+                        if (!it->second->messages.is_array())
+                        {
+                            it->second->messages.clear();
+                            it->second->messages = nlohmann::json::array();
+                            std::cout << "WARN - Session " << it->second->session_id << "file read but is not a array, reset to an empty array." << std::endl;
+                        }
+                    }
+                    catch (const std::exception &e)
+                    {
+                        std::cerr << e.what() << '\n';
+                    }
+                    auto memory_path = workspace + "/memorys/" + it->second->session_id + ".json";
+                    if (std::filesystem::exists(memory_path))
+                    {
+                        try
+                        {
+                            it->second->memory = nlohmann::json::parse(tool_unit::readFile(memory_path));
+                            if (!it->second->memory.contains("abstracts") || !it->second->memory.contains("keywords"))
+                            {
+                                it->second->memory = {{"keywords", ""}, {"abstracts", ""}};
+                                std::cout << "WARN - Session " << it->second->session_id << "file read but is not a valid memory file, reset to an empty memory." << std::endl;
+                            }
+                        }
+                        catch (const std::exception &e)
+                        {
+                            std::cerr << e.what() << '\n';
+                        }
+                    }
+                    it->second->loaded = true;
+                }
                 return it->second;
             }
             return nullptr;
@@ -761,6 +796,21 @@ namespace run_unit
         }
         void change_session(const std::string &id)
         {
+            if (current_session_id == id)
+            {
+                return;
+            }
+            if (!current_session_id.empty())
+            {
+                if (sessions[current_session_id]->loaded == true)
+                {
+                    tool_unit::writeFile(workspace + "/sessions/" + current_session_id + ".json", sessions[current_session_id]->messages.dump(4));
+                    tool_unit::writeFile(workspace + "/memorys/" + current_session_id + ".json", sessions[current_session_id]->memory.dump(4));
+                    sessions[current_session_id]->messages.clear();
+                    sessions[current_session_id]->memory.clear();
+                    sessions[current_session_id]->loaded = false;
+                }
+            }
             current_session_id = id;
         }
         SessionManager(const std::string &workspace = ".") : workspace(workspace)
@@ -774,20 +824,8 @@ namespace run_unit
                     if (ext == ".json")
                     {
                         auto ses_obj = std::make_shared<SessionContext>(name);
-                        ses_obj->messages = nlohmann::json::parse(tool_unit::readFile(session));
                         sessions[name] = ses_obj;
-                        auto memory_path = workspace + "/memorys/" + name + ".json";
-                        if (std::filesystem::exists(memory_path))
-                        {
-                            try
-                            {
-                                sessions[name]->memory = nlohmann::json::parse(tool_unit::readFile(memory_path));
-                            }
-                            catch (const std::exception &e)
-                            {
-                                std::cerr << e.what() << '\n';
-                            }
-                        }
+                        std::cout << "Found session: " << name << std::endl;
                     }
                 }
             }
@@ -802,9 +840,13 @@ namespace run_unit
             {
                 for (auto &ses : sessions)
                 {
-                    std::cout << "Saving session: " << ses.first << std::endl;
-                    tool_unit::writeFile(workspace + "/sessions/" + ses.first + ".json", ses.second->messages.dump(4));
-                    tool_unit::writeFile(workspace + "/memorys/" + ses.first + ".json", ses.second->memory.dump(4));
+                    if (ses.second->loaded)
+                    {
+                        tool_unit::writeFile(workspace + "/sessions/" + ses.first + ".json", ses.second->messages.dump(4));
+                        tool_unit::writeFile(workspace + "/memorys/" + ses.first + ".json", ses.second->memory.dump(4));
+                    }
+                    ses.second->memory.clear();
+                    ses.second->messages.clear();
                 }
             }
             catch (const std::exception &e)
