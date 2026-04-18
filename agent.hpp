@@ -776,15 +776,18 @@ namespace run_unit
                         auto ses_obj = std::make_shared<SessionContext>(name);
                         ses_obj->messages = nlohmann::json::parse(tool_unit::readFile(session));
                         sessions[name] = ses_obj;
-                    }
-                }
-                auto load_memorys = get_all_files(workspace + "/memorys");
-                for (auto &memory : load_memorys)
-                {
-                    auto [name, ext] = file_parse(memory);
-                    if (ext == ".json")
-                    {
-                        sessions[name]->memory = nlohmann::json::parse(tool_unit::readFile(memory));
+                        auto memory_path = workspace + "/memorys/" + name + ".json";
+                        if (std::filesystem::exists(memory_path))
+                        {
+                            try
+                            {
+                                sessions[name]->memory = nlohmann::json::parse(tool_unit::readFile(memory_path));
+                            }
+                            catch (const std::exception &e)
+                            {
+                                std::cerr << e.what() << '\n';
+                            }
+                        }
                     }
                 }
             }
