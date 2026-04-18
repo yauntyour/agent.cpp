@@ -1,11 +1,19 @@
 {
     "name": "Yauntyours",
-    "password": "",
     "agent_nickname": "曦儿",
     "workspace": "D:\\Developments\\CXX\\Agent.cpp\\",
     "server_address": "http://localhost:11434",
-    "model": "ugemma4:latest",
+    "model": "uGemma4",
     "prompt_path": "D:\\Developments\\CXX\\Agent.cpp\\agent.txt",
-    "webui": "D:\\Developments\\CXX\\Agent.cpp\\webui.html",
-    "stream": false
+    "stream": false,
+    "max_mpc_rounds": 10,
+    "max_context": 128000,
+    "channels": [
+        {
+            "name": "Telegram",
+            "status": "active",
+            "user_count": 1,
+            "path": "D:\\Developments\\CXX\\Agent.cpp\\sys/tg_bot.py"
+        }
+    ]
 }
