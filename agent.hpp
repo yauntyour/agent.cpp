@@ -16,13 +16,6 @@
 
 #include "base64.hpp"
 
-/**
- * @brief 提取所有 <tag>...<\tag> 内容的线性迭代器
- *
- * @param text
- * @param tag
- * @return std::vector<std::string_view>
- */
 std::vector<std::string_view> extractAllTags(std::string_view text, std::string tag)
 {
     std::vector<std::string_view> results;
@@ -68,6 +61,28 @@ std::pair<std::string_view, std::string_view> parseArgs(std::string_view input, 
         std::string_view args = input.substr(colonPos + 1); // 跳过 ':'
         return {name, args};
     }
+}
+std::vector<std::string> get_all_files(const std::string &root_dir)
+{
+    std::vector<std::string> files;
+    if (!std::filesystem::exists(root_dir) || !std::filesystem::is_directory(root_dir))
+    {
+        throw std::runtime_error("Directory does not exist: " + root_dir);
+    }
+    for (const auto &entry : std::filesystem::recursive_directory_iterator(root_dir))
+    {
+        if (entry.is_regular_file())
+        {
+            files.push_back(entry.path().string());
+        }
+    }
+
+    return files;
+}
+auto file_parse(const std::string &file_path)
+{
+    std::filesystem::path p(file_path);
+    return std::make_pair(p.stem().string(), p.extension().string());
 }
 
 namespace net_unit
@@ -187,7 +202,6 @@ namespace net_unit
         return (res == CURLE_OK);
     }
 } // namespace net_unit
-
 namespace tool_unit
 {
     void appendFile(const std::string &path, const std::string &content)
@@ -228,7 +242,7 @@ namespace tool_unit
         std::cout << "INFO - readFile('" << path << "')" << std::endl;
         std::ifstream file(path, std::ios::binary | std::ios::in);
         if (!file)
-            throw std::runtime_error("Error: No such file or directory in path:" + path + "Please check the true path");
+            throw std::runtime_error("Error - No such file or directory in path:" + path + "Please check the true path");
         std::string content((std::istreambuf_iterator<char>(file)),
                             std::istreambuf_iterator<char>());
 
@@ -241,7 +255,7 @@ namespace tool_unit
         std::ofstream file(path, std::ios::binary | std::ios::out);
         if (!file.is_open())
         {
-            throw std::runtime_error("Error: Could not create the file:" + path + " Please check the true path");
+            throw std::runtime_error("Error - Could not create the file:" + path + " Please check the true path");
         }
         file.write(content.data(), content.size());
         if (file.fail())
@@ -262,7 +276,7 @@ namespace tool_unit
         std::cout << "INFO - Image('" << path << "')" << std::endl;
         std::ifstream file(path, std::ios::binary | std::ios::in);
         if (!file)
-            throw std::runtime_error("Error: No such file or directory in path:" + path + "Please check the true path");
+            throw std::runtime_error("Error - No such file or directory in path:" + path + "Please check the true path");
         std::string content((std::istreambuf_iterator<char>(file)),
                             std::istreambuf_iterator<char>());
 
@@ -271,6 +285,297 @@ namespace tool_unit
         return "data:image/jpeg;base64," + base;
     }
     std::list<std::string> image_queue;
+}
+namespace run_unit
+{
+    nlohmann::json settings;
+    nlohmann::json tools_list;
+    std::mutex ctx_lock;
+    nlohmann::json Agent_session_context = nlohmann::json::array();
+    size_t over_ctx = 0;
+
+    struct SessionContext
+    {
+        nlohmann::json messages = nlohmann::json::array();
+        nlohmann::json memory = {{"keywords", ""}, {"abstracts", ""}};
+        bool loaded = false;
+        bool thinking = false;
+        std::string session_id;
+        SessionContext()
+        {
+            session_id = std::to_string(std::time(nullptr));
+        }
+        SessionContext(const std::string &session_id) : session_id(session_id)
+        {
+        }
+        bool is_memory_empty()
+        {
+            return memory["keywords"].get_ref<const std::string &>().empty() && memory["abstracts"].get_ref<const std::string &>().empty();
+        }
+        std::pair<std::string, std::string> summary_query()
+        {
+            std::time_t t = std::time(nullptr);
+            std::string time = std::asctime(std::localtime(&t));
+            std::string abstracts_query = "Summarize the following content, including the current Time, and output only the summary as a memory output:\nTime:" + time;
+            std::string keywords_query = "Extract keywords from the following content, and output only the keywords:\n";
+            for (auto &item : messages)
+            {
+                abstracts_query += item.get<std::string>() + "\n\n";
+                keywords_query += item.get<std::string>() + "\n\n";
+            }
+            return {abstracts_query, keywords_query};
+        }
+    };
+
+    class SessionManager
+    {
+    public:
+        std::unordered_map<std::string, std::shared_ptr<SessionContext>> sessions;
+        std::string current_session_id;
+        std::string workspace = "";
+        std::shared_ptr<SessionContext> get(const std::string &id)
+        {
+            auto it = sessions.find(id);
+            if (it != sessions.end())
+            {
+                if (it->second->loaded == false)
+                {
+                    try
+                    {
+                        it->second->messages = nlohmann::json::parse(tool_unit::readFile(workspace + "/sessions/" + it->second->session_id + ".json"));
+                        if (!it->second->messages.is_array())
+                        {
+                            it->second->messages.clear();
+                            it->second->messages = nlohmann::json::array();
+                            std::cout << "WARN - Session " << it->second->session_id << "file read but is not a array, reset to an empty array." << std::endl;
+                        }
+                    }
+                    catch (const std::exception &e)
+                    {
+                        std::cerr << e.what() << '\n';
+                    }
+                    auto memory_path = workspace + "/memorys/" + it->second->session_id + ".json";
+                    if (std::filesystem::exists(memory_path))
+                    {
+                        try
+                        {
+                            it->second->memory = nlohmann::json::parse(tool_unit::readFile(memory_path));
+                            if (!it->second->memory.contains("abstracts") || !it->second->memory.contains("keywords"))
+                            {
+                                it->second->memory = {{"keywords", ""}, {"abstracts", ""}};
+                                std::cout << "WARN - Session " << it->second->session_id << "file read but is not a valid memory file, reset to an empty memory." << std::endl;
+                            }
+                        }
+                        catch (const std::exception &e)
+                        {
+                            std::cerr << e.what() << '\n';
+                        }
+                    }
+                    it->second->loaded = true;
+                }
+                return it->second;
+            }
+            return nullptr;
+        }
+        std::shared_ptr<SessionContext> create()
+        {
+            auto session = std::make_shared<SessionContext>();
+            sessions[session->session_id] = session;
+            current_session_id = session->session_id;
+            return session;
+        }
+        std::shared_ptr<SessionContext> get_current()
+        {
+            if (current_session_id == "")
+            {
+                return create();
+            }
+            return get(current_session_id);
+        }
+
+        std::vector<std::string> list_sessions() const
+        {
+            std::vector<std::string> result;
+            for (const auto &pair : sessions)
+            {
+                result.push_back(pair.first);
+            }
+            return result;
+        }
+        void clear_current()
+        {
+            auto ses = get_current();
+            ses->messages.clear();
+            ses->memory.clear();
+            ses->memory = {{"keywords", ""}, {"abstracts", ""}};
+        }
+
+        void remove_session(const std::string &id)
+        {
+            sessions.erase(id);
+        }
+        void change_session(const std::string &id)
+        {
+            if (current_session_id == id)
+            {
+                return;
+            }
+            if (!current_session_id.empty())
+            {
+                if (sessions[current_session_id]->loaded == true)
+                {
+                    tool_unit::writeFile(workspace + "/sessions/" + current_session_id + ".json", sessions[current_session_id]->messages.dump(4));
+                    tool_unit::writeFile(workspace + "/memorys/" + current_session_id + ".json", sessions[current_session_id]->memory.dump(4));
+                    sessions[current_session_id]->messages.clear();
+                    sessions[current_session_id]->memory.clear();
+                    sessions[current_session_id]->loaded = false;
+                }
+            }
+            current_session_id = id;
+        }
+        SessionManager() = default;
+        SessionManager(const std::string &workspace) : workspace(workspace)
+        {
+            try
+            {
+                auto load_sessions = get_all_files(workspace + "/sessions");
+                for (auto &session : load_sessions)
+                {
+                    auto [name, ext] = file_parse(session);
+                    if (ext == ".json")
+                    {
+                        auto ses_obj = std::make_shared<SessionContext>(name);
+                        sessions[name] = ses_obj;
+                        std::cout << "Found session: " << name << std::endl;
+                    }
+                }
+            }
+            catch (const std::exception &e)
+            {
+                std::cerr << e.what() << '\n';
+            }
+        }
+        ~SessionManager()
+        {
+            try
+            {
+                for (auto &ses : sessions)
+                {
+                    if (ses.second->loaded)
+                    {
+                        tool_unit::writeFile(workspace + "/sessions/" + ses.first + ".json", ses.second->messages.dump(4));
+                        tool_unit::writeFile(workspace + "/memorys/" + ses.first + ".json", ses.second->memory.dump(4));
+                    }
+                    ses.second->memory.clear();
+                    ses.second->messages.clear();
+                }
+            }
+            catch (const std::exception &e)
+            {
+                std::cerr << e.what() << '\n';
+            }
+        }
+    };
+
+    SessionManager agent_session_manager;
+    int init_check(const std::string &settings_path)
+    {
+        settings = nlohmann::json::parse(tool_unit::readFile(settings_path));
+
+        // 1. 检查必需的顶级字段
+        if (!settings.contains("workspace"))
+        {
+            throw std::runtime_error("Error - missing 'workspace' in settings");
+        }
+        if (!settings.contains("channels"))
+        {
+            throw std::runtime_error("Error - missing 'channels' in settings");
+        }
+        if (!settings.contains("model"))
+        {
+            throw std::runtime_error("Error - missing 'model' in settings");
+        }
+        if (!settings.contains("prompt_path"))
+        {
+            throw std::runtime_error("Error - missing 'prompt_path' in settings");
+        }
+
+        std::filesystem::path workspace = settings["workspace"].get<std::string>();
+        if (workspace.empty())
+        {
+            throw std::runtime_error("Error - workspace path is empty");
+        }
+
+        std::filesystem::create_directories(workspace / "sessions");
+        std::filesystem::create_directories(workspace / "memorys");
+        std::filesystem::create_directories(workspace / "assets");
+        std::filesystem::create_directories(workspace / "tools");
+
+        std::filesystem::path sysPath = workspace / "sys";
+        if (!std::filesystem::exists(sysPath) || !std::filesystem::is_directory(sysPath))
+        {
+            throw std::runtime_error("Error - sys directory not found or is not a directory. Please check your workspace.");
+        }
+
+        for (auto &channel : settings["channels"])
+        {
+            if (!channel.contains("name") || channel["name"].get<std::string>().empty())
+            {
+                throw std::runtime_error("Error - channel missing 'name' or name is empty");
+            }
+            std::string channelName = channel["name"].get<std::string>();
+            std::filesystem::path sessionFile = workspace / "sessions" / (channelName + ".json");
+            if (!std::filesystem::exists(sessionFile))
+            {
+                tool_unit::writeFile(sessionFile.string(), "[]");
+            }
+        }
+
+        std::string model = settings["model"].get<std::string>();
+        if (model.empty())
+        {
+            throw std::runtime_error("Error - model is empty. Please check your settings.");
+        }
+
+        std::filesystem::path promptPath = settings["prompt_path"].get<std::string>();
+        if (promptPath.empty())
+        {
+            throw std::runtime_error("Error - prompt_path is empty");
+        }
+        if (!std::filesystem::exists(promptPath) || !std::filesystem::is_regular_file(promptPath))
+        {
+            throw std::runtime_error("Error - prompt_path not found or is not a regular file. Please check your settings.");
+        }
+        if (!settings.contains("server_address") || settings["server_address"].get<std::string>().empty())
+        {
+            throw std::runtime_error("Error - missing or empty 'server_address' in settings");
+        }
+        std::filesystem::path webui = workspace / "webui.html";
+        if (!std::filesystem::exists(webui))
+        {
+            throw std::runtime_error("Error - webui.html not found. Please check your workspace.");
+        }
+        else
+        {
+            settings["webui"] = webui.string();
+        }
+        std::filesystem::path tools_list_path = workspace / "tools/tools.json";
+        if (!std::filesystem::exists(tools_list_path))
+        {
+            std::cout << "Warning - No tools.json found, creating a new one..." << std::endl;
+            tool_unit::writeFile(tools_list_path.string(), "[]");
+            tools_list = nlohmann::json::array();
+        }
+        else
+        {
+            tools_list = nlohmann::json::parse(tool_unit::readFile(tools_list_path.string()));
+        }
+        agent_session_manager = SessionManager(workspace.string());
+        return 0;
+    }
+} // run_unit
+namespace tool_unit
+{
     bool tools_scan(std::string &context, std::string &data)
     {
         auto arr = extractAllTags(context, "tool");
@@ -359,7 +664,7 @@ namespace tool_unit
             {
                 try
                 {
-                    data += exec("cmd /c chcp 65001>nul && python.exe ./tools/" + std::string(name) + "/run.py" + " 2>&1 " + std::string(args));
+                    data += exec("cmd /c chcp 65001>nul && python.exe " + run_unit::settings["workspace"].get_ref<const std::string &>() + "/tools/" + std::string(name) + "/run.py" + " 2>&1 " + std::string(args));
                     data += "\n[TOOL_DONE]\n";
                 }
                 catch (const std::exception &e)
@@ -568,18 +873,18 @@ namespace cs_unit
          {
              try
              {
-                 return tool_unit::exec("cmd /c chcp 65001>nul && python.exe ./sys/sys_state.py 2>&1");
+                 return tool_unit::exec("cmd /c chcp 65001>nul && python.exe " + run_unit::settings["workspace"].get_ref<const std::string &>() + "/sys/sys_state.py 2>&1");
              }
              catch (const std::exception &e)
              {
                  return e.what();
              }
          }},
-        {"tools_status", [](std::string_view args) -> std::string
+        {"tools", [](std::string_view args) -> std::string
          {
              try
              {
-                 return tool_unit::exec("cmd /c chcp 65001>nul && python.exe ./sys/sys_tools.py 2>&1");
+                 return tool_unit::exec("cmd /c chcp 65001>nul && python.exe " + run_unit::settings["workspace"].get_ref<const std::string &>() + "/sys/sys_tools.py 2>&1");
              }
              catch (const std::exception &e)
              {
@@ -616,7 +921,60 @@ namespace cs_unit
                  return e.what();
              }
          }},
-    };
+        {"mem-keys", [](std::string_view args) -> std::string
+         {
+             try
+             {
+                 std::string keys;
+                 auto load_sessions = get_all_files(run_unit::settings["workspace"].get_ref<const std::string &>() + "/memorys");
+                 for (auto &session : load_sessions)
+                 {
+                     auto [name, ext] = file_parse(session);
+                     if (ext == ".json")
+                     {
+                         nlohmann::json memory = nlohmann::json::parse(tool_unit::readFile(session));
+                         if (memory.contains("abstracts") && memory.contains("keywords"))
+                         {
+                             keys += std::format("Session ID:{} {}", name, memory["keywords"].get_ref<const std::string &>()) + "\n\n";
+                         }
+                     }
+                 }
+                 return keys;
+             }
+             catch (const std::exception &e)
+             {
+                 return e.what();
+             }
+         }},
+        {"mem-get", [](std::string_view args) -> std::string
+         {
+             try
+             {
+                 std::string query;
+                 auto load_sessions = get_all_files(run_unit::settings["workspace"].get_ref<const std::string &>() + "/memorys");
+
+                 for (auto &session : load_sessions)
+                 {
+                     auto [name, ext] = file_parse(session);
+                     if (ext == ".json")
+                     {
+                         if (args.find(name) != std::string::npos)
+                         {
+                             nlohmann::json memory = nlohmann::json::parse(tool_unit::readFile(session));
+                             if (memory.contains("abstracts") && memory.contains("keywords"))
+                             {
+                                 query += std::format("SessionID:{} {}", name, memory["abstracts"].get_ref<const std::string &>()) + "\n\n";
+                             }
+                         }
+                     }
+                 }
+                 return query;
+             }
+             catch (const std::exception &e)
+             {
+                 return e.what();
+             }
+         }}};
     /*
     The available commands are as follows:
         - Returns the current system status: system_status
@@ -649,295 +1007,5 @@ namespace cs_unit
         return true;
     }
 } // namespace cs_unit
-
-namespace run_unit
-{
-    std::vector<std::string> get_all_files(const std::string &root_dir)
-    {
-        std::vector<std::string> files;
-        if (!std::filesystem::exists(root_dir) || !std::filesystem::is_directory(root_dir))
-        {
-            throw std::runtime_error("Directory does not exist: " + root_dir);
-        }
-        for (const auto &entry : std::filesystem::recursive_directory_iterator(root_dir))
-        {
-            if (entry.is_regular_file())
-            {
-                files.push_back(entry.path().string());
-            }
-        }
-
-        return files;
-    }
-    auto file_parse(const std::string &file_path)
-    {
-        std::filesystem::path p(file_path);
-        return std::make_pair(p.stem().string(), p.extension().string());
-    }
-    struct SessionContext
-    {
-        nlohmann::json messages = nlohmann::json::array();
-        nlohmann::json memory = {{"keywords", ""}, {"abstracts", ""}};
-        bool loaded = false;
-        bool thinking = false;
-        std::string session_id;
-        SessionContext()
-        {
-            session_id = std::to_string(std::time(nullptr));
-        }
-        SessionContext(const std::string &session_id) : session_id(session_id)
-        {
-        }
-        bool is_memory_empty()
-        {
-            return memory["keywords"].get_ref<const std::string &>().empty() && memory["abstracts"].get_ref<const std::string &>().empty();
-        }
-        std::pair<std::string, std::string> summary_query()
-        {
-            std::time_t t = std::time(nullptr);
-            std::string time = std::asctime(std::localtime(&t));
-            std::string abstracts_query = "Summarize the following content, including the current Time, and output only the summary as a memory output:\nTime:" + time;
-            std::string keywords_query = "Extract keywords from the following content, and output only the keywords:\n";
-            for (auto &item : messages)
-            {
-                abstracts_query += item.get<std::string>() + "\n\n";
-                keywords_query += item.get<std::string>() + "\n\n";
-            }
-            return {abstracts_query, keywords_query};
-        }
-    };
-
-    class SessionManager
-    {
-    public:
-        std::unordered_map<std::string, std::shared_ptr<SessionContext>> sessions;
-        std::string current_session_id;
-        std::string workspace = "";
-        std::shared_ptr<SessionContext> get(const std::string &id)
-        {
-            auto it = sessions.find(id);
-            if (it != sessions.end())
-            {
-                if (it->second->loaded == false)
-                {
-                    try
-                    {
-                        it->second->messages = nlohmann::json::parse(tool_unit::readFile(workspace + "/sessions/" + it->second->session_id + ".json"));
-                        if (!it->second->messages.is_array())
-                        {
-                            it->second->messages.clear();
-                            it->second->messages = nlohmann::json::array();
-                            std::cout << "WARN - Session " << it->second->session_id << "file read but is not a array, reset to an empty array." << std::endl;
-                        }
-                    }
-                    catch (const std::exception &e)
-                    {
-                        std::cerr << e.what() << '\n';
-                    }
-                    auto memory_path = workspace + "/memorys/" + it->second->session_id + ".json";
-                    if (std::filesystem::exists(memory_path))
-                    {
-                        try
-                        {
-                            it->second->memory = nlohmann::json::parse(tool_unit::readFile(memory_path));
-                            if (!it->second->memory.contains("abstracts") || !it->second->memory.contains("keywords"))
-                            {
-                                it->second->memory = {{"keywords", ""}, {"abstracts", ""}};
-                                std::cout << "WARN - Session " << it->second->session_id << "file read but is not a valid memory file, reset to an empty memory." << std::endl;
-                            }
-                        }
-                        catch (const std::exception &e)
-                        {
-                            std::cerr << e.what() << '\n';
-                        }
-                    }
-                    it->second->loaded = true;
-                }
-                return it->second;
-            }
-            return nullptr;
-        }
-        std::shared_ptr<SessionContext> create()
-        {
-            auto session = std::make_shared<SessionContext>();
-            sessions[session->session_id] = session;
-            current_session_id = session->session_id;
-            return session;
-        }
-        std::shared_ptr<SessionContext> get_current()
-        {
-            if (current_session_id == "")
-            {
-                return create();
-            }
-            return get(current_session_id);
-        }
-
-        std::vector<std::string> list_sessions() const
-        {
-            std::vector<std::string> result;
-            for (const auto &pair : sessions)
-            {
-                result.push_back(pair.first);
-            }
-            return result;
-        }
-        void clear_current()
-        {
-            auto ses = get_current();
-            ses->messages.clear();
-            ses->memory.clear();
-            ses->memory = {{"keywords", ""}, {"abstracts", ""}};
-        }
-
-        void remove_session(const std::string &id)
-        {
-            sessions.erase(id);
-        }
-        void change_session(const std::string &id)
-        {
-            if (current_session_id == id)
-            {
-                return;
-            }
-            if (!current_session_id.empty())
-            {
-                if (sessions[current_session_id]->loaded == true)
-                {
-                    tool_unit::writeFile(workspace + "/sessions/" + current_session_id + ".json", sessions[current_session_id]->messages.dump(4));
-                    tool_unit::writeFile(workspace + "/memorys/" + current_session_id + ".json", sessions[current_session_id]->memory.dump(4));
-                    sessions[current_session_id]->messages.clear();
-                    sessions[current_session_id]->memory.clear();
-                    sessions[current_session_id]->loaded = false;
-                }
-            }
-            current_session_id = id;
-        }
-        SessionManager(const std::string &workspace = ".") : workspace(workspace)
-        {
-            try
-            {
-                auto load_sessions = get_all_files(workspace + "/sessions");
-                for (auto &session : load_sessions)
-                {
-                    auto [name, ext] = file_parse(session);
-                    if (ext == ".json")
-                    {
-                        auto ses_obj = std::make_shared<SessionContext>(name);
-                        sessions[name] = ses_obj;
-                        std::cout << "Found session: " << name << std::endl;
-                    }
-                }
-            }
-            catch (const std::exception &e)
-            {
-                std::cerr << e.what() << '\n';
-            }
-        }
-        ~SessionManager()
-        {
-            try
-            {
-                for (auto &ses : sessions)
-                {
-                    if (ses.second->loaded)
-                    {
-                        tool_unit::writeFile(workspace + "/sessions/" + ses.first + ".json", ses.second->messages.dump(4));
-                        tool_unit::writeFile(workspace + "/memorys/" + ses.first + ".json", ses.second->memory.dump(4));
-                    }
-                    ses.second->memory.clear();
-                    ses.second->messages.clear();
-                }
-            }
-            catch (const std::exception &e)
-            {
-                std::cerr << e.what() << '\n';
-            }
-        }
-    };
-
-    int init_check(nlohmann::json &settings)
-    {
-        // 1. 检查必需的顶级字段
-        if (!settings.contains("workspace"))
-        {
-            throw std::runtime_error("Error: missing 'workspace' in settings");
-        }
-        if (!settings.contains("channels"))
-        {
-            throw std::runtime_error("Error: missing 'channels' in settings");
-        }
-        if (!settings.contains("model"))
-        {
-            throw std::runtime_error("Error: missing 'model' in settings");
-        }
-        if (!settings.contains("prompt_path"))
-        {
-            throw std::runtime_error("Error: missing 'prompt_path' in settings");
-        }
-
-        std::filesystem::path workspace = settings["workspace"].get<std::string>();
-        if (workspace.empty())
-        {
-            throw std::runtime_error("Error: workspace path is empty");
-        }
-
-        std::filesystem::create_directories(workspace / "sessions");
-        std::filesystem::create_directories(workspace / "memorys");
-        std::filesystem::create_directories(workspace / "assets");
-        std::filesystem::create_directories(workspace / "tools");
-
-        std::filesystem::path sysPath = workspace / "sys";
-        if (!std::filesystem::exists(sysPath) || !std::filesystem::is_directory(sysPath))
-        {
-            throw std::runtime_error("Error: sys directory not found or is not a directory. Please check your workspace.");
-        }
-
-        for (auto &channel : settings["channels"])
-        {
-            if (!channel.contains("name") || channel["name"].get<std::string>().empty())
-            {
-                throw std::runtime_error("Error: channel missing 'name' or name is empty");
-            }
-            std::string channelName = channel["name"].get<std::string>();
-            std::filesystem::path sessionFile = workspace / "sessions" / (channelName + ".json");
-            if (!std::filesystem::exists(sessionFile))
-            {
-                tool_unit::writeFile(sessionFile.string(), "[]");
-            }
-        }
-
-        std::string model = settings["model"].get<std::string>();
-        if (model.empty())
-        {
-            throw std::runtime_error("Error: model is empty. Please check your settings.");
-        }
-
-        std::filesystem::path promptPath = settings["prompt_path"].get<std::string>();
-        if (promptPath.empty())
-        {
-            throw std::runtime_error("Error: prompt_path is empty");
-        }
-        if (!std::filesystem::exists(promptPath) || !std::filesystem::is_regular_file(promptPath))
-        {
-            throw std::runtime_error("Error: prompt_path not found or is not a regular file. Please check your settings.");
-        }
-        if (!settings.contains("server_address") || settings["server_address"].get<std::string>().empty())
-        {
-            throw std::runtime_error("Error: missing or empty 'server_address' in settings");
-        }
-        std::filesystem::path webui = workspace / "webui.html";
-        if (!std::filesystem::exists(webui))
-        {
-            throw std::runtime_error("Error: webui.html not found. Please check your workspace.");
-        }
-        else
-        {
-            settings["webui"] = webui.string();
-        }
-
-        return 0;
-    }
-} // run_unit
 
 #endif //!__AGENT__H__

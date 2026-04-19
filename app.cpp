@@ -18,7 +18,7 @@
 
 using json = nlohmann::json;
 namespace fs = std::filesystem;
-
+int system_check = run_unit::init_check("D:\\Developments\\CXX\\Agent.cpp\\settings.json");
 namespace app
 {
     void replaceAll(std::string &str, const std::string &from, const std::string &to)
@@ -32,17 +32,10 @@ namespace app
             pos += to.length();
         }
     }
-    static json setting = json::parse(tool_unit::readFile("D:\\Developments\\CXX\\Agent.cpp\\setting.json"));
-    static json tools_list = json::parse(tool_unit::readFile("D:\\Developments\\CXX\\Agent.cpp\\tools/tools.json"));
     static std::string Admin;
     static std::string system_prompt;
     static size_t im_token_len = sizeof("<|im_start|>\n<|im_end|>") - 1;
-    LLMProviders::LlamaClient client(setting["server_address"].get_ref<const std::string &>());
-
-    static std::mutex ctx_lock;
-    static json Agent_session_context = json::array();
-
-    size_t over_ctx = 0;
+    LLMProviders::LlamaClient client(run_unit::settings["server_address"].get_ref<const std::string &>());
 
     std::string to_hex_string(const uint8_t *hash, size_t len)
     {
@@ -57,30 +50,28 @@ namespace app
 
     int init_app(const std::string &password = "")
     {
-        run_unit::init_check(setting);
         uint8_t password_hash[SHA3_256_DIGEST_SIZE];
         if (!SHA3_256((const uint8_t *)password.c_str(), password.length(), password_hash))
         {
             return 1;
         }
-        setting.emplace("password", to_hex_string(password_hash, SHA3_256_DIGEST_SIZE));
-        Admin = setting["name"].get<std::string>();
-        system_prompt = tool_unit::readFile(setting["prompt_path"].get_ref<const std::string &>());
+        run_unit::settings.emplace("password", to_hex_string(password_hash, SHA3_256_DIGEST_SIZE));
+        Admin = run_unit::settings["name"].get<std::string>();
+        system_prompt = tool_unit::readFile(run_unit::settings["prompt_path"].get_ref<const std::string &>());
         replaceAll(system_prompt, "    ", "");
         replaceAll(system_prompt, "\r\n", "");
-        Agent_session_context.push_back(
+        run_unit::Agent_session_context.push_back(
             {
                 {"role", "system"},
                 {"content", system_prompt},
             });
-        Agent_session_context.push_back(
+        run_unit::Agent_session_context.push_back(
             {
                 {"role", "system"},
-                {"content", tools_list.dump()},
+                {"content", run_unit::tools_list.dump()},
             });
         return 0;
     }
-    run_unit::SessionManager agent_session_manager(setting["workspace"]);
 
     int save_memory(std::shared_ptr<run_unit::SessionContext> session_ptr, const std::string &model)
     {
@@ -208,7 +199,7 @@ namespace app
             std::string html;
             try
             {
-                html = tool_unit::readFile(setting["webui"].get_ref<const std::string &>());
+                html = tool_unit::readFile(run_unit::settings["webui"].get_ref<const std::string &>());
             }
             catch (const std::exception &e)
             {
@@ -311,13 +302,13 @@ namespace app
                 model = request["model"].get<std::string>();
                 if (model == "default")
                 {
-                    model = setting["model"];
+                    model = run_unit::settings["model"];
                 }
 
                 json contents = json::array();
                 if (request["channel"] == nullptr)
                 {
-                    session_ptr = agent_session_manager.get_current();
+                    session_ptr = run_unit::agent_session_manager.get_current();
                     session_ptr->messages.push_back(Admin + ":" + user_message);
                     contents.push_back({{"type", "text"},
                                         {"text", user_message}});
@@ -325,7 +316,7 @@ namespace app
                 else
                 {
                     channel = request["channel"].get<std::string>();
-                    session_ptr = agent_session_manager.get(channel);
+                    session_ptr = run_unit::agent_session_manager.get(channel);
                     session_ptr->messages.push_back(Admin + "'s " + channel + ":" + user_message);
                     contents.push_back({{"type", "text"},
                                         {"text", "Messages received from " + channel + ":" + user_message}});
@@ -340,16 +331,16 @@ namespace app
                                             {"image_url", {{"url", std::move(image.get_ref<std::string &>())}}}});
                     }
                 }
-                ctx_lock.lock();
-                Agent_session_context.push_back({{"role", Admin},
-                                                 {"content", std::move(contents)}});
-                ctx_lock.unlock();
+                run_unit::ctx_lock.lock();
+                run_unit::Agent_session_context.push_back({{"role", Admin},
+                                                           {"content", std::move(contents)}});
+                run_unit::ctx_lock.unlock();
                 think_mode = request["think"].get<bool>();
                 req = {
                     {"model", model},
                     {
                         "messages",
-                        Agent_session_context,
+                        run_unit::Agent_session_context,
                     },
                     {"stream", false},
                     {"think", think_mode}};
@@ -368,10 +359,10 @@ namespace app
             auto choices = response["choices"][0];
 
             std::string _content = "\r\n" + choices["message"]["content"].get<std::string>();
-            ctx_lock.lock();
-            Agent_session_context.push_back({{"role", setting["agent_nickname"]},
-                                             {"content", _content}});
-            ctx_lock.unlock();
+            run_unit::ctx_lock.lock();
+            run_unit::Agent_session_context.push_back({{"role", run_unit::settings["agent_nickname"]},
+                                                       {"content", _content}});
+            run_unit::ctx_lock.unlock();
             if (think_mode)
             {
                 thinkings.push_back(choices["message"]["reasoning_content"].get<std::string>());
@@ -380,7 +371,7 @@ namespace app
             std::string tool_call_content = _content;
             json images = json::array();
             size_t mpc_count = 0;
-            for (; mpc_count < setting["max_mpc_rounds"].get<size_t>(); mpc_count++)
+            for (; mpc_count < run_unit::settings["max_mpc_rounds"].get<size_t>(); mpc_count++)
             {
                 try
                 {
@@ -407,16 +398,16 @@ namespace app
                             }
                             tool_unit::image_queue.clear();
                         }
-                        ctx_lock.lock();
-                        Agent_session_context.push_back({{"role", "system"},
-                                                         {"content", sys_outs}});
-                        ctx_lock.unlock();
+                        run_unit::ctx_lock.lock();
+                        run_unit::Agent_session_context.push_back({{"role", "system"},
+                                                                   {"content", sys_outs}});
+                        run_unit::ctx_lock.unlock();
                         req.clear();
                         req = {
                             {"model", model},
                             {
                                 "messages",
-                                Agent_session_context,
+                                run_unit::Agent_session_context,
                             },
                             {"stream", false},
                             {"think", think_mode}};
@@ -431,10 +422,10 @@ namespace app
                         thinkings.push_back(choices["message"]["reasoning_content"].get<std::string>());
 
                         // updata session
-                        ctx_lock.lock();
-                        Agent_session_context.push_back({{"role", setting["agent_nickname"]},
-                                                         {"content", tool_call_content}});
-                        ctx_lock.unlock();
+                        run_unit::ctx_lock.lock();
+                        run_unit::Agent_session_context.push_back({{"role", run_unit::settings["agent_nickname"]},
+                                                                   {"content", tool_call_content}});
+                        run_unit::ctx_lock.unlock();
                     }
                     else
                     {
@@ -447,39 +438,39 @@ namespace app
                     std::cerr << e.what() << '\n';
                 }
             }
-            if (mpc_count >= setting["max_mpc_rounds"].get<size_t>())
+            if (mpc_count >= run_unit::settings["max_mpc_rounds"].get<size_t>())
             {
                 _content += "\r\n[Max CS MPC CALL]\r\n";
             }
 
-            session_ptr->messages.push_back(setting["agent_nickname"].get_ref<const std::string &>() + ":" + _content);
-            size_t ctx_length = Agent_session_context.dump().length() + (Agent_session_context.size() * im_token_len) - images_size;
-            if (ctx_length > setting["max_context"].get<size_t>() && over_ctx < ctx_length)
+            session_ptr->messages.push_back(run_unit::settings["agent_nickname"].get_ref<const std::string &>() + ":" + _content);
+            size_t ctx_length = run_unit::Agent_session_context.dump().length() + (run_unit::Agent_session_context.size() * im_token_len) - images_size;
+            if (ctx_length > run_unit::settings["max_context"].get<size_t>() && run_unit::over_ctx < ctx_length)
             {
                 save_memory(session_ptr, model);
-                ctx_lock.lock();
-                Agent_session_context.clear();
-                Agent_session_context.push_back(
+                run_unit::ctx_lock.lock();
+                run_unit::Agent_session_context.clear();
+                run_unit::Agent_session_context.push_back(
                     {
                         {"role", "system"},
                         {"content", system_prompt},
                     });
 
-                Agent_session_context.push_back(
+                run_unit::Agent_session_context.push_back(
                     {
                         {"role", "system"},
-                        {"content", tools_list.dump()},
+                        {"content", run_unit::tools_list.dump()},
                     });
 
-                Agent_session_context.push_back(
+                run_unit::Agent_session_context.push_back(
                     {
                         {"role", "memory"},
                         {"content", session_ptr->memory["abstracts"]},
                     });
                 std::cout << std::format("Session auto memory generated. ID:{}, num_messages:{}", session_ptr->session_id, session_ptr->messages.size()) << std::endl;
-                ctx_lock.unlock();
-                ctx_length = Agent_session_context.dump().length() + (Agent_session_context.size() * im_token_len);
-                over_ctx = ctx_length;
+                run_unit::ctx_lock.unlock();
+                ctx_length = run_unit::Agent_session_context.dump().length() + (run_unit::Agent_session_context.size() * im_token_len);
+                run_unit::over_ctx = ctx_length;
             }
 
             _content += "\r\n" + std::format("\r\n[Number of characters (including im-tokens, excluding media file size): {}]", ctx_length);
@@ -488,21 +479,21 @@ namespace app
         }
         int handle_session_clear(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
-            ctx_lock.lock();
-            Agent_session_context.clear();
-            Agent_session_context.push_back(
+            run_unit::ctx_lock.lock();
+            run_unit::Agent_session_context.clear();
+            run_unit::Agent_session_context.push_back(
                 {
                     {"role", "system"},
                     {"content", system_prompt},
                 });
-            Agent_session_context.push_back(
+            run_unit::Agent_session_context.push_back(
                 {
                     {"role", "system"},
-                    {"content", tools_list.dump()},
+                    {"content", run_unit::tools_list.dump()},
                 });
-            ctx_lock.unlock();
+            run_unit::ctx_lock.unlock();
 
-            agent_session_manager.clear_current();
+            run_unit::agent_session_manager.clear_current();
 
             json resp = {{"status", "cleared"}};
             output = build_http_response(200, "application/json", resp.dump());
@@ -526,29 +517,29 @@ namespace app
         int handle_session_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
             json resp = {
-                {"session_list", agent_session_manager.list_sessions()}};
+                {"session_list", run_unit::agent_session_manager.list_sessions()}};
             output = build_http_response(200, "application/json", resp.dump());
             return rt::FLAG_DONE;
         }
         int handle_new_session(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
-            ctx_lock.lock();
-            Agent_session_context.clear();
-            Agent_session_context.push_back(
+            run_unit::ctx_lock.lock();
+            run_unit::Agent_session_context.clear();
+            run_unit::Agent_session_context.push_back(
                 {
                     {"role", "system"},
                     {"content", system_prompt},
                 });
 
-            Agent_session_context.push_back(
+            run_unit::Agent_session_context.push_back(
                 {
                     {"role", "system"},
-                    {"content", tools_list.dump()},
+                    {"content", run_unit::tools_list.dump()},
                 });
-            ctx_lock.unlock();
+            run_unit::ctx_lock.unlock();
 
-            auto new_session = agent_session_manager.create();
-            agent_session_manager.current_session_id = new_session->session_id;
+            auto new_session = run_unit::agent_session_manager.create();
+            run_unit::agent_session_manager.current_session_id = new_session->session_id;
 
             json resp = {{"status", "OK"}, {"session_id", new_session->session_id}};
             output = build_http_response(200, "application/json", resp.dump());
@@ -562,7 +553,7 @@ namespace app
                 std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
                 json request = json::parse(body);
 
-                agent_session_manager.remove_session(request["session_id"]);
+                run_unit::agent_session_manager.remove_session(request["session_id"]);
 
                 json resp = {{"status", "deleted"}};
                 output = build_http_response(200, "application/json", resp.dump());
@@ -582,7 +573,7 @@ namespace app
                 std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
 
                 json input_setting = json::parse(body);
-                setting["stream"] = input_setting["stream"];
+                run_unit::settings["stream"] = input_setting["stream"];
                 output = build_http_response(200, "application/json", "{\"status\": \"OK\"}");
                 return rt::FLAG_DONE;
             }
@@ -626,10 +617,10 @@ namespace app
                 std::string password = body.substr(pass_start, pass_end - pass_start);
 
                 std::cout << "Login: " << username << " " << password << std::endl;
-                std::cout << "Password: " << setting["password"].get_ref<const std::string &>() << std::endl;
+                std::cout << "Password: " << run_unit::settings["password"].get_ref<const std::string &>() << std::endl;
 
                 // 简单验证逻辑
-                if (username == setting["name"].get_ref<const std::string &>() && password == setting["password"].get_ref<const std::string &>())
+                if (username == run_unit::settings["name"].get_ref<const std::string &>() && password == run_unit::settings["password"].get_ref<const std::string &>())
                 {
                     json resp = {{"token", "fake-jwt-token"}, {"user", username}};
                     output = build_http_response(200, "application/json", resp.dump());
@@ -648,12 +639,12 @@ namespace app
         }
         int handle_channels_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
-            output = build_http_response(200, "application/json", setting["channels"].dump());
+            output = build_http_response(200, "application/json", run_unit::settings["channels"].dump());
             return rt::FLAG_DONE;
         }
         int handle_tools_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
-            output = build_http_response(200, "application/json", tools_list.dump());
+            output = build_http_response(200, "application/json", run_unit::tools_list.dump());
             return rt::FLAG_DONE;
         }
         int handle_todos_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
@@ -680,7 +671,7 @@ namespace app
             if (params.size() > 0)
             {
                 std::string name = params.count("name") ? params.at("name") : "unknown";
-                for (auto &tool : tools_list)
+                for (auto &tool : run_unit::tools_list)
                 {
                     if (tool["name"].get_ref<const std::string &>() == name)
                     {
@@ -761,33 +752,33 @@ namespace app
                 size_t header_end = input.find("\r\n\r\n");
                 std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
                 json request = json::parse(body);
-                agent_session_manager.change_session(request["session_id"]);
+                run_unit::agent_session_manager.change_session(request["session_id"]);
 
-                std::shared_ptr<run_unit::SessionContext> session_ptr = agent_session_manager.get_current();
+                std::shared_ptr<run_unit::SessionContext> session_ptr = run_unit::agent_session_manager.get_current();
 
-                ctx_lock.lock();
-                Agent_session_context.clear();
-                Agent_session_context.push_back(
+                run_unit::ctx_lock.lock();
+                run_unit::Agent_session_context.clear();
+                run_unit::Agent_session_context.push_back(
                     {
                         {"role", "system"},
                         {"content", system_prompt},
                     });
 
-                Agent_session_context.push_back(
+                run_unit::Agent_session_context.push_back(
                     {
                         {"role", "system"},
-                        {"content", tools_list.dump()},
+                        {"content", run_unit::tools_list.dump()},
                     });
                 if (!session_ptr->is_memory_empty())
                 {
-                    Agent_session_context.push_back(
+                    run_unit::Agent_session_context.push_back(
                         {
                             {"role", "memory"},
                             {"content", session_ptr->memory["abstracts"]},
                         });
                     std::cout << std::format("Session memory loaded. ID:{}, num_messages:{}", session_ptr->session_id, session_ptr->messages.size()) << std::endl;
                 }
-                ctx_lock.unlock();
+                run_unit::ctx_lock.unlock();
 
                 json resp = {{"status", "done"}, {"messages", session_ptr->messages}};
                 output = build_http_response(200, "application/json", resp.dump());
@@ -805,29 +796,29 @@ namespace app
         {
             try
             {
-                std::shared_ptr<run_unit::SessionContext> session_ptr = agent_session_manager.get_current();
-                ctx_lock.lock();
-                Agent_session_context.clear();
-                Agent_session_context.push_back(
+                std::shared_ptr<run_unit::SessionContext> session_ptr = run_unit::agent_session_manager.get_current();
+                run_unit::ctx_lock.lock();
+                run_unit::Agent_session_context.clear();
+                run_unit::Agent_session_context.push_back(
                     {
                         {"role", "system"},
                         {"content", system_prompt},
                     });
 
-                Agent_session_context.push_back(
+                run_unit::Agent_session_context.push_back(
                     {
                         {"role", "system"},
-                        {"content", tools_list.dump()},
+                        {"content", run_unit::tools_list.dump()},
                     });
-                save_memory(session_ptr, setting["model"].get<std::string>());
+                save_memory(session_ptr, run_unit::settings["model"].get<std::string>());
 
-                Agent_session_context.push_back(
+                run_unit::Agent_session_context.push_back(
                     {
                         {"role", "memory"},
                         {"content", session_ptr->memory["abstracts"]},
                     });
 
-                ctx_lock.unlock();
+                run_unit::ctx_lock.unlock();
 
                 json resp = {{"status", "done"}};
                 output = build_http_response(200, "application/json", resp.dump());
