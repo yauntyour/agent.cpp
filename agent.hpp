@@ -103,7 +103,7 @@ namespace net_unit
         userp.append((char *)contents, size * nmemb);
         return size * nmemb;
     }
-    bool CURL_get(CURL *__handle__, const char *URL, std::string &buf)
+    bool CURL_get(CURL *__handle__, const char *URL, std::string &buf, std::string header = "")
     {
         if (__handle__)
         {
@@ -111,6 +111,13 @@ namespace net_unit
             curl_easy_setopt(__handle__, CURLOPT_URL, URL);
             curl_easy_setopt(__handle__, CURLOPT_WRITEFUNCTION, CURL_WriteCallback);
             curl_easy_setopt(__handle__, CURLOPT_WRITEDATA, &buf);
+
+            struct curl_slist *headers = nullptr;
+            if (header != "")
+            {
+                headers = curl_slist_append(headers, header.c_str());
+                curl_easy_setopt(__handle__, CURLOPT_HTTPHEADER, headers);
+            }
 
             CURLcode res = curl_easy_perform(__handle__);
             if (res != CURLE_OK)
@@ -122,7 +129,33 @@ namespace net_unit
         }
         return false;
     }
-    bool CURL_post(CURL *__handle__, const char *URL, const std::string &data, std::string &buf, std::string haeder = "")
+    bool CURL_get(CURL *__handle__, const char *URL, std::string &buf, const std::vector<std::string> &header_list)
+    {
+        if (__handle__)
+        {
+            curl_easy_reset(__handle__);
+            curl_easy_setopt(__handle__, CURLOPT_URL, URL);
+            curl_easy_setopt(__handle__, CURLOPT_WRITEFUNCTION, CURL_WriteCallback);
+            curl_easy_setopt(__handle__, CURLOPT_WRITEDATA, &buf);
+
+            struct curl_slist *headers = nullptr;
+            for (auto &header : header_list)
+            {
+                headers = curl_slist_append(headers, header.c_str());
+                curl_easy_setopt(__handle__, CURLOPT_HTTPHEADER, headers);
+            }
+
+            CURLcode res = curl_easy_perform(__handle__);
+            if (res != CURLE_OK)
+            {
+                std::cerr << "curl_easy_perform() failed: " << curl_easy_strerror(res) << std::endl;
+                return false;
+            }
+            return true;
+        }
+        return false;
+    }
+    bool CURL_post(CURL *__handle__, const char *URL, const std::string &data, std::string &buf, std::string header = "")
     {
         if (__handle__)
         {
@@ -135,9 +168,9 @@ namespace net_unit
             curl_easy_setopt(__handle__, CURLOPT_POSTFIELDSIZE, data.size());
 
             struct curl_slist *headers = nullptr;
-            if (haeder != "")
+            if (header != "")
             {
-                headers = curl_slist_append(headers, haeder.c_str());
+                headers = curl_slist_append(headers, header.c_str());
                 curl_easy_setopt(__handle__, CURLOPT_HTTPHEADER, headers);
             }
 
@@ -159,6 +192,44 @@ namespace net_unit
         }
         return false;
     }
+    bool CURL_post(CURL *__handle__, const char *URL, const std::string &data, std::string &buf, const std::vector<std::string> &header_list)
+    {
+        if (__handle__)
+        {
+            curl_easy_reset(__handle__);
+            curl_easy_setopt(__handle__, CURLOPT_URL, URL);
+
+            curl_easy_setopt(__handle__, CURLOPT_POST, 1L);
+
+            curl_easy_setopt(__handle__, CURLOPT_POSTFIELDS, data.c_str());
+            curl_easy_setopt(__handle__, CURLOPT_POSTFIELDSIZE, data.size());
+
+            struct curl_slist *headers = nullptr;
+            for (auto &header : header_list)
+            {
+                headers = curl_slist_append(headers, header.c_str());
+                curl_easy_setopt(__handle__, CURLOPT_HTTPHEADER, headers);
+            }
+
+            curl_easy_setopt(__handle__, CURLOPT_WRITEFUNCTION, CURL_WriteCallback);
+            curl_easy_setopt(__handle__, CURLOPT_WRITEDATA, &buf);
+
+            CURLcode res = curl_easy_perform(__handle__);
+            if (headers != nullptr)
+            {
+                curl_slist_free_all(headers);
+            }
+
+            if (res != CURLE_OK)
+            {
+                std::cerr << "curl_easy_perform() failed: " << curl_easy_strerror(res) << std::endl;
+                return false;
+            }
+            return true;
+        }
+        return false;
+    }
+
     using StreamCallback = std::function<void(const char *, size_t)>;
     size_t WriteCallback(char *ptr, size_t size, size_t nmemb, void *userdata)
     {
@@ -293,6 +364,7 @@ namespace run_unit
     std::mutex ctx_lock;
     nlohmann::json Agent_session_context = nlohmann::json::array();
     size_t over_ctx = 0;
+    std::string setting_file_path;
 
     struct SessionContext
     {
@@ -480,6 +552,7 @@ namespace run_unit
     SessionManager agent_session_manager;
     int init_check(const std::string &settings_path)
     {
+        setting_file_path = settings_path;
         settings = nlohmann::json::parse(tool_unit::readFile(settings_path));
 
         // 1. 检查必需的顶级字段
@@ -572,6 +645,100 @@ namespace run_unit
         }
         agent_session_manager = SessionManager(workspace.string());
         return 0;
+    }
+    /**
+     * Validates if a JSON object matches the expected format.
+     * @param j JSON object to validate
+     * @return true if format is correct, false otherwise (error messages printed to stderr)
+     */
+    bool validateJsonFormat(const nlohmann::json &j)
+    {
+        // 1. Check top-level fields existence and types
+        if (!j.contains("name") || !j["name"].is_string())
+        {
+            std::cerr << "Error: missing 'name' field or not a string" << std::endl;
+            return false;
+        }
+        if (!j.contains("agent_nickname") || !j["agent_nickname"].is_string())
+        {
+            std::cerr << "Error: missing 'agent_nickname' field or not a string" << std::endl;
+            return false;
+        }
+        if (!j.contains("workspace") || !j["workspace"].is_string())
+        {
+            std::cerr << "Error: missing 'workspace' field or not a string" << std::endl;
+            return false;
+        }
+        if (!j.contains("server_address") || !j["server_address"].is_string())
+        {
+            std::cerr << "Error: missing 'server_address' field or not a string" << std::endl;
+            return false;
+        }
+        if (!j.contains("model") || !j["model"].is_string())
+        {
+            std::cerr << "Error: missing 'model' field or not a string" << std::endl;
+            return false;
+        }
+        if (!j.contains("prompt_path") || !j["prompt_path"].is_string())
+        {
+            std::cerr << "Error: missing 'prompt_path' field or not a string" << std::endl;
+            return false;
+        }
+        if (!j.contains("stream") || !j["stream"].is_boolean())
+        {
+            std::cerr << "Error: missing 'stream' field or not a boolean" << std::endl;
+            return false;
+        }
+        if (!j.contains("max_mpc_rounds") || !j["max_mpc_rounds"].is_number_integer())
+        {
+            std::cerr << "Error: missing 'max_mpc_rounds' field or not an integer" << std::endl;
+            return false;
+        }
+        if (!j.contains("max_context") || !j["max_context"].is_number_integer())
+        {
+            std::cerr << "Error: missing 'max_context' field or not an integer" << std::endl;
+            return false;
+        }
+
+        // 2. Check channels array
+        if (!j.contains("channels") || !j["channels"].is_array())
+        {
+            std::cerr << "Error: missing 'channels' field or not an array" << std::endl;
+            return false;
+        }
+
+        const auto &channels = j["channels"];
+        for (size_t i = 0; i < channels.size(); ++i)
+        {
+            const auto &ch = channels[i];
+            if (!ch.is_object())
+            {
+                std::cerr << "Error: channels[" << i << "] is not an object" << std::endl;
+                return false;
+            }
+            if (!ch.contains("name") || !ch["name"].is_string())
+            {
+                std::cerr << "Error: channels[" << i << "] missing 'name' or not a string" << std::endl;
+                return false;
+            }
+            if (!ch.contains("status") || !ch["status"].is_string())
+            {
+                std::cerr << "Error: channels[" << i << "] missing 'status' or not a string" << std::endl;
+                return false;
+            }
+            if (!ch.contains("user_count") || !ch["user_count"].is_number_integer())
+            {
+                std::cerr << "Error: channels[" << i << "] missing 'user_count' or not an integer" << std::endl;
+                return false;
+            }
+            if (!ch.contains("path") || !ch["path"].is_string())
+            {
+                std::cerr << "Error: channels[" << i << "] missing 'path' or not a string" << std::endl;
+                return false;
+            }
+        }
+
+        return true;
     }
 } // run_unit
 namespace tool_unit
@@ -816,6 +983,76 @@ namespace LLMProviders
                 data.push_back({id, status});
             }
             return nlohmann::json({{"data", data}}).dump();
+        }
+    };
+
+    class OpenAIClient
+    {
+    private:
+        std::string base_url_;
+        std::string api_key_;
+        CURL *curl_;
+
+    public:
+        explicit OpenAIClient() = default;
+        explicit OpenAIClient(const std::string &base_url = "http://localhost:11434", const std::string &api_key = "")
+            : base_url_(base_url), api_key_(api_key), curl_(curl_easy_init()) {}
+
+        ~OpenAIClient()
+        {
+            if (curl_)
+            {
+                curl_easy_cleanup(curl_);
+            }
+        }
+
+        /**
+         * @brief 非流式生成：传入完整请求 JSON（必须包含 "model" 和 "prompt" 或其他合法字段）
+         * @param request OpenAI 请求体
+         * @param response 输出：完整的响应 JSON（包含 "response", "done", "context" 等）
+         * @return 是否成功
+         */
+        bool generate(nlohmann::json &request, nlohmann::json &response)
+        {
+            std::string buf;
+            std::string url = base_url_ + "/v1/chat/completions";
+
+            auto user_name = run_unit::settings["name"].get_ref<const std::string &>();
+            auto agent_name = run_unit::settings["agent_nickname"].get_ref<const std::string &>();
+
+            for (auto &msg : request["messages"])
+            {
+                auto name = msg["role"].get_ref<std::string &>();
+                if (name == user_name)
+                {
+                    msg["role"] = "user";
+                }
+                else if (name == agent_name)
+                {
+                    msg["role"] = "assistant";
+                }
+            }
+
+            if (!net_unit::CURL_post(curl_, url.c_str(), request.dump(), buf, {"Authorization: Bearer " + api_key_, "Content-Type: application/json"}))
+            {
+                return false;
+            }
+            try
+            {
+                response = nlohmann::json::parse(buf);
+                return true;
+            }
+            catch (...)
+            {
+                return false;
+            }
+        }
+        std::string models()
+        {
+            std::string result;
+            std::string url = base_url_ + "/api/tags";
+            net_unit::CURL_get(curl_easy_init(), url.c_str(), result, "Authorization: Bearer " + api_key_);
+            return result;
         }
     };
 } // namespace LLMProviders

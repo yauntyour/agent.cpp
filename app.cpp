@@ -18,7 +18,7 @@
 
 using json = nlohmann::json;
 namespace fs = std::filesystem;
-int system_check = run_unit::init_check("settings.json");
+int system_check = run_unit::init_check("D:\\Developments\\CXX\\Agent.cpp\\settings.json");
 namespace app
 {
     void replaceAll(std::string &str, const std::string &from, const std::string &to)
@@ -35,7 +35,8 @@ namespace app
     static std::string Admin;
     static std::string system_prompt;
     static size_t im_token_len = sizeof("<|im_start|>\n<|im_end|>") - 1;
-    LLMProviders::OllamaClient client(run_unit::settings["server_address"].get_ref<const std::string &>());
+    // LLMProviders::LlamaClient client(run_unit::settings["server_address"].get_ref<const std::string &>());
+    LLMProviders::OpenAIClient client("https://api.deepseek.com", "sk-47b4754048ea433fa7e7c28ae2bf967e");
 
     std::string to_hex_string(const uint8_t *hash, size_t len)
     {
@@ -128,7 +129,6 @@ namespace app
         // API 处理函数声明
         int handle_root(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
         int handle_api_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
-        int handle_status(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
         int handle_control(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
         int handle_input_stream(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
         int handle_session_clear(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
@@ -159,7 +159,6 @@ namespace app
         {
             router.on("/", handle_root);
             router.on("/api", handle_api_list);
-            router.on("/api/status", handle_status);
             router.on("/api/models", handle_models);
             router.on("/api/settings", handle_settings);
 
@@ -167,12 +166,11 @@ namespace app
             router.on("/api/input", handle_input_stream);
 
             router.on("/api/session", handle_session_list);
-            router.on("/api/new", handle_new_session);
+            router.on("/api/session/new", handle_new_session);
             router.on("/api/session/set", handle_session_set);
             router.on("/api/session/memory", handle_session_memory);
-
-            router.on("/api/clear", handle_session_clear);
-            // router.on("/api/delete", handle_delete_session);
+            router.on("/api/session/clear", handle_session_clear);
+            // router.on("/api/session/delete", handle_delete_session);
 
             router.on("/api/login", handle_login);
             router.on("/api/logout", handle_logout);
@@ -212,48 +210,9 @@ namespace app
         }
         int handle_api_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
-            json api_list = {
-                {"/", "GET", "返回WebUI页面"},
-                {"/api", "GET", "返回可用接口列表"},
-                {"/api/status", "GET", "获取系统综合状态"},
-                {"/api/control", "POST", "发送控制指令"},
-                {"/api/input", "POST", "接收用户输入并流式响应"},
-                {"/api/syc", "POST", "同步当前会话上下文"},
-                {"/api/clear", "POST", "重启当前会话"},
-                {"/api/models", "GET", "返回可用模型列表"},
-                {"/api/new", "POST", "新建服务器会话"},
-                {"/api/delete", "POST", "删除前端指定会话"},
-                {"/api/settings", "POST", "更新服务器设置"},
-                {"/api/loading", "GET", "返回登录页面"},
-                {"/api/logout", "GET", "用户登出"},
-                {"/api/login", "POST", "用户登录认证"},
-                {"/api/channels", "GET", "返回频道列表"},
-                {"/api/channels/<name>", "GET/POST", "查询或设置频道"},
-                {"/api/skills", "GET", "返回技能列表"},
-                {"/api/skills/<name>", "GET/POST", "查询或设置技能"},
-                {"/api/todos", "GET", "返回待办事项列表"},
-                {"/api/todos/<name>", "GET/POST", "查询或设置待办事项"},
-                {"/api/todos/new", "POST", "新增待办事项"},
-                {"/api/todos/delete", "POST", "删除待办事项"}};
+            json api_list = {};
             output = build_http_response(200, "application/json", api_list.dump());
             return rt::FLAG_DONE;
-        }
-        int handle_status(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
-        {
-            try
-            {
-                std::string result = tool_unit::exec("cmd /c chcp 65001>nul && python.exe ./sys/sys_state.py 2>&1");
-                json response = {
-                    {"raw_output", result},
-                    {"timestamp", std::time(nullptr)}};
-                output = build_http_response(200, "application/json", response.dump());
-                return rt::FLAG_DONE;
-            }
-            catch (...)
-            {
-                output = build_http_response(500, "text/plain", "Failed to retrieve system status.");
-                return rt::FLAG_ERROR;
-            }
         }
         int handle_control(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
@@ -267,7 +226,6 @@ namespace app
                 }
                 std::string body = input.substr(header_end + 4);
                 json request = json::parse(body);
-                // 执行控制指令
                 json response = {{"result", "success"}, {"executed", "null"}};
                 output = build_http_response(200, "application/json", response.dump());
                 return rt::FLAG_DONE;
@@ -365,7 +323,18 @@ namespace app
             run_unit::ctx_lock.unlock();
             if (think_mode)
             {
-                thinkings.push_back(choices["message"]["reasoning_content"].get<std::string>());
+                if (choices["message"].contains("reasoning_content"))
+                {
+                    thinkings.push_back(std::move(choices["message"]["reasoning_content"]));
+                }
+                else if (choices["message"].contains("reasoning"))
+                {
+                    thinkings.push_back(std::move(choices["message"]["reasoning"]));
+                }
+                else
+                {
+                    thinkings.push_back("Unknown key of reasoning.");
+                }
             }
 
             std::string tool_call_content = _content;
@@ -415,11 +384,25 @@ namespace app
                         // tool response to agent
                         response.clear();
                         client.generate(req, response);
-                        auto choices = response["choices"][0];
-                        tool_call_content = choices["message"]["content"].get<std::string>();
+                        auto tool_choices = response["choices"][0];
+                        tool_call_content = tool_choices["message"]["content"].get<std::string>();
 
                         _content += "\r\n" + tool_call_content;
-                        thinkings.push_back(choices["message"]["reasoning_content"].get<std::string>());
+                        if (think_mode)
+                        {
+                            if (tool_choices["message"].contains("reasoning_content"))
+                            {
+                                thinkings.push_back(std::move(tool_choices["message"]["reasoning_content"]));
+                            }
+                            else if (tool_choices["message"].contains("reasoning"))
+                            {
+                                thinkings.push_back(std::move(tool_choices["message"]["reasoning"]));
+                            }
+                            else
+                            {
+                                thinkings.push_back(std::move(tool_choices["message"]));
+                            }
+                        }
 
                         // updata session
                         run_unit::ctx_lock.lock();
@@ -569,10 +552,24 @@ namespace app
             {
                 size_t header_end = input.find("\r\n\r\n");
                 std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
+                json input_data = json::parse(body);
 
-                json input_setting = json::parse(body);
-                run_unit::settings["stream"] = input_setting["stream"];
-                output = build_http_response(200, "application/json", "{\"status\": \"OK\"}");
+                if (input_data["updata"].get<bool>() && input_data.contains("settings"))
+                {
+                    if (run_unit::validateJsonFormat(input_data["settings"]))
+                    {
+                        run_unit::settings = input_data["settings"];
+                        tool_unit::writeFile(run_unit::setting_file_path, run_unit::settings.dump(4));
+                        std::cout << "Warning - The settings file has been overwritten." << std::endl;
+                    }
+                    else
+                    {
+                        output = build_http_response(500, "text/plain", "Settings saved failed.");
+                        return rt::FLAG_ERROR;
+                    }
+                }
+
+                output = build_http_response(200, "application/json", run_unit::settings.dump());
                 return rt::FLAG_DONE;
             }
             catch (...)
