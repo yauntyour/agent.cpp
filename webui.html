@@ -701,7 +701,6 @@
                 const response = await api.post('/settings', { updata: false });
                 if (response.status === 200) {
                     state.settings = response.data;
-                    state.currentModel = state.settings.model;
                     showToast('设置加载成功', 'success');
                     log('已从服务器加载配置文件', 'success');
                 } else {
@@ -1016,6 +1015,9 @@
                     name: m.aliases?.[0] || m.id,
                     available: m.status?.value === 'loaded',
                 }));
+                if (state.models.length == 0) {
+                    state.models.push({ name: 'default', available: true });
+                }
                 renderModels();
             } catch (error) { log('Failed to load models', 'error'); }
         }
@@ -1023,7 +1025,7 @@
         function renderModels() {
             els.modelDropdownList.innerHTML = '';
             if (!state.currentModel && state.models.length > 0) {
-                selectModel(state.models[0].name, state.models[0].available !== false);
+                selectModel(state.models[0].name, state.models[0].available);
             }
             state.models.forEach(model => {
                 const isAvailable = model.available !== false;
