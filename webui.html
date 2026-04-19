@@ -409,7 +409,7 @@
             sessions: [],
             currentSessionId: null,
             messages: [],
-            settings: { stream: false, ollama_default_model: "" },
+            settings: { stream: false, default_model: "" },
             models: [],
             currentModel: null,
             thinkMode: false,
@@ -910,10 +910,8 @@
             try {
                 const response = await api.get('/models');
                 state.models = (response.data.data || []).map(m => ({
-                    id: m.id,
                     name: m.aliases?.[0] || m.id,
                     available: m.status?.value === 'loaded',
-                    details: m
                 }));
                 renderModels();
             } catch (error) { log('Failed to load models', 'error'); }
@@ -924,14 +922,14 @@
             if (!state.currentModel && state.models.length > 0) {
                 let selected = false;
                 for (const model of state.models) {
-                    if (model.name === state.settings.ollama_default_model) {
+                    if (model.name === state.settings.default_model) {
                         selectModel(model.name, true);
                         selected = true;
                         break;
                     }
                 }
                 if (!selected) selectModel(state.models[0].name, state.models[0].available !== false);
-                log(`Default Model: ${state.settings.ollama_default_model}`, 'success');
+                log(`Default Model: ${state.settings.default_model}`, 'success');
             }
             state.models.forEach(model => {
                 const isAvailable = model.available !== false;
@@ -993,7 +991,7 @@
         async function loadSettings() {
             try {
                 const response = await api.get('/models');
-                state.settings.ollama_default_model = response.data.ollama_default_model;
+                state.settings.default_model = response.data.ollama_default_model;
                 state.settings.stream = response.data.stream;
                 els.streamToggle.checked = state.settings.stream;
             } catch (e) { log('加载设置失败', 'error'); }

@@ -749,12 +749,19 @@ namespace LLMProviders
                 return false;
             }
         }
+        std::string models()
+        {
+            std::string result;
+            std::string url = base_url_ + "/api/tags";
+            net_unit::CURL_get(curl_easy_init(), url.c_str(), result);
+            return result;
+        }
     };
 
     class OllamaClient
     {
     private:
-        std::string base_url_; // 通常为 "http://localhost:11434"
+        std::string base_url_;
         CURL *curl_;
 
     public:
@@ -772,14 +779,14 @@ namespace LLMProviders
 
         /**
          * @brief 非流式生成：传入完整请求 JSON（必须包含 "model" 和 "prompt" 或其他合法字段）
-         * @param request 完整的 Ollama /api/generate 请求体（JSON）
+         * @param request OpenAI 请求体
          * @param response 输出：完整的响应 JSON（包含 "response", "done", "context" 等）
          * @return 是否成功
          */
         bool generate(const nlohmann::json &request, nlohmann::json &response)
         {
             std::string buf;
-            std::string url = base_url_ + "/api/generate";
+            std::string url = base_url_ + "/v1/chat/completions";
 
             if (!net_unit::CURL_post(curl_, url.c_str(), request.dump(), buf, "Content-Type: application/json"))
             {
@@ -795,68 +802,20 @@ namespace LLMProviders
                 return false;
             }
         }
-        bool stream_generate(const nlohmann::json &request, std::string &response, std::string &thinking)
+        std::string models()
         {
-            std::string url = base_url_ + "/api/generate";
-            std::vector<const char *> header_vec;
-            header_vec.push_back("Content-Type: application/json");
-            header_vec.push_back(nullptr);
-            return net_unit::CURL_stream_post(curl_, url.c_str(), request.dump(), "Content-Type: application/json", [&](const char *ptr, size_t size)
-                                              {
-                                                  try
-                                                  {
-                                                      nlohmann::json j = nlohmann::json::parse(ptr, ptr + size);
-                                                      if (j["done"] == true)
-                                                      {
-                                                          return;
-                                                      }
-                                                      if (j["response"] != nullptr)
-                                                      {
-                                                          response += j["response"];
-                                                      }
-                                                      if (j["thinking"] != nullptr)
-                                                      {
-                                                          thinking += j["thinking"];
-                                                      }
-                                                      return;
-                                                  }
-                                                  catch (const std::exception& e)
-                                                  {
-                                                      std::cerr << e.what() << '\n';
-                                                      return;
-                                                  } });
-        }
-        bool stream_chat(const nlohmann::json &request, std::string &response, std::string &thinking)
-        {
-            std::string url = base_url_ + "/api/chat";
-            std::vector<const char *> header_vec;
-            header_vec.push_back("Content-Type: application/json");
-            header_vec.push_back(nullptr);
-            return net_unit::CURL_stream_post(curl_, url.c_str(), request.dump(), "Content-Type: application/json", [&](const char *ptr, size_t size)
-                                              {
-                                                 try
-                                                 {
-                                                    nlohmann::json j = nlohmann::json::parse(ptr, ptr + size);
-                                                 if (j["done"] == true)
-                                                 {
-                                                     return;
-                                                 }
-                                                 auto &msg = j["message"];
-                                                 if (msg["content"] != nullptr)
-                                                 {
-                                                     response += msg["content"];
-                                                 }
-                                                 if (msg["thinking"] != nullptr)
-                                                 {
-                                                     thinking += msg["thinking"];
-                                                 }
-                                                 return; 
-                                                 }
-                                                 catch(const std::exception& e)
-                                                 {
-                                                    std::cerr << e.what() << '\n';
-                                                    return;
-                                                 } });
+            std::string result;
+            std::string url = base_url_ + "/api/tags";
+            net_unit::CURL_get(curl_easy_init(), url.c_str(), result);
+            nlohmann::json ollama_models = nlohmann::json::parse(result);
+            nlohmann::json data = nlohmann::json::array();
+            for (const auto &item : ollama_models["models"])
+            {
+                nlohmann::json id = {"id", item["model"]};
+                nlohmann::json status = {"status", {{"value", "loaded"}}};
+                data.push_back({id, status});
+            }
+            return nlohmann::json({{"data", data}}).dump();
         }
     };
 } // namespace LLMProviders

@@ -35,7 +35,7 @@ namespace app
     static std::string Admin;
     static std::string system_prompt;
     static size_t im_token_len = sizeof("<|im_start|>\n<|im_end|>") - 1;
-    LLMProviders::LlamaClient client(run_unit::settings["server_address"].get_ref<const std::string &>());
+    LLMProviders::OllamaClient client(run_unit::settings["server_address"].get_ref<const std::string &>());
 
     std::string to_hex_string(const uint8_t *hash, size_t len)
     {
@@ -503,9 +503,7 @@ namespace app
         {
             try
             {
-                std::string result;
-                net_unit::CURL_get(curl_easy_init(), "http://localhost:11434/api/tags", result);
-                output = build_http_response(200, "application/json", result);
+                output = build_http_response(200, "application/json", client.models());
                 return rt::FLAG_DONE;
             }
             catch (...)
@@ -839,8 +837,9 @@ int main(int argc, char *argv[])
 {
     try
     {
-        std::thread webview([]()
-                            { system("python ui.py"); });
+        // 可选启动Webview的GUI
+        /*std::thread webview([]()
+                            { system("python ui.py"); });*/
         app::init_app("88888888");
 
         boost::asio::io_context io_context;
