@@ -968,7 +968,7 @@
 
         async function newSession() {
             try {
-                const res = await api.post('/new');
+                const res = await api.post('/session/new');
                 if (res.data.status === 'OK') {
                     state.sessions.push(res.data.session_id);
                     await switchSession(res.data.session_id);
@@ -981,7 +981,7 @@
             if (!state.currentSessionId) return;
             if (!confirm("⚠️ 确定清除当前会话的上下文吗？")) return;
             try {
-                await api.post('/clear');
+                await api.post('/session/clear');
                 await switchSession(state.currentSessionId);
                 showToast("会话上下文已清除", "success");
             } catch (error) {
