@@ -242,7 +242,7 @@ namespace tool_unit
         std::cout << "INFO - readFile('" << path << "')" << std::endl;
         std::ifstream file(path, std::ios::binary | std::ios::in);
         if (!file)
-            throw std::runtime_error("Error - No such file or directory in path:" + path + "Please check the true path");
+            throw std::runtime_error("Error - No such file or directory in path:" + path + " Please check the true path");
         std::string content((std::istreambuf_iterator<char>(file)),
                             std::istreambuf_iterator<char>());
 
@@ -276,7 +276,7 @@ namespace tool_unit
         std::cout << "INFO - Image('" << path << "')" << std::endl;
         std::ifstream file(path, std::ios::binary | std::ios::in);
         if (!file)
-            throw std::runtime_error("Error - No such file or directory in path:" + path + "Please check the true path");
+            throw std::runtime_error("Error - No such file or directory in path:" + path + " Please check the true path");
         std::string content((std::istreambuf_iterator<char>(file)),
                             std::istreambuf_iterator<char>());
 

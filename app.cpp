@@ -18,7 +18,7 @@
 
 using json = nlohmann::json;
 namespace fs = std::filesystem;
-int system_check = run_unit::init_check("D:\\Developments\\CXX\\Agent.cpp\\settings.json");
+int system_check = run_unit::init_check("settings.json");
 namespace app
 {
     void replaceAll(std::string &str, const std::string &from, const std::string &to)
