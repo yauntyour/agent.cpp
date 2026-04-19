@@ -693,11 +693,6 @@
                 showToast('保存设置失败: ' + (error.response?.data?.error || error.message), 'error');
                 log('保存设置失败: ' + (error.response?.data?.error || error.message), 'error');
             }
-            // 如果修改了模型，更新当前选中的模型显示
-            if (newSettings.model && newSettings.model !== state.currentModel) {
-                state.currentModel = newSettings.model;
-                els.modelNameDisplay.textContent = `Model: ${newSettings.model}`;
-            }
         }
 
         // --- 加载完整配置 (从后端获取) ---
@@ -706,6 +701,7 @@
                 const response = await api.post('/settings', { updata: false });
                 if (response.status === 200) {
                     state.settings = response.data;
+                    state.currentModel = state.settings.model;
                     showToast('设置加载成功', 'success');
                     log('已从服务器加载配置文件', 'success');
                 } else {
