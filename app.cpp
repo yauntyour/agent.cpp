@@ -839,6 +839,8 @@ int main(int argc, char *argv[])
 {
     try
     {
+        std::thread webview([]()
+                            { system("python ui.py"); });
         app::init_app("88888888");
 
         boost::asio::io_context io_context;
