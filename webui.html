@@ -805,8 +805,99 @@
 
         // --- API Service ---
         const api = axios.create({ baseURL: API_BASE, headers: { 'Content-Type': 'application/json' } });
+        // --- 构建带深度思考和图像区域的AI消息DOM ---
+        function buildAiMessageStructure(thinkArray, responseContent, thinkEnabled, aiImages = []) {
+            const bubbleDiv = document.createElement('div');
+            bubbleDiv.className = 'bg-slate-800 border border-slate-700 px-4 py-2 rounded-lg shadow-md message-bubble w-full';
 
-        // --- 消息渲染函数 (与原有逻辑保持一致，略作简化但保留核心功能) ---
+            if (thinkEnabled && thinkArray && Array.isArray(thinkArray) && thinkArray.length > 0) {
+                const thinkContainer = document.createElement('div');
+                thinkContainer.className = 'think-container mb-3';
+                const details = document.createElement('details');
+                details.open = false;
+                const summary = document.createElement('summary');
+                summary.className = 'think-summary text-xs font-medium text-blue-300 cursor-pointer list-none';
+                summary.innerHTML = '<i class="fa-solid fa-chevron-right text-[10px]"></i> 🧠 深度思考轨迹 · 点击展开推理细节';
+                details.appendChild(summary);
+                const stepsWrapper = document.createElement('div');
+                stepsWrapper.className = 'think-steps mt-2';
+                thinkArray.forEach((step, idx) => {
+                    const stepDiv = document.createElement('div');
+                    stepDiv.className = 'think-step';
+                    stepDiv.innerHTML = `<span class="think-step-marker">${idx + 1}.</span><span>${escapeHtml(String(step))}</span>`;
+                    stepsWrapper.appendChild(stepDiv);
+                });
+                details.appendChild(stepsWrapper);
+                thinkContainer.appendChild(details);
+                bubbleDiv.appendChild(thinkContainer);
+            }
+
+            const proseDiv = document.createElement('div');
+            proseDiv.className = 'prose prose-sm max-w-none';
+            if (responseContent) {
+                proseDiv.innerHTML = marked.parse(renderFixCodeBlock(responseContent));
+                attachCopyButtons(proseDiv);
+            } else {
+                proseDiv.innerHTML = '<span class="typing-cursor">思考中...</span>';
+            }
+            bubbleDiv.appendChild(proseDiv);
+
+            if (aiImages && aiImages.length > 0) {
+                const imgContainer = document.createElement('div');
+                imgContainer.className = 'flex flex-wrap gap-2 mt-4 pt-3 border-t border-slate-700';
+                aiImages.forEach(img => {
+                    const imgEl = document.createElement('img');
+                    imgEl.src = img.startsWith('data:') ? img : 'data:image/jpeg;base64,' + img;
+                    imgEl.className = 'max-w-sm max-h-80 object-contain rounded border border-slate-600 cursor-pointer hover:opacity-90 transition';
+                    imgEl.onclick = () => window.open(imgEl.src);
+                    imgContainer.appendChild(imgEl);
+                });
+                bubbleDiv.appendChild(imgContainer);
+            }
+
+            return bubbleDiv;
+        }
+
+        function updateAiMessageWithThink(messageId, responseContent, thinkArray, useStream = false, aiImages = []) {
+            const msgContainer = document.getElementById(`msg-${messageId}`);
+            if (!msgContainer) return;
+            const bubbleWrapper = msgContainer.querySelector('.message-bubble')?.parentElement;
+            if (!bubbleWrapper) return;
+            const oldBubble = bubbleWrapper.querySelector('.bg-slate-800');
+            if (!oldBubble) return;
+
+            const shouldShowThink = state.thinkMode && thinkArray && thinkArray.length > 0;
+            const newBubble = buildAiMessageStructure(shouldShowThink ? thinkArray : [], responseContent, shouldShowThink, aiImages);
+            oldBubble.replaceWith(newBubble);
+
+            const proseArea = newBubble.querySelector('.prose');
+            if (useStream && responseContent) {
+                proseArea.innerHTML = '';
+                simulateTypingToElement(proseArea, responseContent);
+            } else if (responseContent) {
+                proseArea.innerHTML = marked.parse(renderFixCodeBlock(responseContent));
+                attachCopyButtons(proseArea);
+            }
+            els.messagesContainer.scrollTop = els.messagesContainer.scrollHeight;
+        }
+
+        function simulateTypingToElement(element, fullText) {
+            element.innerHTML = '';
+            let idx = 0;
+            const interval = setInterval(() => {
+                const partial = fullText.substring(0, idx);
+                element.innerHTML = marked.parse(renderFixCodeBlock(partial));
+                attachCopyButtons(element);
+                els.messagesContainer.scrollTop = els.messagesContainer.scrollHeight;
+                idx += 2;
+                if (idx >= fullText.length) {
+                    clearInterval(interval);
+                    element.innerHTML = marked.parse(renderFixCodeBlock(fullText));
+                    attachCopyButtons(element);
+                }
+            }, 18);
+        }
+
         function escapeHtml(str) {
             if (!str) return '';
             return str.replace(/[&<>]/g, function (m) {
@@ -814,6 +905,8 @@
                 if (m === '<') return '&lt;';
                 if (m === '>') return '&gt;';
                 return m;
+            }).replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, function (c) {
+                return c;
             });
         }
 
@@ -848,24 +941,26 @@
             if (role === 'ai' && !id) attachCopyButtons(div.querySelector('.prose'));
         }
 
-        // 简化版消息更新函数 (保留原有接口)
-        function updateAiMessageWithThink(messageId, responseContent, thinkArray, useStream = false, aiImages = []) {
-            const msgContainer = document.getElementById(`msg-${messageId}`);
-            if (!msgContainer) return;
-            const proseDiv = msgContainer.querySelector('.prose');
-            if (proseDiv) {
-                proseDiv.innerHTML = marked.parse(renderFixCodeBlock(responseContent));
-                attachCopyButtons(proseDiv);
+        function renderMessages() {
+            els.messagesContainer.innerHTML = '';
+            if (!state.messages.length) {
+                const emptyDiv = document.createElement('div');
+                emptyDiv.className = 'flex justify-center mt-10';
+                emptyDiv.innerHTML = `
+                    <div class="text-center text-slate-500">
+                        <i class="fa-solid fa-comment-dots text-4xl mb-3 opacity-50"></i>
+                        <p>会话已清空，开始新对话吧 ✨</p>
+                    </div>
+                `;
+                els.messagesContainer.appendChild(emptyDiv);
+                return;
             }
+            state.messages.forEach(m => addMessageToUI(m.role, m.content, null, m.images));
         }
 
-        // --- 核心 API 调用函数 ---
         async function sendMessage() {
             const content = els.userInput.value.trim();
             const imagesToSend = [...state.pendingImages];
-            if (!state.currentSessionId) {
-                showToast('会话未选择！', 'error');
-            }
 
             if ((!content && imagesToSend.length === 0) || state.isTyping || !state.currentSessionId) return;
 
@@ -884,9 +979,12 @@
                     model: state.currentModel,
                     think: state.thinkMode
                 };
-                if (imagesToSend.length > 0) payload.images = imagesToSend;
+                if (imagesToSend.length > 0) {
+                    payload.images = imagesToSend;
+                }
 
                 const res = await api.post('/input', payload);
+
                 let responseContent = '';
                 let thinkArray = [];
                 let aiImages = [];
@@ -911,8 +1009,11 @@
                 }
 
                 state.messages.push({ role: 'ai', content: responseContent, images: aiImages });
-                updateAiMessageWithThink(aiMessageId, responseContent, thinkArray, state.settings.stream, aiImages);
-                log(`AI响应完成，思考步骤: ${thinkArray.length}步`, 'success');
+
+                const useStream = state.settings.stream;
+                updateAiMessageWithThink(aiMessageId, responseContent, thinkArray, useStream, aiImages);
+
+                log(`AI响应完成，思考步骤: ${thinkArray.length}步${aiImages.length ? '，含附件图像' : ''}`, 'success');
             } catch (error) {
                 console.error(error);
                 const errorMsg = error.response?.data?.error || '请求失败';
@@ -920,6 +1021,8 @@
                 if (msgDiv) {
                     const prose = msgDiv.querySelector('.prose');
                     if (prose) prose.innerHTML = `<span class="text-red-400">❌ ${escapeHtml(errorMsg)}</span>`;
+                } else {
+                    addMessageToUI('ai', `错误: ${errorMsg}`);
                 }
                 log(`发送失败: ${errorMsg}`, 'error');
             } finally {
@@ -990,19 +1093,38 @@
         }
 
         async function generateSessionSummary() {
-            if (!state.currentSessionId) return;
-            if (!confirm("🧠 确定要为当前会话生成记忆摘要吗？")) return;
+            if (!state.currentSessionId) {
+                showToast("当前没有打开的会话", "error");
+                return;
+            }
+
+            if (!confirm("🧠 确定要为当前会话生成记忆摘要吗？\n后端将调用模型处理当前会话记录并提取关键摘要内容。")) return;
+
+            // 直接操作按钮，避开对 <i> 或 <svg> 的直接引用
             const btn = els.summarySessionBtn;
-            const originalHTML = btn.innerHTML;
+            const originalHTML = btn.innerHTML; // 备份当前图标（可能是 <i> 也可能是 FontAwesome 转换后的 <svg>）
+
+            // 设置加载状态：显示转圈并禁用按钮
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
             btn.disabled = true;
+
+            showToast("正在生成记忆摘要，请稍候...", "info");
+
             try {
                 const res = await api.post('/session/memory');
-                if (res.data.status === 'done') showToast("✅ 记忆摘要生成成功", "success");
-                else throw new Error("生成失败");
+                if (res.data.status === 'done') {
+                    showToast("✅ 记忆摘要生成成功并已更新上下文", "success");
+                    log("记忆摘要生成成功", "success");
+                } else {
+                    throw new Error("生成摘要失败，服务器返回状态异常");
+                }
             } catch (error) {
-                showToast("生成摘要失败", "error");
+                console.error(error);
+                const errorMsg = error.response?.data?.error || error.message;
+                showToast("生成摘要失败: " + errorMsg, "error");
+                log("摘要生成失败: " + errorMsg, "error");
             } finally {
+                // 还原按钮内容和状态
                 btn.innerHTML = originalHTML;
                 btn.disabled = false;
             }

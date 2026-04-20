@@ -18,7 +18,7 @@
 
 using json = nlohmann::json;
 namespace fs = std::filesystem;
-int system_check = run_unit::init_check("settings.json");
+int system_check = run_unit::init_check("D:\\Developments\\CXX\\Agent.cpp\\settings.json");
 namespace app
 {
     void replaceAll(std::string &str, const std::string &from, const std::string &to)
@@ -36,7 +36,7 @@ namespace app
     static std::string system_prompt;
     static size_t im_token_len = sizeof("<|im_start|>\n<|im_end|>") - 1;
     LLMProviders::LlamaClient client(run_unit::settings["server_address"].get_ref<const std::string &>());
-    // LLMProviders::OpenAIClient client("https://api.deepseek.com", "sk-47b4754048ea433fa7e7c28ae2bf967e");
+    //LLMProviders::OpenAIClient client("https://api.deepseek.com", "sk-47b4754048ea433fa7e7c28ae2bf967e");
 
     std::string to_hex_string(const uint8_t *hash, size_t len)
     {
