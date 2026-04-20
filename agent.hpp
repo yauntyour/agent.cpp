@@ -505,6 +505,17 @@ namespace run_unit
             }
             current_session_id = id;
         }
+        void saved()
+        {
+            if (sessions[current_session_id]->loaded == true)
+            {
+                tool_unit::writeFile(workspace + "/sessions/" + current_session_id + ".json", sessions[current_session_id]->messages.dump(4));
+                tool_unit::writeFile(workspace + "/memorys/" + current_session_id + ".json", sessions[current_session_id]->memory.dump(4));
+                sessions[current_session_id]->messages.clear();
+                sessions[current_session_id]->memory.clear();
+                sessions[current_session_id]->loaded = false;
+            }
+        }
         SessionManager() = default;
         SessionManager(const std::string &workspace) : workspace(workspace)
         {
@@ -743,15 +754,16 @@ namespace run_unit
 } // run_unit
 namespace tool_unit
 {
-    bool tools_scan(std::string &context, std::string &data)
+    std::pair<size_t, size_t> tools_scan(std::string &context, std::string &data)
     {
         auto arr = extractAllTags(context, "tool");
+        size_t count = 0;
+        size_t succeed = 0;
         if (arr.size() < 1)
         {
-            return false;
+            return {count, succeed};
         }
         data += "\n````\n";
-        bool flag = false;
         for (auto &ctx : arr)
         {
             auto [name, args] = parseArgs(ctx);
@@ -761,13 +773,14 @@ namespace tool_unit
                 {
                     data += exec(std::string(args));
                     data += "\n[TOOL_DONE]\n";
+                    succeed += 1;
                 }
                 catch (const std::exception &e)
                 {
                     data += e.what();
                     data += "\n[TOOL_ERR]\n";
-                    flag = true;
                 }
+                count += 1;
             }
             else if (name == "read")
             {
@@ -775,13 +788,14 @@ namespace tool_unit
                 {
                     data += readFile(std::string(args));
                     data += "\n[TOOL_DONE]\n";
+                    succeed += 1;
                 }
                 catch (const std::exception &e)
                 {
                     data += e.what();
                     data += "\n[TOOL_ERR]\n";
-                    flag = true;
                 }
+                count += 1;
             }
             else if (name == "Image")
             {
@@ -790,13 +804,14 @@ namespace tool_unit
                     image_queue.push_back(Image(std::string(args)));
                     data += "[Image has read done]";
                     data += "\n[TOOL_DONE]\n";
+                    succeed += 1;
                 }
                 catch (const std::exception &e)
                 {
                     data += e.what();
                     data += "\n[TOOL_ERR]\n";
-                    flag = true;
                 }
+                count += 1;
             }
             else if (name == "write")
             {
@@ -805,13 +820,14 @@ namespace tool_unit
                     auto [file, content] = parseArgs(args, '|');
                     writeFile(std::string(file), std::string(content));
                     data += "\n[TOOL_DONE]\n";
+                    succeed += 1;
                 }
                 catch (const std::exception &e)
                 {
                     data += e.what();
                     data += "\n[TOOL_ERR]\n";
-                    flag = true;
                 }
+                count += 1;
             }
             else if (name == "wget")
             {
@@ -819,13 +835,14 @@ namespace tool_unit
                 {
                     data += wget(std::string(args).c_str());
                     data += "\n[TOOL_DONE]\n";
+                    succeed += 1;
                 }
                 catch (const std::exception &e)
                 {
                     data += e.what();
                     data += "\n[TOOL_ERR]\n";
-                    flag = true;
                 }
+                count += 1;
             }
             else
             {
@@ -833,24 +850,24 @@ namespace tool_unit
                 {
                     data += exec("cmd /c chcp 65001>nul && python.exe " + run_unit::settings["workspace"].get_ref<const std::string &>() + "/tools/" + std::string(name) + "/run.py" + " 2>&1 " + std::string(args));
                     data += "\n[TOOL_DONE]\n";
+                    succeed += 1;
                 }
                 catch (const std::exception &e)
                 {
                     data += e.what();
                     data += "\n[TOOL_ERR]\n";
-                    flag = true;
                 }
+                count += 1;
             }
         }
-        if (flag)
+        if (succeed < count)
         {
             data += "Did an error occur when calling the tool? Please check that you're using it correctly and that the parameters are correct!";
         }
         data += "\n````\n";
-        return true;
+        return {count, succeed};
     }
 } // namespace tool_unit
-
 namespace LLMProviders
 {
     /**
@@ -1056,7 +1073,6 @@ namespace LLMProviders
         }
     };
 } // namespace LLMProviders
-
 namespace cs_unit
 {
     struct Command
@@ -1131,7 +1147,10 @@ namespace cs_unit
                          nlohmann::json memory = nlohmann::json::parse(tool_unit::readFile(session));
                          if (memory.contains("abstracts") && memory.contains("keywords"))
                          {
-                             keys += std::format("Session ID:{} {}", name, memory["keywords"].get_ref<const std::string &>()) + "\n\n";
+                             if (!memory["keywords"].get_ref<const std::string &>().empty() && !memory["abstracts"].get_ref<const std::string &>().empty())
+                             {
+                                 keys += name + ": " + memory["keywords"].get_ref<const std::string &>() + "\n";
+                             }
                          }
                      }
                  }
@@ -1159,7 +1178,7 @@ namespace cs_unit
                              nlohmann::json memory = nlohmann::json::parse(tool_unit::readFile(session));
                              if (memory.contains("abstracts") && memory.contains("keywords"))
                              {
-                                 query += std::format("SessionID:{} {}", name, memory["abstracts"].get_ref<const std::string &>()) + "\n\n";
+                                 query += name + ": " + memory["abstracts"].get_ref<const std::string &>() + "\n";
                              }
                          }
                      }
@@ -1179,12 +1198,13 @@ namespace cs_unit
         - Returns the current date and time: time
         - Returns a random number by <seed> in [-1e9,1e9]: random:<seed>
     */
-    bool cs_scan(std::string &context, std::string &data)
+    size_t cs_scan(std::string &context, std::string &data)
     {
         auto arr = extractAllTags(context, "cs");
+        size_t count = 0;
         if (arr.size() < 1)
         {
-            return false;
+            return count;
         }
         data += "````\n";
         for (auto &tag : arr)
@@ -1196,12 +1216,12 @@ namespace cs_unit
                 {
                     data += cmd.callback(args);
                     data += "\n[CS_DONE]\n";
+                    count += 1;
                 }
             }
         }
         data += "\n````\n";
-        return true;
+        return count;
     }
 } // namespace cs_unit
-
 #endif //!__AGENT__H__

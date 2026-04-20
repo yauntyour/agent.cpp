@@ -36,7 +36,7 @@ namespace app
     static std::string system_prompt;
     static size_t im_token_len = sizeof("<|im_start|>\n<|im_end|>") - 1;
     LLMProviders::LlamaClient client(run_unit::settings["server_address"].get_ref<const std::string &>());
-    //LLMProviders::OpenAIClient client("https://api.deepseek.com", "sk-47b4754048ea433fa7e7c28ae2bf967e");
+    // LLMProviders::OpenAIClient client("https://api.deepseek.com", "sk-47b4754048ea433fa7e7c28ae2bf967e");
 
     std::string to_hex_string(const uint8_t *hash, size_t len)
     {
@@ -100,7 +100,69 @@ namespace app
         }
         catch (const std::exception &e)
         {
-            std::cerr << e.what() << '\n';
+            std::cerr << "ERROR - Memory summarize with error: " << e.what() << '\n';
+        }
+        return 0;
+    }
+    /**
+     * @brief 返回false表示无需改进
+     *
+     * @param session_ptr
+     * @param model
+     * @return true
+     * @return false
+     */
+    int evolved_memory(std::shared_ptr<run_unit::SessionContext> session_ptr, const nlohmann::json &agent_context, const std::string &model)
+    {
+        try
+        {
+            nlohmann::json response;
+            nlohmann::json req = {
+                {"model", model},
+                {"messages", {
+                                 {
+                                     {"role", "memory"},
+                                     {"content", "Keywords:" + session_ptr->memory["keywords"].get_ref<std::string &>()},
+                                 },
+                                 {
+                                     {"role", "memory"},
+                                     {"content", session_ptr->memory["abstracts"]},
+                                 },
+                                 {
+                                     {"role", "system"},
+                                     {"content", "Evaluate the value of the memory content and chat history in improving the work of the user of this memory. If improvements are needed, output only the improved memory output; if no improvements are needed, output only [PASS]."},
+                                 },
+                             }},
+                {"stream", false},
+            };
+            for (const auto &msg : agent_context)
+            {
+                auto role = msg["role"].get_ref<const std::string &>();
+                if (role != "system" || role != "memory")
+                {
+                    req["messages"].push_back(msg);
+                }
+            }
+
+            client.generate(req, response);
+            auto output = std::move(response["choices"][0]["message"]["content"].get_ref<std::string &>());
+            if (output.find("[PASS]") == std::string::npos)
+            {
+                session_ptr->memory["abstracts"] = std::move(output);
+                std::cout << "Abstracts updata successfully." << std::endl;
+                req["messages"][2]["content"] = "Please evaluate the relevance of the following content to the memory content, refine the keywords for the memory, and output only the refined keywords for the memory content.";
+                client.generate(req, response);
+                session_ptr->memory["keywords"] = std::move(response["choices"][0]["message"]["content"].get_ref<std::string &>());
+                std::cout << "Keywords updata successfully." << std::endl;
+            }
+            else
+            {
+                std::cout << "Memory not need to updata." << std::endl;
+            }
+        }
+        catch (const std::exception &e)
+        {
+            std::cerr << "ERROR - Memory assessment and evolution with error: " << e.what() << '\n';
         }
         return 0;
     }
@@ -346,11 +408,11 @@ namespace app
                 {
                     json sys_outs = json::array();
                     std::string sys_out;
-                    bool tool_flag = tool_unit::tools_scan(tool_call_content, sys_out);
-                    bool cs_flag = cs_unit::cs_scan(tool_call_content, sys_out);
-                    if (cs_flag | tool_flag)
+                    auto [tools_count, succeed] = tool_unit::tools_scan(tool_call_content, sys_out);
+                    auto cs_count = cs_unit::cs_scan(tool_call_content, sys_out);
+                    if (cs_count > 0 | tools_count > 0)
                     {
-                        printf("Trigger command invocation at cs:%d tool: %d\n", cs_flag, tool_flag);
+                        printf("CS CALL NUM: %d\nTOOL CALL NUM: %d, SUCCEED: %d, FAIL: \n", cs_count, tools_count, succeed, tools_count - succeed);
                         // prepare data
                         _content += "\r\n" + sys_out;
                         sys_outs.push_back({{"type", "text"},
@@ -368,7 +430,7 @@ namespace app
                             tool_unit::image_queue.clear();
                         }
                         run_unit::ctx_lock.lock();
-                        run_unit::Agent_session_context.push_back({{"role", "system"},
+                        run_unit::Agent_session_context.push_back({{"role", "tool"},
                                                                    {"content", sys_outs}});
                         run_unit::ctx_lock.unlock();
                         req.clear();
@@ -430,8 +492,15 @@ namespace app
             size_t ctx_length = run_unit::Agent_session_context.dump().length() + (run_unit::Agent_session_context.size() * im_token_len) - images_size;
             if (ctx_length > run_unit::settings["max_context"].get<size_t>() && run_unit::over_ctx < ctx_length)
             {
-                save_memory(session_ptr, model);
                 run_unit::ctx_lock.lock();
+                if (session_ptr->is_memory_empty())
+                {
+                    save_memory(session_ptr, model);
+                }
+                else
+                {
+                    evolved_memory(session_ptr, run_unit::Agent_session_context, model);
+                }
                 run_unit::Agent_session_context.clear();
                 run_unit::Agent_session_context.push_back(
                     {
@@ -793,6 +862,14 @@ namespace app
             {
                 std::shared_ptr<run_unit::SessionContext> session_ptr = run_unit::agent_session_manager.get_current();
                 run_unit::ctx_lock.lock();
+                if (session_ptr->is_memory_empty())
+                {
+                    save_memory(session_ptr, run_unit::settings["model"].get<std::string>());
+                }
+                else
+                {
+                    evolved_memory(session_ptr, run_unit::Agent_session_context, run_unit::settings["model"].get<std::string>());
+                }
                 run_unit::Agent_session_context.clear();
                 run_unit::Agent_session_context.push_back(
                     {
@@ -805,7 +882,6 @@ namespace app
                         {"role", "system"},
                         {"content", run_unit::tools_list.dump()},
                     });
-                save_memory(session_ptr, run_unit::settings["model"].get<std::string>());
 
                 run_unit::Agent_session_context.push_back(
                     {
@@ -814,7 +890,7 @@ namespace app
                     });
 
                 run_unit::ctx_lock.unlock();
-
+                run_unit::agent_session_manager.saved();
                 json resp = {{"status", "done"}};
                 output = build_http_response(200, "application/json", resp.dump());
                 return rt::FLAG_DONE;

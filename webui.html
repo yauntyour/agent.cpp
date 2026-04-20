@@ -424,7 +424,6 @@
                     data-tab="channels">Channels</button>
             </div>
             <div class="tab-content flex-1 overflow-y-auto p-4" id="tab-settings">
-                <!-- 动态设置表单将渲染在此处 -->
                 <div id="settings-form-container"></div>
                 <div class="mt-4">
                     <button id="save-settings-btn"
@@ -579,10 +578,21 @@
             return output;
         }
 
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str.replace(/[&<>]/g, function (m) {
+                if (m === '&') return '&amp;';
+                if (m === '<') return '&lt;';
+                if (m === '>') return '&gt;';
+                return m;
+            }).replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, function (c) {
+                return c;
+            });
+        }
+
         // --- 动态渲染设置表单 ---
         function renderSettingsForm(settings) {
             if (!els.settingsFormContainer) return;
-
             const formHtml = `
                 <div class="settings-group">
                     <div class="settings-label">⚙️ 基本设置</div>
@@ -617,7 +627,6 @@
                         <div class="setting-description">系统提示词文件路径</div>
                     </div>
                 </div>
-
                 <div class="settings-group">
                     <div class="settings-label">🎛️ 运行参数</div>
                     <div class="setting-row checkbox-wrapper">
@@ -627,39 +636,26 @@
                     <div class="setting-row">
                         <label>最大 MPC 轮次 (max_mpc_rounds)</label>
                         <input type="number" id="setting-max_mpc_rounds" value="${settings.max_mpc_rounds || 10}" min="1" max="50">
-                        <div class="setting-description">工具/命令调用的最大循环次数</div>
                     </div>
                     <div class="setting-row">
                         <label>最大上下文长度 (max_context)</label>
                         <input type="number" id="setting-max_context" value="${settings.max_context || 128000}" min="1000" max="1000000">
-                        <div class="setting-description">触发记忆压缩的上下文 token 阈值</div>
                     </div>
                 </div>
-
                 <div class="settings-group">
                     <div class="settings-label">📡 频道配置 (channels)</div>
                     <div class="setting-row">
                         <label>频道列表 (JSON 格式)</label>
                         <textarea id="setting-channels" rows="6" class="font-mono text-sm">${escapeHtml(JSON.stringify(settings.channels || [], null, 2))}</textarea>
-                        <div class="setting-description">编辑 channels 数组，请确保 JSON 格式正确</div>
                     </div>
                 </div>
             `;
-
             els.settingsFormContainer.innerHTML = formHtml;
         }
 
-        // --- 收集表单中的设置值 ---
         function collectSettingsFromForm() {
             let channels = [];
-            try {
-                const channelsRaw = document.getElementById('setting-channels')?.value || '[]';
-                channels = JSON.parse(channelsRaw);
-            } catch (e) {
-                console.warn('Channels JSON 解析失败', e);
-                channels = state.settings.channels;
-            }
-
+            try { channels = JSON.parse(document.getElementById('setting-channels')?.value || '[]'); } catch (e) { channels = state.settings.channels; }
             return {
                 name: document.getElementById('setting-name')?.value || '',
                 agent_nickname: document.getElementById('setting-agent_nickname')?.value || '',
@@ -674,242 +670,83 @@
             };
         }
 
-        // --- 保存设置到后端 ---
         async function saveSettings() {
             const newSettings = collectSettingsFromForm();
             state.settings = newSettings;
-
             try {
                 const response = await api.post('/settings', { updata: true, settings: state.settings });
                 if (response.status === 200) {
                     state.settings = response.data;
-                    showToast('设置已保存 (部分设置需重启服务生效)', 'success');
-                    log('设置已保存: ' + JSON.stringify({ stream: newSettings.stream, model: newSettings.model }), 'success');
-                } else {
-                    throw new Error('保存失败');
-                }
+                    showToast('设置已保存', 'success');
+                    log('设置已保存', 'success');
+                    await getModels();
+                    if (state.settings.model && state.models.some(m => m.name === state.settings.model)) selectModel(state.settings.model, true);
+                } else throw new Error('保存失败');
             } catch (error) {
-                console.error('保存设置失败:', error);
                 showToast('保存设置失败: ' + (error.response?.data?.error || error.message), 'error');
-                log('保存设置失败: ' + (error.response?.data?.error || error.message), 'error');
             }
         }
 
-        // --- 加载完整配置 (从后端获取) ---
         async function loadSettings() {
             try {
                 const response = await api.post('/settings', { updata: false });
-                if (response.status === 200) {
-                    state.settings = response.data;
-                    showToast('设置加载成功', 'success');
-                    log('已从服务器加载配置文件', 'success');
-                } else {
-                    throw new Error('设置加载失败');
-                }
-            } catch (e) {
-                showToast('设置加载失败: ' + (error.response?.data?.error || error.message), 'error');
-                log('设置加载失败: ' + (error.response?.data?.error || error.message), 'error');
-            }
-
-            // 渲染表单
+                if (response.status === 200) state.settings = response.data;
+                else throw new Error('设置加载失败');
+            } catch (e) { showToast('设置加载失败', 'error'); }
             renderSettingsForm(state.settings);
         }
 
-        // --- 文件上传与图片处理 (保持不变) ---
+        // --- 图片压缩与附件 ---
         els.attachBtn.onclick = () => els.fileUpload.click();
-
         function compressImage(file, maxResolution = 1024, quality = 0.7) {
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
                 reader.onload = (event) => {
                     const img = new Image();
                     img.onload = () => {
-                        let width = img.width;
-                        let height = img.height;
-
+                        let width = img.width, height = img.height;
                         if (width > maxResolution || height > maxResolution) {
-                            if (width > height) {
-                                height = Math.round((height * maxResolution) / width);
-                                width = maxResolution;
-                            } else {
-                                width = Math.round((width * maxResolution) / height);
-                                height = maxResolution;
-                            }
+                            if (width > height) { height = Math.round((height * maxResolution) / width); width = maxResolution; }
+                            else { width = Math.round((width * maxResolution) / height); height = maxResolution; }
                         }
-
                         const canvas = document.createElement('canvas');
-                        canvas.width = width;
-                        canvas.height = height;
+                        canvas.width = width; canvas.height = height;
                         const ctx = canvas.getContext('2d');
                         ctx.drawImage(img, 0, 0, width, height);
-
-                        const compressedBase64 = canvas.toDataURL('image/jpeg', quality);
-                        resolve(compressedBase64);
+                        resolve(canvas.toDataURL('image/jpeg', quality));
                     };
-                    img.onerror = error => reject(error);
+                    img.onerror = reject;
                     img.src = event.target.result;
                 };
                 reader.readAsDataURL(file);
             });
         }
-
         els.fileUpload.onchange = async (e) => {
             const files = e.target.files;
             if (!files.length) return;
-
             for (const file of files) {
                 if (file.type.startsWith('image/')) {
-                    try {
-                        const compressedBase64 = await compressImage(file, 1024, 0.7);
-                        state.pendingImages.push(compressedBase64);
-                        renderImagePreviews();
-                    } catch (err) {
-                        console.error("图像压缩失败:", err);
-                        showToast("图像处理失败", "error");
-                    }
+                    try { state.pendingImages.push(await compressImage(file, 1024, 0.7)); renderImagePreviews(); }
+                    catch (err) { showToast("图像处理失败", "error"); }
                 } else {
                     const reader = new FileReader();
-                    reader.onload = (event) => {
-                        const text = event.target.result;
-                        const prefix = els.userInput.value.trim() ? '\n\n' : '';
-                        els.userInput.value += prefix + `[File: ${file.name}]\n` + text;
-                        els.userInput.scrollTop = els.userInput.scrollHeight;
-                    };
+                    reader.onload = (event) => { els.userInput.value += (els.userInput.value.trim() ? '\n\n' : '') + `[File: ${file.name}]\n${event.target.result}`; };
                     reader.readAsText(file);
                 }
             }
             els.fileUpload.value = '';
         };
-
         function renderImagePreviews() {
-            if (state.pendingImages.length === 0) {
-                els.imagePreviewContainer.classList.add('hidden');
-                els.imagePreviewContainer.innerHTML = '';
-                return;
-            }
+            if (state.pendingImages.length === 0) { els.imagePreviewContainer.classList.add('hidden'); els.imagePreviewContainer.innerHTML = ''; return; }
             els.imagePreviewContainer.classList.remove('hidden');
-            els.imagePreviewContainer.innerHTML = state.pendingImages.map((img, index) => `
-                <div class="relative group mt-2 mb-2">
-                    <img src="${img}" class="w-16 h-16 object-cover rounded border border-slate-600">
-                    <button class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition" onclick="window.removePendingImage(${index})">
-                        <i class="fa-solid fa-times"></i>
-                    </button>
-                </div>
-            `).join('');
+            els.imagePreviewContainer.innerHTML = state.pendingImages.map((img, index) => `<div class="relative group mt-2 mb-2"><img src="${img}" class="w-16 h-16 object-cover rounded border border-slate-600"><button class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition" onclick="window.removePendingImage(${index})"><i class="fa-solid fa-times"></i></button></div>`).join('');
         }
-
-        window.removePendingImage = (index) => {
-            state.pendingImages.splice(index, 1);
-            renderImagePreviews();
-        };
+        window.removePendingImage = (index) => { state.pendingImages.splice(index, 1); renderImagePreviews(); };
 
         // --- API Service ---
         const api = axios.create({ baseURL: API_BASE, headers: { 'Content-Type': 'application/json' } });
-        // --- 构建带深度思考和图像区域的AI消息DOM ---
-        function buildAiMessageStructure(thinkArray, responseContent, thinkEnabled, aiImages = []) {
-            const bubbleDiv = document.createElement('div');
-            bubbleDiv.className = 'bg-slate-800 border border-slate-700 px-4 py-2 rounded-lg shadow-md message-bubble w-full';
 
-            if (thinkEnabled && thinkArray && Array.isArray(thinkArray) && thinkArray.length > 0) {
-                const thinkContainer = document.createElement('div');
-                thinkContainer.className = 'think-container mb-3';
-                const details = document.createElement('details');
-                details.open = false;
-                const summary = document.createElement('summary');
-                summary.className = 'think-summary text-xs font-medium text-blue-300 cursor-pointer list-none';
-                summary.innerHTML = '<i class="fa-solid fa-chevron-right text-[10px]"></i> 🧠 深度思考轨迹 · 点击展开推理细节';
-                details.appendChild(summary);
-                const stepsWrapper = document.createElement('div');
-                stepsWrapper.className = 'think-steps mt-2';
-                thinkArray.forEach((step, idx) => {
-                    const stepDiv = document.createElement('div');
-                    stepDiv.className = 'think-step';
-                    stepDiv.innerHTML = `<span class="think-step-marker">${idx + 1}.</span><span>${escapeHtml(String(step))}</span>`;
-                    stepsWrapper.appendChild(stepDiv);
-                });
-                details.appendChild(stepsWrapper);
-                thinkContainer.appendChild(details);
-                bubbleDiv.appendChild(thinkContainer);
-            }
-
-            const proseDiv = document.createElement('div');
-            proseDiv.className = 'prose prose-sm max-w-none';
-            if (responseContent) {
-                proseDiv.innerHTML = marked.parse(renderFixCodeBlock(responseContent));
-                attachCopyButtons(proseDiv);
-            } else {
-                proseDiv.innerHTML = '<span class="typing-cursor">思考中...</span>';
-            }
-            bubbleDiv.appendChild(proseDiv);
-
-            if (aiImages && aiImages.length > 0) {
-                const imgContainer = document.createElement('div');
-                imgContainer.className = 'flex flex-wrap gap-2 mt-4 pt-3 border-t border-slate-700';
-                aiImages.forEach(img => {
-                    const imgEl = document.createElement('img');
-                    imgEl.src = img.startsWith('data:') ? img : 'data:image/jpeg;base64,' + img;
-                    imgEl.className = 'max-w-sm max-h-80 object-contain rounded border border-slate-600 cursor-pointer hover:opacity-90 transition';
-                    imgEl.onclick = () => window.open(imgEl.src);
-                    imgContainer.appendChild(imgEl);
-                });
-                bubbleDiv.appendChild(imgContainer);
-            }
-
-            return bubbleDiv;
-        }
-
-        function updateAiMessageWithThink(messageId, responseContent, thinkArray, useStream = false, aiImages = []) {
-            const msgContainer = document.getElementById(`msg-${messageId}`);
-            if (!msgContainer) return;
-            const bubbleWrapper = msgContainer.querySelector('.message-bubble')?.parentElement;
-            if (!bubbleWrapper) return;
-            const oldBubble = bubbleWrapper.querySelector('.bg-slate-800');
-            if (!oldBubble) return;
-
-            const shouldShowThink = state.thinkMode && thinkArray && thinkArray.length > 0;
-            const newBubble = buildAiMessageStructure(shouldShowThink ? thinkArray : [], responseContent, shouldShowThink, aiImages);
-            oldBubble.replaceWith(newBubble);
-
-            const proseArea = newBubble.querySelector('.prose');
-            if (useStream && responseContent) {
-                proseArea.innerHTML = '';
-                simulateTypingToElement(proseArea, responseContent);
-            } else if (responseContent) {
-                proseArea.innerHTML = marked.parse(renderFixCodeBlock(responseContent));
-                attachCopyButtons(proseArea);
-            }
-            els.messagesContainer.scrollTop = els.messagesContainer.scrollHeight;
-        }
-
-        function simulateTypingToElement(element, fullText) {
-            element.innerHTML = '';
-            let idx = 0;
-            const interval = setInterval(() => {
-                const partial = fullText.substring(0, idx);
-                element.innerHTML = marked.parse(renderFixCodeBlock(partial));
-                attachCopyButtons(element);
-                els.messagesContainer.scrollTop = els.messagesContainer.scrollHeight;
-                idx += 2;
-                if (idx >= fullText.length) {
-                    clearInterval(interval);
-                    element.innerHTML = marked.parse(renderFixCodeBlock(fullText));
-                    attachCopyButtons(element);
-                }
-            }, 18);
-        }
-
-        function escapeHtml(str) {
-            if (!str) return '';
-            return str.replace(/[&<>]/g, function (m) {
-                if (m === '&') return '&amp;';
-                if (m === '<') return '&lt;';
-                if (m === '>') return '&gt;';
-                return m;
-            }).replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, function (c) {
-                return c;
-            });
-        }
-
+        // --- 消息UI渲染 (统一) ---
         function addMessageToUI(role, content, id = null, images = []) {
             const div = document.createElement('div');
             div.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'}`;
@@ -917,25 +754,9 @@
             const emoji = role === 'user' ? '⭐' : '💖';
             const bubbleClass = role === 'user' ? 'bg-blue-600 text-white' : 'bg-slate-800 border border-slate-700 text-slate-200';
             const innerContent = role === 'user' ? escapeHtml(content).replace(/\n/g, '<br>') : marked.parse(renderFixCodeBlock(content));
-
             let imagesHtml = '';
-            if (images && images.length > 0) {
-                imagesHtml = `<div class="flex flex-wrap gap-2 mt-2 pt-2 border-t ${role === 'user' ? 'border-blue-500' : 'border-slate-700'}">` +
-                    images.map(img => `<img src="${img.startsWith('data:') ? img : 'data:image/jpeg;base64,' + img}" class="max-w-xs max-h-64 object-contain rounded border border-slate-600 cursor-pointer" onclick="window.open(this.src)">`).join('') +
-                    `</div>`;
-            }
-
-            div.innerHTML = `
-                <div class="flex max-w-[85%] ${role === 'user' ? 'flex-row-reverse space-x-reverse' : 'flex-row'} items-start space-x-3 min-w-0">
-                    <div class="w-8 h-8 rounded flex-shrink-0 flex items-center justify-center ${role === 'user' ? 'bg-blue-500' : 'bg-slate-700'} text-lg">
-                        ${emoji}
-                    </div>
-                    <div class="${bubbleClass} px-4 py-2 rounded-lg shadow-md message-bubble overflow-hidden">
-                        <div class="prose prose-sm text-white">${innerContent}</div>
-                        ${imagesHtml}
-                    </div>
-                </div>
-            `;
+            if (images && images.length) imagesHtml = `<div class="flex flex-wrap gap-2 mt-2 pt-2 border-t ${role === 'user' ? 'border-blue-500' : 'border-slate-700'}">` + images.map(img => `<img src="${img.startsWith('data:') ? img : 'data:image/jpeg;base64,' + img}" class="max-w-xs max-h-64 object-contain rounded border border-slate-600 cursor-pointer" onclick="window.open(this.src)">`).join('') + `</div>`;
+            div.innerHTML = `<div class="flex max-w-[85%] ${role === 'user' ? 'flex-row-reverse space-x-reverse' : 'flex-row'} items-start space-x-3 min-w-0"><div class="w-8 h-8 rounded flex-shrink-0 flex items-center justify-center ${role === 'user' ? 'bg-blue-500' : 'bg-slate-700'} text-lg">${emoji}</div><div class="${bubbleClass} px-4 py-2 rounded-lg shadow-md message-bubble overflow-hidden"><div class="prose prose-sm text-white">${innerContent}</div>${imagesHtml}</div></div>`;
             els.messagesContainer.appendChild(div);
             els.messagesContainer.scrollTop = els.messagesContainer.scrollHeight;
             if (role === 'ai' && !id) attachCopyButtons(div.querySelector('.prose'));
@@ -944,98 +765,46 @@
         function renderMessages() {
             els.messagesContainer.innerHTML = '';
             if (!state.messages.length) {
-                const emptyDiv = document.createElement('div');
-                emptyDiv.className = 'flex justify-center mt-10';
-                emptyDiv.innerHTML = `
-                    <div class="text-center text-slate-500">
-                        <i class="fa-solid fa-comment-dots text-4xl mb-3 opacity-50"></i>
-                        <p>会话已清空，开始新对话吧 ✨</p>
-                    </div>
-                `;
-                els.messagesContainer.appendChild(emptyDiv);
+                els.messagesContainer.innerHTML = `<div class="flex justify-center mt-10"><div class="text-center text-slate-500"><i class="fa-solid fa-comment-dots text-4xl mb-3 opacity-50"></i><p>会话已清空，开始新对话吧 ✨</p></div></div>`;
                 return;
             }
-            state.messages.forEach(m => addMessageToUI(m.role, m.content, null, m.images));
+            state.messages.forEach(m => addMessageToUI(m.role, m.content, null, m.images || []));
         }
 
-        async function sendMessage() {
-            const content = els.userInput.value.trim();
-            const imagesToSend = [...state.pendingImages];
-
-            if ((!content && imagesToSend.length === 0) || state.isTyping || !state.currentSessionId) return;
-
-            addMessageToUI('user', content, null, imagesToSend);
-            els.userInput.value = '';
-            state.pendingImages = [];
-            renderImagePreviews();
-            state.isTyping = true;
-
-            const aiMessageId = Date.now();
-            addMessageToUI('ai', '<span class="typing-cursor">Thinking...</span>', aiMessageId);
-
+        // --- 核心：切换会话修复版 ---
+        async function switchSession(sessionId) {
+            if (state.isTyping) { showToast("请等待当前消息回复完成", "error"); return; }
             try {
-                const payload = {
-                    messages: content,
-                    model: state.currentModel,
-                    think: state.thinkMode
-                };
-                if (imagesToSend.length > 0) {
-                    payload.images = imagesToSend;
-                }
-
-                const res = await api.post('/input', payload);
-
-                let responseContent = '';
-                let thinkArray = [];
-                let aiImages = [];
-
-                if (res.data && Array.isArray(res.data.messages)) {
-                    for (const item of res.data.messages) {
-                        if (item.type === 'response') responseContent = item.content || '';
-                        else if (item.type === 'think') {
-                            let raw = item.content;
-                            if (Array.isArray(raw)) thinkArray = raw;
-                            else if (typeof raw === 'string') thinkArray = [raw];
-                        }
-                        else if (item.type === 'images') {
-                            let raw = item.content;
-                            if (Array.isArray(raw)) aiImages = raw;
-                        }
+                const res = await api.post('/session/set', { session_id: sessionId });
+                state.currentSessionId = sessionId;
+                els.currentSessionIdDisplay.textContent = `Session: ${sessionId}`;
+                const rawMessages = res.data.messages || [];
+                state.messages = rawMessages.map(msg => {
+                    let role = 'ai', content = msg;
+                    if (typeof msg === 'string') {
+                        if (msg.startsWith('User:')) { role = 'user'; content = msg.slice(5).trim(); }
+                        else if (msg.startsWith('AI:')) { role = 'ai'; content = msg.slice(3).trim(); }
+                        else if (msg.startsWith('Assistant:')) { role = 'ai'; content = msg.slice(10).trim(); }
                     }
-                } else if (res.data && res.data.messages && res.data.messages[0] && res.data.messages[0].content) {
-                    responseContent = res.data.messages[0].content;
-                } else {
-                    responseContent = "无法解析响应格式";
-                }
-
-                state.messages.push({ role: 'ai', content: responseContent, images: aiImages });
-
-                const useStream = state.settings.stream;
-                updateAiMessageWithThink(aiMessageId, responseContent, thinkArray, useStream, aiImages);
-
-                log(`AI响应完成，思考步骤: ${thinkArray.length}步${aiImages.length ? '，含附件图像' : ''}`, 'success');
+                    return { role, content, images: [] };
+                });
+                renderMessages();
+                renderSessions(); // 更新侧边栏高亮
+                log(`已切换到会话: ${sessionId}`, 'success');
             } catch (error) {
-                console.error(error);
-                const errorMsg = error.response?.data?.error || '请求失败';
-                const msgDiv = document.getElementById(`msg-${aiMessageId}`);
-                if (msgDiv) {
-                    const prose = msgDiv.querySelector('.prose');
-                    if (prose) prose.innerHTML = `<span class="text-red-400">❌ ${escapeHtml(errorMsg)}</span>`;
-                } else {
-                    addMessageToUI('ai', `错误: ${errorMsg}`);
-                }
-                log(`发送失败: ${errorMsg}`, 'error');
-            } finally {
-                state.isTyping = false;
+                log(`切换会话失败: ${error.message}`, 'error');
+                showToast("切换会话失败", "error");
             }
         }
 
-        // --- 会话管理函数 (简化保留) ---
+        // --- 会话管理 ---
         async function loadSessions() {
             try {
                 const res = await api.get('/session');
                 state.sessions = res.data.session_list || [];
                 renderSessions();
+                if (state.sessions.length > 0 && !state.currentSessionId) await switchSession(state.sessions[0]);
+                else if (state.sessions.length === 0) await newSession();
             } catch (e) { log('加载会话失败', 'error'); }
         }
 
@@ -1051,33 +820,18 @@
             });
         }
 
-        async function switchSession(id) {
-            try {
-                const res = await api.post('/session/set', { session_id: id });
-                state.currentSessionId = id;
-                els.currentSessionIdDisplay.textContent = `Session: ${id}`;
-                state.messages = (res.data.messages || []).map(m => ({ role: m.startsWith('User') ? 'user' : 'ai', content: m, images: [] }));
-                els.messagesContainer.innerHTML = '';
-                if (!state.messages.length) {
-                    const emptyDiv = document.createElement('div');
-                    emptyDiv.className = 'flex justify-center mt-10';
-                    emptyDiv.innerHTML = `<div class="text-center text-slate-500"><i class="fa-solid fa-comment-dots text-4xl mb-3 opacity-50"></i><p>会话已切换，开始新对话吧 ✨</p></div>`;
-                    els.messagesContainer.appendChild(emptyDiv);
-                } else {
-                    state.messages.forEach(m => addMessageToUI(m.role, m.content));
-                }
-            } catch (e) { log('切换会话失败', 'error'); }
-        }
-
         async function newSession() {
+            if (state.isTyping) { showToast("请等待当前消息回复完成", "error"); return; }
             try {
                 const res = await api.post('/session/new');
                 if (res.data.status === 'OK') {
-                    state.sessions.push(res.data.session_id);
-                    await switchSession(res.data.session_id);
+                    const newId = res.data.session_id;
+                    if (!state.sessions.includes(newId)) state.sessions.push(newId);
+                    await switchSession(newId);
                     renderSessions();
+                    showToast("新会话已创建", "success");
                 }
-            } catch (e) { log('新建会话失败', 'error'); }
+            } catch (e) { log('新建会话失败', 'error'); showToast("新建会话失败", "error"); }
         }
 
         async function clearCurrentSession() {
@@ -1087,68 +841,35 @@
                 await api.post('/session/clear');
                 await switchSession(state.currentSessionId);
                 showToast("会话上下文已清除", "success");
-            } catch (error) {
-                showToast("清除失败", "error");
-            }
+            } catch (error) { showToast("清除失败", "error"); }
         }
 
         async function generateSessionSummary() {
-            if (!state.currentSessionId) {
-                showToast("当前没有打开的会话", "error");
-                return;
-            }
-
-            if (!confirm("🧠 确定要为当前会话生成记忆摘要吗？\n后端将调用模型处理当前会话记录并提取关键摘要内容。")) return;
-
-            // 直接操作按钮，避开对 <i> 或 <svg> 的直接引用
+            if (!state.currentSessionId) { showToast("当前没有打开的会话", "error"); return; }
+            if (!confirm("🧠 确定要为当前会话生成记忆摘要吗？")) return;
             const btn = els.summarySessionBtn;
-            const originalHTML = btn.innerHTML; // 备份当前图标（可能是 <i> 也可能是 FontAwesome 转换后的 <svg>）
-
-            // 设置加载状态：显示转圈并禁用按钮
+            const originalHTML = btn.innerHTML;
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
             btn.disabled = true;
-
-            showToast("正在生成记忆摘要，请稍候...", "info");
-
             try {
                 const res = await api.post('/session/memory');
-                if (res.data.status === 'done') {
-                    showToast("✅ 记忆摘要生成成功并已更新上下文", "success");
-                    log("记忆摘要生成成功", "success");
-                } else {
-                    throw new Error("生成摘要失败，服务器返回状态异常");
-                }
-            } catch (error) {
-                console.error(error);
-                const errorMsg = error.response?.data?.error || error.message;
-                showToast("生成摘要失败: " + errorMsg, "error");
-                log("摘要生成失败: " + errorMsg, "error");
-            } finally {
-                // 还原按钮内容和状态
-                btn.innerHTML = originalHTML;
-                btn.disabled = false;
-            }
+                if (res.data.status === 'done') showToast("✅ 记忆摘要生成成功并已更新上下文", "success");
+                else throw new Error("生成摘要失败");
+            } catch (error) { showToast("生成摘要失败", "error"); }
+            finally { btn.innerHTML = originalHTML; btn.disabled = false; }
         }
 
         async function getModels() {
             try {
                 const response = await api.get('/models');
-                state.models = (response.data.data || []).map(m => ({
-                    name: m.aliases?.[0] || m.id,
-                    available: m.status?.value === 'loaded',
-                }));
-                if (state.models.length == 0) {
-                    state.models.push({ name: 'default', available: true });
-                }
+                state.models = (response.data.data || []).map(m => ({ name: m.aliases?.[0] || m.id, available: m.status?.value === 'loaded' }));
+                if (state.models.length === 0) state.models.push({ name: 'default', available: true });
+                if (!state.currentModel && state.models.length) selectModel(state.models[0].name, state.models[0].available);
                 renderModels();
             } catch (error) { log('Failed to load models', 'error'); }
         }
-
         function renderModels() {
             els.modelDropdownList.innerHTML = '';
-            if (!state.currentModel && state.models.length > 0) {
-                selectModel(state.models[0].name, state.models[0].available);
-            }
             state.models.forEach(model => {
                 const isAvailable = model.available !== false;
                 const btn = document.createElement('button');
@@ -1158,11 +879,70 @@
                 els.modelDropdownList.appendChild(btn);
             });
         }
+        function selectModel(name, ok) { state.currentModel = name; els.modelNameDisplay.textContent = `Model: ${name}`; els.connectionStatusDot.className = `w-2 h-2 rounded-full ${ok ? 'bg-green-500' : 'bg-red-500'}`; }
 
-        function selectModel(name, ok) {
-            state.currentModel = name;
-            els.modelNameDisplay.textContent = `Model: ${name}`;
-            els.connectionStatusDot.className = `w-2 h-2 rounded-full ${ok ? 'bg-green-500' : 'bg-red-500'}`;
+        // --- 发送消息 (兼容当前会话)---
+        async function sendMessage() {
+            const content = els.userInput.value.trim();
+            const imagesToSend = [...state.pendingImages];
+            if ((!content && imagesToSend.length === 0) || state.isTyping || !state.currentSessionId) return;
+            addMessageToUI('user', content, null, imagesToSend);
+            els.userInput.value = '';
+            state.pendingImages = [];
+            renderImagePreviews();
+            state.isTyping = true;
+            const aiMessageId = Date.now();
+            addMessageToUI('ai', '<span class="typing-cursor">Thinking...</span>', aiMessageId);
+            try {
+                const payload = { messages: content, model: state.currentModel, think: state.thinkMode };
+                if (imagesToSend.length) payload.images = imagesToSend;
+                const res = await api.post('/input', payload);
+                let responseContent = '', thinkArray = [], aiImages = [];
+                if (res.data && Array.isArray(res.data.messages)) {
+                    for (const item of res.data.messages) {
+                        if (item.type === 'response') responseContent = item.content || '';
+                        else if (item.type === 'think') thinkArray = Array.isArray(item.content) ? item.content : [item.content];
+                        else if (item.type === 'images') aiImages = Array.isArray(item.content) ? item.content : [];
+                    }
+                } else responseContent = res.data.messages?.[0]?.content || "无法解析响应格式";
+                state.messages.push({ role: 'ai', content: responseContent, images: aiImages });
+                const useStream = state.settings.stream;
+                const msgDiv = document.getElementById(`msg-${aiMessageId}`);
+                if (msgDiv) {
+                    const bubble = msgDiv.querySelector('.bg-slate-800');
+                    if (bubble) {
+                        const newBubble = (() => {
+                            const div = document.createElement('div');
+                            div.className = 'bg-slate-800 border border-slate-700 px-4 py-2 rounded-lg shadow-md message-bubble w-full';
+                            if (state.thinkMode && thinkArray.length) {
+                                const details = document.createElement('details');
+                                details.innerHTML = `<summary class="think-summary text-xs font-medium text-blue-300 cursor-pointer list-none"><i class="fa-solid fa-chevron-right text-[10px]"></i> 🧠 深度思考轨迹 · 点击展开推理细节</summary><div class="think-steps mt-2">${thinkArray.map((step, idx) => `<div class="think-step"><span class="think-step-marker">${idx + 1}.</span><span>${escapeHtml(String(step))}</span></div>`).join('')}</div>`;
+                                div.appendChild(details);
+                            }
+                            const proseDiv = document.createElement('div');
+                            proseDiv.className = 'prose prose-sm max-w-none';
+                            proseDiv.innerHTML = marked.parse(renderFixCodeBlock(responseContent));
+                            attachCopyButtons(proseDiv);
+                            div.appendChild(proseDiv);
+                            if (aiImages.length) {
+                                const imgDiv = document.createElement('div');
+                                imgDiv.className = 'flex flex-wrap gap-2 mt-4 pt-3 border-t border-slate-700';
+                                aiImages.forEach(img => { const el = document.createElement('img'); el.src = img.startsWith('data:') ? img : 'data:image/jpeg;base64,' + img; el.className = 'max-w-sm max-h-80 object-contain rounded border border-slate-600 cursor-pointer'; el.onclick = () => window.open(el.src); imgDiv.appendChild(el); });
+                                div.appendChild(imgDiv);
+                            }
+                            return div;
+                        })();
+                        bubble.replaceWith(newBubble);
+                    }
+                }
+                log(`AI响应完成`, 'success');
+            } catch (error) {
+                const errorMsg = error.response?.data?.error || '请求失败';
+                const msgDiv = document.getElementById(`msg-${aiMessageId}`);
+                if (msgDiv) { const prose = msgDiv.querySelector('.prose'); if (prose) prose.innerHTML = `<span class="text-red-400">❌ ${escapeHtml(errorMsg)}</span>`; }
+                else addMessageToUI('ai', `错误: ${errorMsg}`);
+                log(`发送失败: ${errorMsg}`, 'error');
+            } finally { state.isTyping = false; }
         }
 
         async function loadTools() { try { const res = await api.get('/tools'); state.tools = res.data || []; renderTools(); } catch (e) { } }
@@ -1171,27 +951,19 @@
         window.deleteTodo = async function (id) { if (!confirm('删除待办?')) return; await api.get(`/todos/delete/${id}`); state.todos = state.todos.filter(t => t.id != id); renderTodos(); };
         window.doneTodo = async function (id, isDone) { const todo = state.todos.find(t => t.id == id); if (todo) { todo.done = !isDone; await api.post(`/todos/${id}`, todo); renderTodos(); } };
         els.addTodoBtn.onclick = async () => { if (!els.newTodoInput.value.trim()) return; const res = await api.post('/todos/new', { id: String(Date.now()), done: false, content: els.newTodoInput.value }); state.todos.push(res.data); renderTodos(); els.newTodoInput.value = ''; };
-        function renderTodos() {
-            if (!state.todos?.length) { els.todosList.innerHTML = '<div class="text-gray-500 text-sm p-4 text-center">暂无待办</div>'; return; }
-            els.todosList.innerHTML = state.todos.map(t => `<div class="flex items-center justify-between bg-slate-900 p-3 rounded-lg text-sm mb-2 border border-slate-800"><div class="flex items-center gap-3 flex-1 cursor-pointer" onclick="doneTodo(${t.id}, ${t.done})"><div class="w-5 h-5 rounded border flex items-center justify-center ${t.done ? 'bg-green-600 border-green-600' : 'border-gray-500'}">${t.done ? '<svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>' : ''}</div><p class="text-gray-300 truncate ${t.done ? 'line-through opacity-60' : ''}">${escapeHtml(t.content)}</p></div><button onclick="event.stopPropagation(); deleteTodo(${t.id})" class="bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white px-3 py-1 rounded text-xs">删除</button></div>`).join('');
-        }
+        function renderTodos() { if (!state.todos?.length) { els.todosList.innerHTML = '<div class="text-gray-500 text-sm p-4 text-center">暂无待办</div>'; return; } els.todosList.innerHTML = state.todos.map(t => `<div class="flex items-center justify-between bg-slate-900 p-3 rounded-lg text-sm mb-2 border border-slate-800"><div class="flex items-center gap-3 flex-1 cursor-pointer" onclick="doneTodo(${t.id}, ${t.done})"><div class="w-5 h-5 rounded border flex items-center justify-center ${t.done ? 'bg-green-600 border-green-600' : 'border-gray-500'}">${t.done ? '<svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>' : ''}</div><p class="text-gray-300 truncate ${t.done ? 'line-through opacity-60' : ''}">${escapeHtml(t.content)}</p></div><button onclick="event.stopPropagation(); deleteTodo(${t.id})" class="bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white px-3 py-1 rounded text-xs">删除</button></div>`).join(''); }
         async function loadChannels() { try { const res = await api.get('/channels'); state.channels = res.data || []; renderChannels(); } catch (e) { } }
         function renderChannels() { els.channelsList.innerHTML = state.channels.map(c => `<div class="p-2 hover:bg-slate-700 rounded cursor-pointer text-sm"># ${c.name}</div>`).join(''); }
 
-        // --- 初始化应用 ---
         async function init() {
             els.currentUserDisplay.textContent = state.user;
-            await loadSettings();      // 加载配置并渲染设置表单
+            await loadSettings();
             await getModels();
-            await loadSessions();
+            await loadSessions();  // 内部自动创建或选中默认会话
             await loadTools();
             await loadTodos();
             await loadChannels();
-
-            // 绑定保存按钮事件
-            if (els.saveSettingsBtn) {
-                els.saveSettingsBtn.onclick = saveSettings;
-            }
+            els.saveSettingsBtn.onclick = saveSettings;
         }
 
         // --- 事件绑定 ---
@@ -1199,20 +971,11 @@
         els.newSessionBtn.onclick = newSession;
         els.clearSessionBtn.onclick = clearCurrentSession;
         els.summarySessionBtn.onclick = generateSessionSummary;
-        els.tabBtns.forEach(btn => {
-            btn.onclick = () => {
-                els.tabBtns.forEach(b => b.classList.replace('text-blue-400', 'text-slate-400'));
-                btn.classList.replace('text-slate-400', 'text-blue-400');
-                els.tabContents.forEach(c => c.classList.add('hidden'));
-                document.getElementById(`tab-${btn.dataset.tab}`).classList.remove('hidden');
-            };
-        });
+        els.tabBtns.forEach(btn => { btn.onclick = () => { els.tabBtns.forEach(b => b.classList.replace('text-blue-400', 'text-slate-400')); btn.classList.replace('text-slate-400', 'text-blue-400'); els.tabContents.forEach(c => c.classList.add('hidden')); document.getElementById(`tab-${btn.dataset.tab}`).classList.remove('hidden'); }; });
         els.userInput.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } };
         els.sendBtn.onclick = sendMessage;
         els.modelDropdownBtn.onclick = (e) => { e.stopPropagation(); els.modelDropdownMenu.classList.toggle('hidden'); };
         document.onclick = () => els.modelDropdownMenu.classList.add('hidden');
-
-        // 启动应用
         init();
     </script>
 </body>
