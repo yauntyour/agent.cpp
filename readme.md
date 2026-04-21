@@ -12,17 +12,27 @@
 
 ### 快速启动
 
+1.下载仓库
 ```bash
-#Linux
-mkdir build && cd build
-cmake .. -DWEBUI_INCLUDE_DIR=/path/to/webui/include -DWEBUI_LIBRARY=/path/to/webui/libwebui-2.a
-
-#Windows
-mkdir build && cd build
-cmake .. -DWEBUI_INCLUDE_DIR=/path/to/webui/include -DWEBUI_LIBRARY=/path/to/webui/libwebui-2.dll
+git clone --recursive https://github.com/yauntyour/agent.cpp.git
+cd agent.cpp
+wget https://github.com/webui-dev/webui/releases/download/nightly/webui-XXXXX.zip -O webui.zip
+unzip webui.zip # 请确保agent.cpp/webui下有运行库文件和include文件夹
 ```
+2.编译
 
+```bash
+# 编译
+mkdir build && cd build
+cmake ..
+cmake --build .
+```
+3.启动WebUI程序
 
+```bash
+#启动程序
+./webui 
+```
 
 ## 核心特性
 
