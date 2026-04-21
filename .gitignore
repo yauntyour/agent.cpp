@@ -2,3 +2,5 @@
 *.exe
 sessions/*
 memorys/*
+*.a
+*.dll
