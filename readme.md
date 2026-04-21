@@ -6,9 +6,23 @@
 
 **设计理念**：语言是经验的载体。LLM 作为系统的语言中枢服务于 Agent，Agent 再将语言转化为行动与记忆。二者的协同，是通向通用人工智能（AGI）的一条可行路径。
 
-## WebUI
+## WebUI安装
 
 ![WebUI 截图](./assets/WebUI.png)
+
+### 快速启动
+
+```bash
+#Linux
+mkdir build && cd build
+cmake .. -DWEBUI_INCLUDE_DIR=/path/to/webui/include -DWEBUI_LIBRARY=/path/to/webui/libwebui-2.a
+
+#Windows
+mkdir build && cd build
+cmake .. -DWEBUI_INCLUDE_DIR=/path/to/webui/include -DWEBUI_LIBRARY=/path/to/webui/libwebui-2.dll
+```
+
+
 
 ## 核心特性
 
