@@ -8,30 +8,46 @@ on:
     types: [ published ]
   workflow_dispatch:
   schedule:
-    # 新增定时触发器
-    - cron: "0 0 * * *" # 每天 UTC 0:00
+    - cron: "0 0 * * *" # 每天 UTC 0:00 自动构建 nightly
 
 permissions:
   contents: write
 
 jobs:
   build:
-    name: Build on ${{ matrix.os }}
+    name: Build on ${{ matrix.os }} (${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ ubuntu-latest, windows-latest, macos-latest ]
         include:
+          # Linux x86_64
           - os: ubuntu-latest
-            artifact_name: agent-cpp-linux
+            arch: x86_64
+            artifact_name: agent-cpp-linux-x86_64
             asset_suffix: .tar.gz
+            cmake_generator: "Unix Makefiles"
+
+          # Windows x86_64
           - os: windows-latest
-            artifact_name: agent-cpp-windows
+            arch: x86_64
+            artifact_name: agent-cpp-windows-x86_64
             asset_suffix: .zip
-          - os: macos-latest
-            artifact_name: agent-cpp-macos
+            cmake_generator: "Visual Studio 17 2022"
+
+          # macOS Intel (x86_64)
+          - os: macos-13
+            arch: x86_64
+            artifact_name: agent-cpp-macos-x86_64
             asset_suffix: .tar.gz
+            cmake_generator: "Unix Makefiles"
+
+          # macOS Apple Silicon (ARM64)
+          - os: macos-latest
+            arch: arm64
+            artifact_name: agent-cpp-macos-arm64
+            asset_suffix: .tar.gz
+            cmake_generator: "Unix Makefiles"
 
     steps:
       - name: Checkout code with submodules
@@ -39,24 +55,76 @@ jobs:
         with:
           submodules: recursive
 
-      # ... (各平台依赖安装、配置、编译、打包步骤保持不变) ...
+      # ---------- 各平台依赖安装（根据实际情况调整） ----------
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake
 
-      - name: Determine package file name
-        id: package
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        run: |
+          brew install cmake
+
+      - name: Install Windows dependencies
+        if: runner.os == 'Windows'
+        run: |
+          choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System'
+
+      # ---------- 配置与编译 ----------
+      - name: Configure CMake
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -G "${{ matrix.cmake_generator
+          }}"
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      # ---------- 打包并重命名，加入架构和版本信息 ----------
+      - name: Package and rename
         shell: bash
         run: |
           cd build
-          PKG_FILE=$(ls *${{ matrix.asset_suffix }} | head -1)
-          echo "pkg_file=$PKG_FILE" >> $GITHUB_OUTPUT
-          echo "pkg_path=build/$PKG_FILE" >> $GITHUB_OUTPUT
+          # 执行打包（根据平台使用不同的 CPack 生成器）
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            cpack -G ZIP -C Release
+          else
+            cpack -G TGZ
+          fi
 
+          # 获取版本标识（标签名或 nightly）
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            VERSION="${{ github.ref_name }}"
+          else
+            VERSION="nightly"
+          fi
+
+          # 构建最终文件名：agent-cpp-<os>-<arch>-<version>.<ext>
+          # 提取操作系统短名称（去掉版本号，如 macos-13 → macos）
+          OS_NAME=$(echo "${{ matrix.os }}" | sed 's/-[0-9]*$//')
+          EXT="${{ matrix.asset_suffix }}"
+          NEW_NAME="agent-cpp-${OS_NAME}-${{ matrix.arch }}-${VERSION}${EXT}"
+
+          # 重命名生成的包（假设只生成一个匹配后缀的文件）
+          for f in *${EXT}; do
+            mv "$f" "$NEW_NAME"
+            echo "Renamed $f to $NEW_NAME"
+            break
+          done
+
+          # 输出文件路径供后续步骤使用
+          echo "pkg_file=$NEW_NAME" >> $GITHUB_OUTPUT
+          echo "pkg_path=build/$NEW_NAME" >> $GITHUB_OUTPUT
+        id: package
+
+      # ---------- 上传构建产物到 Actions Artifact ----------
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
           path: ${{ steps.package.outputs.pkg_path }}
 
-      # ---------- 稳定版 Release（标签推送） ----------
+      # ---------- 稳定版 Release（标签推送时触发） ----------
       - name: Release (Stable)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
@@ -78,7 +146,7 @@ jobs:
           name: agent.cpp Nightly Build
           body: |
             Automated nightly build from commit ${{ github.sha }}.
-            Built on ${{ matrix.os }}.
+            Built on ${{ matrix.os }} (${{ matrix.arch }}).
           prerelease: true
           files: ${{ steps.package.outputs.pkg_path }}
           fail_on_unmatched_files: true
