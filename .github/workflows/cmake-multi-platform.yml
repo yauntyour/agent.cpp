@@ -39,7 +39,78 @@ jobs:
         with:
           submodules: recursive
 
-      # ... (各平台依赖安装、配置、编译、打包步骤保持不变) ...
+      # ---------- Linux (仅头文件) ----------
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcurl4-openssl-dev libboost-dev
+
+      # ---------- macOS ----------
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+          brew install cmake ninja curl boost
+
+      # ---------- Windows (MSYS2) ----------
+      - name: Setup MSYS2 and install dependencies (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-curl mingw-w64-x86_64-boost
+
+      # ---------- CMake 配置 ----------
+      - name: Configure CMake (Windows MSYS2)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          mkdir build
+          cd build
+          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release
+
+      - name: Configure CMake (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir build
+          cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+
+      # ---------- 编译 ----------
+      - name: Build (Windows MSYS2)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: cmake --build build --parallel
+
+      - name: Build (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: cmake --build build --config Release --parallel
+
+      # ---------- 安装 ----------
+      - name: Install (staging)
+        shell: bash
+        run: cmake --install build --prefix install
+
+      # ---------- 打包 ----------
+      - name: Package with CPack (Windows MSYS2)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          cd build
+          cpack -G ZIP
+
+      - name: Package with CPack (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cd build
+          cpack -G TGZ
 
       - name: Determine package file name
         id: package
