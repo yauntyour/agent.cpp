@@ -1,0 +1,8 @@
+{
+    "name": "agent.cpp",
+    "version": "1.0.0",
+    "dependencies": [
+        "curl",
+        "boost-system"
+    ]
+}

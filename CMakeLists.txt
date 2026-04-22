@@ -5,7 +5,6 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-
 # 输出目录统一
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
@@ -13,9 +12,11 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 # 查找依赖
 find_package(CURL REQUIRED)
-find_package(Boost REQUIRED COMPONENTS system) # asio 需要 Boost.System（部分平台）
 
-# nlohmann_json 通过 FetchContent 自动获取（避免外部依赖）
+# 查找 Boost，优先使用 Config 模式，macOS 上通过 Boost_ROOT 指定路径
+find_package(Boost REQUIRED COMPONENTS system)
+
+# nlohmann_json 通过 FetchContent 自动获取
 include(FetchContent)
 FetchContent_Declare(
     nlohmann_json
@@ -24,12 +25,10 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(nlohmann_json)
 
-
 # 主可执行文件
 add_executable(app
     app.cpp
 )
-
 
 # 链接库
 target_link_libraries(app PRIVATE
@@ -38,7 +37,7 @@ target_link_libraries(app PRIVATE
     nlohmann_json::nlohmann_json
 )
 
-# Windows 下需要链接 winsock 库
+# Windows 下需要链接 Winsock 库
 if(WIN32)
     target_link_libraries(app PRIVATE ws2_32 wsock32)
 endif()
@@ -50,7 +49,7 @@ else()
     target_compile_options(app PRIVATE -Wall -Wextra -pedantic)
 endif()
 
-# 定义需要打包的资产文件（相对于源码根目录）
+# 需要打包的资产文件（相对于源码根目录）
 set(ASSET_FILES
     webui.html
     agent.txt
@@ -62,7 +61,7 @@ set(ASSET_DIRS
     tools
 )
 
-# 安装规则：将二进制和资产安装到目标目录
+# 安装规则
 install(TARGETS app RUNTIME DESTINATION .)
 
 foreach(file ${ASSET_FILES})
@@ -78,7 +77,7 @@ install(DIRECTORY DESTINATION ./sessions)
 install(DIRECTORY DESTINATION ./memorys)
 install(DIRECTORY DESTINATION ./assets)
 
-# CPack 配置（用于生成 .zip/.tar.gz 等归档包）
+# ---------- CPack 配置 ----------
 set(CPACK_PACKAGE_NAME ${PROJECT_NAME})
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "C++ Agent with web UI and tools")
