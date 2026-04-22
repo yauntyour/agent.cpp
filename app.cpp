@@ -412,7 +412,8 @@ namespace app
                     auto cs_count = cs_unit::cs_scan(tool_call_content, sys_out);
                     if (cs_count > 0 | tools_count > 0)
                     {
-                        printf("CS CALL NUM: %d\nTOOL CALL NUM: %d, SUCCEED: %d, FAIL: \n", cs_count, tools_count, succeed, tools_count - succeed);
+                        printf("CS CALL NUM: %zu\nTOOL CALL NUM: %zu, SUCCEED: %zu, FAIL: %zu\n",
+                               cs_count, tools_count, succeed, tools_count - succeed);
                         // prepare data
                         _content += "\r\n" + sys_out;
                         sys_outs.push_back({{"type", "text"},
@@ -855,7 +856,6 @@ namespace app
                 return rt::FLAG_ERROR;
             }
         }
-
         int handle_session_memory(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
             try

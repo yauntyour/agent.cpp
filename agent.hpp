@@ -1123,7 +1123,7 @@ namespace cs_unit
              try
              {
                  int seed;
-                 sscanf_s(args.data(), "%d", &seed);
+                 sscanf(args.data(), "%d", &seed);
                  std::mt19937 gen(seed);
                  std::uniform_int_distribution<int> dist(-1e9, 1e9);
                  return std::to_string(dist(gen));
