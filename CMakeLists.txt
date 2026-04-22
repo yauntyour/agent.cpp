@@ -13,10 +13,8 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 # 查找 CURL
 find_package(CURL REQUIRED)
 
-# 解决 macOS Homebrew Boost 1.90+ 的 Config 模式查找失败问题
-# 强制使用旧版 FindBoost 模块
 if(POLICY CMP0167)
-    cmake_policy(SET CMP0167 OLD)
+    cmake_policy(SET CMP0167 NEW)
 endif()
 find_package(Boost REQUIRED COMPONENTS system)
 

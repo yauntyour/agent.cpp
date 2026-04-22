@@ -40,13 +40,18 @@ jobs:
           sudo apt-get install -y libcurl4-openssl-dev libboost-system-dev
 
       # ---------- macOS ----------
+      - name: Setup latest CMake (macOS)
+        if: runner.os == 'macOS'
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: "3.31.x" # 确保版本 >= 3.31 以支持 Boost 1.90
+
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
           brew update
           brew install curl boost
-          echo "Boost_ROOT=$(brew --prefix boost)" >> $GITHUB_ENV
-
+          echo "Boost_ROOT=$(brew --prefix boost)" >>$GITHUB_ENV
       # ---------- Windows (改用 MSYS2) ----------
       - name: Setup MSYS2 and install dependencies (Windows)
         if: runner.os == 'Windows'
