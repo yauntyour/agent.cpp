@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 project(AgentCPP VERSION 1.0.0 LANGUAGES CXX)
 
 # C++26 标准
-set(CMAKE_CXX_STANDARD 26)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -30,18 +30,12 @@ add_executable(app
     app.cpp
 )
 
-# 头文件目录
-target_include_directories(app PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/servic.cpp/include
-)
 
 # 链接库
 target_link_libraries(app PRIVATE
     CURL::libcurl
     Boost::system
     nlohmann_json::nlohmann_json
-    servic
 )
 
 # Windows 下需要链接 winsock 库
