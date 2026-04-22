@@ -5,18 +5,22 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# 输出目录统一
+# 统一输出目录
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
-# 查找依赖
+# 查找 CURL
 find_package(CURL REQUIRED)
 
-# 查找 Boost，优先使用 Config 模式，macOS 上通过 Boost_ROOT 指定路径
+# 解决 macOS Homebrew Boost 1.90+ 的 Config 模式查找失败问题
+# 强制使用旧版 FindBoost 模块
+if(POLICY CMP0167)
+    cmake_policy(SET CMP0167 OLD)
+endif()
 find_package(Boost REQUIRED COMPONENTS system)
 
-# nlohmann_json 通过 FetchContent 自动获取
+# 通过 FetchContent 获取 nlohmann_json
 include(FetchContent)
 FetchContent_Declare(
     nlohmann_json
@@ -37,7 +41,7 @@ target_link_libraries(app PRIVATE
     nlohmann_json::nlohmann_json
 )
 
-# Windows 下需要链接 Winsock 库
+# Windows 需要 Winsock
 if(WIN32)
     target_link_libraries(app PRIVATE ws2_32 wsock32)
 endif()
@@ -72,12 +76,12 @@ foreach(dir ${ASSET_DIRS})
     install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/${dir}/ DESTINATION ./${dir})
 endforeach()
 
-# 创建工作目录的空子目录（运行时需要）
+# 运行时需要的空目录
 install(DIRECTORY DESTINATION ./sessions)
 install(DIRECTORY DESTINATION ./memorys)
 install(DIRECTORY DESTINATION ./assets)
 
-# ---------- CPack 配置 ----------
+# ---------- CPack ----------
 set(CPACK_PACKAGE_NAME ${PROJECT_NAME})
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "C++ Agent with web UI and tools")

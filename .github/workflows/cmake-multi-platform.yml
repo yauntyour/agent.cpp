@@ -33,39 +33,36 @@ jobs:
         with:
           submodules: recursive
 
-      # ---------- Linux 依赖 ----------
+      # ---------- Linux ----------
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libcurl4-openssl-dev libboost-system-dev
 
-      # ---------- macOS 依赖 ----------
+      # ---------- macOS ----------
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
           brew update
           brew install curl boost
-          # 显式设置 Boost_ROOT，帮助 CMake 找到 Homebrew 安装的 Boost
+          # 设置 Boost_ROOT 供 FindBoost 模块使用
           echo "Boost_ROOT=$(brew --prefix boost)" >> $GITHUB_ENV
 
-      # ---------- Windows 依赖（通过 vcpkg 清单）----------
+      # ---------- Windows ----------
       - name: Setup vcpkg and install dependencies (Windows)
         if: runner.os == 'Windows'
         uses: lukka/run-vcpkg@v11
         with:
-          # 将 vcpkg 安装在工作区目录下
           vcpkgDirectory: "${{ github.workspace }}/vcpkg"
-          # 可选的固定 commit ID（建议使用稳定版本）
-          # 若不指定，默认使用最新版本
-          vcpkgGitCommitId: "b02e1c6e5b1b2a0e2e5e0e8f9f1e2e3e4e5e6e7e"
+          # 不指定 commit 则使用 master 分支最新版（稳定可用）
+          # vcpkgGitCommitId: 'fba12d1cd4c83e2c8e5b9e5c5e8e9e1e2e3e4e5e6'  # 如需固定版本，填入真实 hash
 
-      # ---------- CMake 配置 ----------
+          # ---------- CMake 配置 ----------
       - name: Configure CMake
         run: |
           mkdir build
           cd build
-          # 在 Windows 上 run-vcpkg 会自动设置 CMAKE_TOOLCHAIN_FILE 环境变量
           cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="${{ env.CMAKE_TOOLCHAIN_FILE }}"
         shell: bash
 
@@ -82,25 +79,24 @@ jobs:
           cpack -G ${{ matrix.os == 'windows-latest' && 'ZIP' || 'TGZ' }}
         shell: bash
 
-      # ---------- 确定生成的包文件名 ----------
+      # ---------- 识别包文件名 ----------
       - name: Determine package file name
         id: package
         shell: bash
         run: |
           cd build
-          # 匹配扩展名为 asset_suffix 的文件（通常只有一个）
           PKG_FILE=$(ls *${{ matrix.asset_suffix }} | head -1)
           echo "pkg_file=$PKG_FILE" >> $GITHUB_OUTPUT
           echo "pkg_path=build/$PKG_FILE" >> $GITHUB_OUTPUT
 
-      # ---------- 上传工件（用于工作流内部）----------
+      # ---------- 上传工件 ----------
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
           path: ${{ steps.package.outputs.pkg_path }}
 
-      # ---------- 上传到 GitHub Release ----------
+      # ---------- 发布到 Release ----------
       - name: Upload to Release
         if: github.event_name == 'release'
         uses: svenstaro/upload-release-action@v2
