@@ -1,0 +1,96 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            artifact_name: agent-cpp-linux
+            asset_suffix: .tar.gz
+          - os: windows-latest
+            artifact_name: agent-cpp-windows
+            asset_suffix: .zip
+          - os: macos-latest
+            artifact_name: agent-cpp-macos
+            asset_suffix: .tar.gz
+
+    steps:
+      - name: Checkout code with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcurl4-openssl-dev libboost-system-dev
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+          brew install curl boost
+
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          # curl 通常已自带，Boost 通过 vcpkg 或 choco 安装，这里使用 vcpkg 更可靠
+          vcpkg install curl boost-system --triplet x64-windows
+          echo "CMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" >> $env:GITHUB_ENV
+
+      - name: Configure CMake
+        run: |
+          mkdir build
+          cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release ${{ env.CMAKE_TOOLCHAIN_FILE && format('-DCMAKE_TOOLCHAIN_FILE={0}', env.CMAKE_TOOLCHAIN_FILE) }}
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Install (staging)
+        run: cmake --install build --prefix install
+
+      - name: Package with CPack
+        run: |
+          cd build
+          cpack -G ${{ matrix.os == 'windows-latest' && 'ZIP' || 'TGZ' }}
+        shell: bash
+
+      - name: Determine package file name
+        id: package
+        shell: bash
+        run: |
+          cd build
+          PKG_FILE=$(ls AgentCPP-*${{ matrix.asset_suffix }})
+          echo "pkg_file=$PKG_FILE" >> $GITHUB_OUTPUT
+          echo "pkg_path=build/$PKG_FILE" >> $GITHUB_OUTPUT
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ steps.package.outputs.pkg_path }}
+
+      - name: Upload to Release
+        if: github.event_name == 'release'
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ${{ steps.package.outputs.pkg_path }}
+          asset_name: ${{ matrix.artifact_name }}-${{ github.ref_name }}${{ matrix.asset_suffix }}
+          tag: ${{ github.ref }}
+          overwrite: true
