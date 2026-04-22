@@ -18,7 +18,7 @@ find_package(CURL REQUIRED)
 if(POLICY CMP0167)
     cmake_policy(SET CMP0167 OLD)
 endif()
-find_package(Boost REQUIRED COMPONENTS system)
+find_package(Boost REQUIRED)
 
 # 通过 FetchContent 获取 nlohmann_json
 include(FetchContent)
