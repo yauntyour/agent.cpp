@@ -716,7 +716,7 @@ namespace app
         {
             try
             {
-                json::array_t todos = json::parse(tool_unit::readFile("todos.json"));
+                json::array_t todos = json::parse(tool_unit::readFile(run_unit::settings["workspace"].get_ref<const std::string &>() + "/todos.json"));
                 output = build_http_response(200, "application/json", json(todos).dump());
                 return rt::FLAG_DONE;
             }
@@ -758,13 +758,13 @@ namespace app
                 std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
                 json request = json::parse(body);
                 std::string id = params.count("id") ? params.at("id") : "unknown";
-                json::array_t todos = json::parse(tool_unit::readFile("todos.json"));
+                json::array_t todos = json::parse(tool_unit::readFile(run_unit::settings["workspace"].get_ref<const std::string &>() + "/todos.json"));
                 for (auto &todo : todos)
                 {
                     if (todo["id"].get_ref<const std::string &>() == id)
                     {
                         todo = request;
-                        tool_unit::writeFile("todos.json", json(todos).dump());
+                        tool_unit::writeFile(run_unit::settings["workspace"].get_ref<const std::string &>() + "/todos.json", json(todos).dump());
                         output = build_http_response(200, "application/json", "{}");
                         return rt::FLAG_DONE;
                     }
@@ -782,11 +782,11 @@ namespace app
         int handle_todos_delete(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
             std::string id = params.count("id") ? params.at("id") : "unknown";
-            json::array_t todos = json::parse(tool_unit::readFile("todos.json"));
+            json::array_t todos = json::parse(tool_unit::readFile(run_unit::settings["workspace"].get_ref<const std::string &>() + "/todos.json"));
             todos.erase(std::remove_if(todos.begin(), todos.end(), [&](const json &todo)
                                        { return todo["id"].get_ref<const std::string &>() == id; }),
                         todos.end());
-            tool_unit::writeFile("todos.json", json(todos).dump());
+            tool_unit::writeFile(run_unit::settings["workspace"].get_ref<const std::string &>() + "/todos.json", json(todos).dump());
             output = build_http_response(200, "application/json", "{}");
             return rt::FLAG_DONE;
         }
@@ -798,9 +798,9 @@ namespace app
                 std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
                 json request = json::parse(body);
 
-                json::array_t todos = json::parse(tool_unit::readFile("todos.json"));
+                json::array_t todos = json::parse(tool_unit::readFile(run_unit::settings["workspace"].get_ref<const std::string &>() + "/todos.json"));
                 todos.push_back(request);
-                tool_unit::writeFile("todos.json", json(todos).dump());
+                tool_unit::writeFile(run_unit::settings["workspace"].get_ref<const std::string &>() + "/todos.json", json(todos).dump());
                 output = build_http_response(200, "application/json", request.dump());
                 return rt::FLAG_DONE;
             }
