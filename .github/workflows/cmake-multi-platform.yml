@@ -55,15 +55,12 @@ jobs:
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgDirectory: "${{ github.workspace }}/vcpkg"
-          # 不指定 commit 则使用 master 分支最新版（稳定可用）
-          # vcpkgGitCommitId: 'fba12d1cd4c83e2c8e5b9e5c5e8e9e1e2e3e4e5e6'  # 如需固定版本，填入真实 hash
-
           # ---------- CMake 配置 ----------
       - name: Configure CMake
         run: |
           mkdir build
           cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release"
+          cmake .. -DCMAKE_BUILD_TYPE=Release
         shell: bash
 
       - name: Build
