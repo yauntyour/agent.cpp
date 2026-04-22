@@ -7,47 +7,29 @@ on:
   release:
     types: [ published ]
   workflow_dispatch:
-  schedule:
-    - cron: "0 0 * * *" # 每天 UTC 0:00 自动构建 nightly
 
+    # 显式赋予 GITHUB_TOKEN 读写权限，确保有足够权限创建 Release 和上传资产
 permissions:
   contents: write
 
 jobs:
   build:
-    name: Build on ${{ matrix.os }} (${{ matrix.arch }})
+    name: Build on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
         include:
-          # Linux x86_64
           - os: ubuntu-latest
-            arch: x86_64
-            artifact_name: agent-cpp-linux-x86_64
+            artifact_name: agent-cpp-linux
             asset_suffix: .tar.gz
-            cmake_generator: "Unix Makefiles"
-
-          # Windows x86_64
           - os: windows-latest
-            arch: x86_64
-            artifact_name: agent-cpp-windows-x86_64
+            artifact_name: agent-cpp-windows
             asset_suffix: .zip
-            cmake_generator: "Visual Studio 17 2022"
-
-          # macOS Intel (x86_64)
-          - os: macos-13
-            arch: x86_64
-            artifact_name: agent-cpp-macos-x86_64
-            asset_suffix: .tar.gz
-            cmake_generator: "Unix Makefiles"
-
-          # macOS Apple Silicon (ARM64)
           - os: macos-latest
-            arch: arm64
-            artifact_name: agent-cpp-macos-arm64
+            artifact_name: agent-cpp-macos
             asset_suffix: .tar.gz
-            cmake_generator: "Unix Makefiles"
 
     steps:
       - name: Checkout code with submodules
@@ -55,98 +37,104 @@ jobs:
         with:
           submodules: recursive
 
-      # ---------- 各平台依赖安装（根据实际情况调整） ----------
-      - name: Install Linux dependencies
+      # ---------- Linux (仅头文件) ----------
+      - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake
+          sudo apt-get install -y libcurl4-openssl-dev libboost-dev
 
-      - name: Install macOS dependencies
+      # ---------- macOS ----------
+      - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install cmake
+          brew update
+          brew install cmake ninja curl boost
 
-      - name: Install Windows dependencies
+      # ---------- Windows (MSYS2) ----------
+      - name: Setup MSYS2 and install dependencies (Windows)
         if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-curl mingw-w64-x86_64-boost
+
+      # ---------- CMake 配置 ----------
+      - name: Configure CMake (Windows MSYS2)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
         run: |
-          choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System'
+          mkdir build
+          cd build
+          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release
 
-      # ---------- 配置与编译 ----------
-      - name: Configure CMake
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -G "${{ matrix.cmake_generator
-          }}"
+      - name: Configure CMake (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir build
+          cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
 
-      - name: Build
-        run: cmake --build build --config Release
+      # ---------- 编译 ----------
+      - name: Build (Windows MSYS2)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: cmake --build build --parallel
 
-      # ---------- 打包并重命名，加入架构和版本信息 ----------
-      - name: Package and rename
+      - name: Build (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: cmake --build build --config Release --parallel
+
+      # ---------- 安装 ----------
+      - name: Install (staging)
+        shell: bash
+        run: cmake --install build --prefix install
+
+      # ---------- 打包 ----------
+      - name: Package with CPack (Windows MSYS2)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          cd build
+          cpack -G ZIP
+
+      - name: Package with CPack (Unix)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           cd build
-          # 执行打包（根据平台使用不同的 CPack 生成器）
-          if [[ "${{ runner.os }}" == "Windows" ]]; then
-            cpack -G ZIP -C Release
-          else
-            cpack -G TGZ
-          fi
+          cpack -G TGZ
 
-          # 获取版本标识（标签名或 nightly）
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            VERSION="${{ github.ref_name }}"
-          else
-            VERSION="nightly"
-          fi
-
-          # 构建最终文件名：agent-cpp-<os>-<arch>-<version>.<ext>
-          # 提取操作系统短名称（去掉版本号，如 macos-13 → macos）
-          OS_NAME=$(echo "${{ matrix.os }}" | sed 's/-[0-9]*$//')
-          EXT="${{ matrix.asset_suffix }}"
-          NEW_NAME="agent-cpp-${OS_NAME}-${{ matrix.arch }}-${VERSION}${EXT}"
-
-          # 重命名生成的包（假设只生成一个匹配后缀的文件）
-          for f in *${EXT}; do
-            mv "$f" "$NEW_NAME"
-            echo "Renamed $f to $NEW_NAME"
-            break
-          done
-
-          # 输出文件路径供后续步骤使用
-          echo "pkg_file=$NEW_NAME" >> $GITHUB_OUTPUT
-          echo "pkg_path=build/$NEW_NAME" >> $GITHUB_OUTPUT
+      # ---------- 识别包文件名 ----------
+      - name: Determine package file name
         id: package
+        shell: bash
+        run: |
+          cd build
+          PKG_FILE=$(ls *${{ matrix.asset_suffix }} | head -1)
+          echo "pkg_file=$PKG_FILE" >> $GITHUB_OUTPUT
+          echo "pkg_path=build/$PKG_FILE" >> $GITHUB_OUTPUT
 
-      # ---------- 上传构建产物到 Actions Artifact ----------
+      # ---------- 上传工件到 Actions 临时存储 ----------
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
           path: ${{ steps.package.outputs.pkg_path }}
 
-      # ---------- 稳定版 Release（标签推送时触发） ----------
-      - name: Release (Stable)
-        if: startsWith(github.ref, 'refs/tags/')
+      # ---------- 发布到 Release（仅在标签推送或正式发布时执行） ----------
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           tag_name: ${{ github.ref_name }}
           name: agent.cpp ${{ github.ref_name }}
           body_path: release.md
-          files: ${{ steps.package.outputs.pkg_path }}
-          fail_on_unmatched_files: true
-
-      # ---------- Nightly 版 Release（定时或手动触发） ----------
-      - name: Release (Nightly)
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-        uses: softprops/action-gh-release@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          tag_name: nightly
-          name: agent.cpp Nightly Build
-          body: |
-            Automated nightly build from commit ${{ github.sha }}.
-            Built on ${{ matrix.os }} (${{ matrix.arch }}).
-          prerelease: true
           files: ${{ steps.package.outputs.pkg_path }}
           fail_on_unmatched_files: true
