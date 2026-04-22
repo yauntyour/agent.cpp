@@ -1,5 +1,4 @@
 name: Build and Release
-
 on:
   push:
     tags:
@@ -46,35 +45,66 @@ jobs:
         run: |
           brew update
           brew install curl boost
-          # 设置 Boost_ROOT 供 FindBoost 模块使用
           echo "Boost_ROOT=$(brew --prefix boost)" >> $GITHUB_ENV
 
-      # ---------- Windows ----------
-      - name: Setup vcpkg and install dependencies (Windows)
+      # ---------- Windows (改用 MSYS2) ----------
+      - name: Setup MSYS2 and install dependencies (Windows)
         if: runner.os == 'Windows'
-        uses: lukka/run-vcpkg@v11
+        uses: msys2/setup-msys2@v2
         with:
-          vcpkgDirectory: "${{ github.workspace }}/vcpkg"
-          # ---------- CMake 配置 ----------
-      - name: Configure CMake
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-curl mingw-w64-x86_64-boost
+
+      # ---------- CMake 配置 ----------
+      - name: Configure CMake (Windows MSYS2)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          mkdir build
+          cd build
+          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release
+
+      - name: Configure CMake (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
         run: |
           mkdir build
           cd build
           cmake .. -DCMAKE_BUILD_TYPE=Release
-        shell: bash
 
-      - name: Build
+      # ---------- 编译 ----------
+      - name: Build (Windows MSYS2)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: cmake --build build --parallel
+
+      - name: Build (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
         run: cmake --build build --config Release --parallel
 
+      # ---------- 安装 ----------
       - name: Install (staging)
+        shell: bash
         run: cmake --install build --prefix install
 
       # ---------- 打包 ----------
-      - name: Package with CPack
+      - name: Package with CPack (Windows MSYS2)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
         run: |
           cd build
-          cpack -G ${{ matrix.os == 'windows-latest' && 'ZIP' || 'TGZ' }}
+          cpack -G ZIP
+
+      - name: Package with CPack (Unix)
+        if: runner.os != 'Windows'
         shell: bash
+        run: |
+          cd build
+          cpack -G TGZ
 
       # ---------- 识别包文件名 ----------
       - name: Determine package file name

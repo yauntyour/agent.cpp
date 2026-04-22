@@ -16,7 +16,7 @@ find_package(CURL REQUIRED)
 # 解决 macOS Homebrew Boost 1.90+ 的 Config 模式查找失败问题
 # 强制使用旧版 FindBoost 模块
 if(POLICY CMP0167)
-  cmake_policy(SET CMP0167 OLD)
+    cmake_policy(SET CMP0167 OLD)
 endif()
 find_package(Boost REQUIRED COMPONENTS system)
 
@@ -44,13 +44,6 @@ target_link_libraries(app PRIVATE
 # Windows 需要 Winsock
 if(WIN32)
     target_link_libraries(app PRIVATE ws2_32 wsock32)
-endif()
-
-# 编译选项
-if(MSVC)
-    target_compile_options(app PRIVATE /utf-8 /W4)
-else()
-    target_compile_options(app PRIVATE -Wall -Wextra -pedantic)
 endif()
 
 # 需要打包的资产文件（相对于源码根目录）
