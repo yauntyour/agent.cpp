@@ -122,14 +122,13 @@ jobs:
           name: ${{ matrix.artifact_name }}
           path: ${{ steps.package.outputs.pkg_path }}
 
-      # ---------- 发布到 Release ----------
-      - name: Upload to Release
-        if: github.event_name == 'release'
-        uses: svenstaro/upload-release-action@v2
+      # ---------- 发布到 Release（自动创建/更新） ----------
+      - name: Release
+        uses: softprops/action-gh-release@v2
         with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: ${{ steps.package.outputs.pkg_path }}
-          asset_name: ${{ matrix.artifact_name }}-${{ github.ref_name }}${{
-            matrix.asset_suffix }}
-          tag: ${{ github.ref }}
-          overwrite: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: ${{ github.ref_name }}
+          name: agent.cpp ${{ github.ref_name }}
+          body_path: release.md
+          files: ${{ steps.package.outputs.pkg_path }}
+          fail_on_unmatched_files: true
