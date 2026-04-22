@@ -63,7 +63,7 @@ jobs:
         run: |
           mkdir build
           cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="${{ env.CMAKE_TOOLCHAIN_FILE }}"
+          cmake .. -DCMAKE_BUILD_TYPE=Release"
         shell: bash
 
       - name: Build
