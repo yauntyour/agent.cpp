@@ -75,7 +75,7 @@ jobs:
         shell: bash
         run: |
           cd build
-          PKG_FILE=$(ls AgentCPP-*${{ matrix.asset_suffix }})
+          PKG_FILE=$(ls agent.cpp-*${{ matrix.asset_suffix }})
           echo "pkg_file=$PKG_FILE" >> $GITHUB_OUTPUT
           echo "pkg_path=build/$PKG_FILE" >> $GITHUB_OUTPUT
 
