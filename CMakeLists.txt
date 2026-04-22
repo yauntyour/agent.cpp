@@ -13,11 +13,6 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 # 查找 CURL
 find_package(CURL REQUIRED)
 
-if(POLICY CMP0167)
-    cmake_policy(SET CMP0167 NEW)
-endif()
-find_package(Boost REQUIRED COMPONENTS system)
-
 # 通过 FetchContent 获取 nlohmann_json
 include(FetchContent)
 FetchContent_Declare(
@@ -35,7 +30,6 @@ add_executable(app
 # 链接库
 target_link_libraries(app PRIVATE
     CURL::libcurl
-    Boost::system
     nlohmann_json::nlohmann_json
 )
 
