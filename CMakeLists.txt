@@ -13,7 +13,12 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 # 查找 CURL
 find_package(CURL REQUIRED)
 
-# 通过 FetchContent 获取 nlohmann_json
+# ---------- Boost (header-only) ----------
+# 强制 header-only 模式，不查找编译后的库文件
+set(Boost_NO_BOOST_CMAKE ON)
+find_package(Boost REQUIRED)
+
+# ---------- nlohmann_json (header-only) ----------
 include(FetchContent)
 FetchContent_Declare(
     nlohmann_json
@@ -27,9 +32,10 @@ add_executable(app
     app.cpp
 )
 
-# 链接库
+# 链接库（仅头文件目标 + CURL）
 target_link_libraries(app PRIVATE
     CURL::libcurl
+    Boost::boost
     nlohmann_json::nlohmann_json
 )
 
