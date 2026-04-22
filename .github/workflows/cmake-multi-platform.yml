@@ -47,13 +47,10 @@ jobs:
 
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
-        shell: pwsh
         run: |
-          git clone https://github.com/microsoft/vcpkg.git $env:GITHUB_WORKSPACE/vcpkg
-          cd $env:GITHUB_WORKSPACE/vcpkg
-          .\bootstrap-vcpkg.bat
-          .\vcpkg install curl boost-system --triplet x64-windows
-          echo "CMAKE_TOOLCHAIN_FILE=$env:GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          # curl 通常已自带，Boost 通过 vcpkg 或 choco 安装，这里使用 vcpkg 更可靠
+          vcpkg install curl boost-system --triplet x64-windows
+          echo "CMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" >> $env:GITHUB_ENV
 
       - name: Configure CMake
         run: |
@@ -78,7 +75,7 @@ jobs:
         shell: bash
         run: |
           cd build
-          PKG_FILE=$(ls agent-cpp-*${{ matrix.asset_suffix }})
+          PKG_FILE=$(ls agent.cpp-*${{ matrix.asset_suffix }})
           echo "pkg_file=$PKG_FILE" >> $GITHUB_OUTPUT
           echo "pkg_path=build/$PKG_FILE" >> $GITHUB_OUTPUT
 
