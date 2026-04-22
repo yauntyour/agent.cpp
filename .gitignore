@@ -4,3 +4,6 @@ sessions/*
 memorys/*
 *.a
 *.dll
+*.zip
+build
+_CPack_Packages

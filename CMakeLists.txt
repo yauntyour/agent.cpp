@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(AgentCPP VERSION 1.0.0 LANGUAGES CXX)
+project(agent.cpp VERSION 1.0.0 LANGUAGES CXX)
 
 # C++26 标准
 set(CMAKE_CXX_STANDARD 20)
@@ -63,20 +63,20 @@ set(ASSET_DIRS
 )
 
 # 安装规则：将二进制和资产安装到目标目录
-install(TARGETS app RUNTIME DESTINATION bin)
+install(TARGETS app RUNTIME DESTINATION .)
 
 foreach(file ${ASSET_FILES})
-    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/${file} DESTINATION share/${PROJECT_NAME})
+    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/${file} DESTINATION .)
 endforeach()
 
 foreach(dir ${ASSET_DIRS})
-    install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/${dir}/ DESTINATION share/${PROJECT_NAME}/${dir})
+    install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/${dir}/ DESTINATION ./${dir})
 endforeach()
 
 # 创建工作目录的空子目录（运行时需要）
-install(DIRECTORY DESTINATION share/${PROJECT_NAME}/sessions)
-install(DIRECTORY DESTINATION share/${PROJECT_NAME}/memorys)
-install(DIRECTORY DESTINATION share/${PROJECT_NAME}/assets)
+install(DIRECTORY DESTINATION ./sessions)
+install(DIRECTORY DESTINATION ./memorys)
+install(DIRECTORY DESTINATION ./assets)
 
 # CPack 配置（用于生成 .zip/.tar.gz 等归档包）
 set(CPACK_PACKAGE_NAME ${PROJECT_NAME})
