@@ -147,7 +147,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           tag_name: ${{ github.ref_name }}
           name: agent.cpp ${{ github.ref_name }}
-          body_path: release.md # 确保 release.md 存在，否则删除该行
+          body_path: release.md
           files: artifacts/**/* # 上传所有平台的包
           fail_on_unmatched_files: true
 
