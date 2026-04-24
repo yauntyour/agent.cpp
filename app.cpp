@@ -1,4 +1,3 @@
-// app.cpp (corrected)
 #include <iostream>
 #include <string>
 #include <memory>
@@ -125,11 +124,9 @@ namespace app
             session_ptr->memory["keywords"] = response["choices"][0]["message"]["content"].get<std::string>();
             std::cout << "Keywords generated successfully." << std::endl;
 
-            // FIX: avoid get_ref<size_t&>() on size_t JSON numbers
-            auto &mem = run_unit::agent_data_manager.data["usages"]["memory"];
-            mem["prompt_cost"] = mem["prompt_cost"].get<size_t>() + total_prompt_tokens;
-            mem["completion_cost"] = mem["completion_cost"].get<size_t>() + total_completion_tokens;
-            mem["total_cost"] = mem["total_cost"].get<size_t>() + total_prompt_tokens + total_completion_tokens;
+            run_unit::agent_data_manager.data["usages"]["memory"]["prompt_cost"].get_ref<size_t &>() += total_prompt_tokens;
+            run_unit::agent_data_manager.data["usages"]["memory"]["completion_cost"].get_ref<size_t &>() += total_completion_tokens;
+            run_unit::agent_data_manager.data["usages"]["memory"]["total_cost"].get_ref<size_t &>() += total_prompt_tokens + total_completion_tokens;
         }
         catch (const std::exception &e)
         {
@@ -189,12 +186,9 @@ namespace app
             {
                 std::cout << "Memory not need to update." << std::endl;
             }
-
-            // FIX: avoid get_ref<size_t&>() on size_t JSON numbers
-            auto &mem = run_unit::agent_data_manager.data["usages"]["memory"];
-            mem["prompt_cost"] = mem["prompt_cost"].get<size_t>() + total_prompt_tokens;
-            mem["completion_cost"] = mem["completion_cost"].get<size_t>() + total_completion_tokens;
-            mem["total_cost"] = mem["total_cost"].get<size_t>() + total_prompt_tokens + total_completion_tokens;
+            run_unit::agent_data_manager.data["usages"]["memory"]["prompt_cost"].get_ref<size_t &>() += total_prompt_tokens;
+            run_unit::agent_data_manager.data["usages"]["memory"]["completion_cost"].get_ref<size_t &>() += total_completion_tokens;
+            run_unit::agent_data_manager.data["usages"]["memory"]["total_cost"].get_ref<size_t &>() += total_prompt_tokens + total_completion_tokens;
         }
         catch (const std::exception &e)
         {
@@ -712,14 +706,11 @@ namespace app
                     {"stream", false},
                     {"think", think_mode},
                     {"usage", {{"prompt_cost", total_prompt_tokens}, {"completion_cost", total_completion_tokens}, {"total_cost", total_prompt_tokens + total_completion_tokens}}}};
-
-                // FIX: avoid get_ref<size_t&>() on size_t JSON numbers
                 if (run_unit::agent_data_manager.data["usages"].contains(sid))
                 {
-                    auto &session_usage = run_unit::agent_data_manager.data["usages"][sid];
-                    session_usage["prompt_cost"] = session_usage["prompt_cost"].get<size_t>() + total_prompt_tokens;
-                    session_usage["completion_cost"] = session_usage["completion_cost"].get<size_t>() + total_completion_tokens;
-                    session_usage["total_cost"] = session_usage["total_cost"].get<size_t>() + total_prompt_tokens + total_completion_tokens;
+                    run_unit::agent_data_manager.data["usages"][sid]["prompt_cost"].get_ref<size_t &>() += total_prompt_tokens;
+                    run_unit::agent_data_manager.data["usages"][sid]["completion_cost"].get_ref<size_t &>() += total_completion_tokens;
+                    run_unit::agent_data_manager.data["usages"][sid]["total_cost"].get_ref<size_t &>() += total_prompt_tokens + total_completion_tokens;
                 }
                 else
                 {
