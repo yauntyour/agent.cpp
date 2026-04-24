@@ -125,8 +125,8 @@ namespace app
             std::cout << "Keywords generated successfully." << std::endl;
 
             run_unit::agent_data_manager.data["usages"]["memory"]["prompt_cost"] = run_unit::agent_data_manager.data["usages"]["memory"]["prompt_cost"].get<size_t>() + total_prompt_tokens;
-            run_unit::agent_data_manager.data["usages"]["memory"]["prompt_cost"] = run_unit::agent_data_manager.data["usages"]["memory"]["completion_cost"].get<size_t>() + total_completion_tokens;
-            run_unit::agent_data_manager.data["usages"]["memory"]["prompt_cost"] = run_unit::agent_data_manager.data["usages"]["memory"]["total_cost"].get<size_t>() + total_prompt_tokens + total_completion_tokens;
+            run_unit::agent_data_manager.data["usages"]["memory"]["completion_cost"] = run_unit::agent_data_manager.data["usages"]["memory"]["completion_cost"].get<size_t>() + total_completion_tokens;
+            run_unit::agent_data_manager.data["usages"]["memory"]["total_cost"] = run_unit::agent_data_manager.data["usages"]["memory"]["total_cost"].get<size_t>() + total_prompt_tokens + total_completion_tokens;
         }
         catch (const std::exception &e)
         {
@@ -187,8 +187,8 @@ namespace app
                 std::cout << "Memory not need to update." << std::endl;
             }
             run_unit::agent_data_manager.data["usages"]["memory"]["prompt_cost"] = run_unit::agent_data_manager.data["usages"]["memory"]["prompt_cost"].get<size_t>() + total_prompt_tokens;
-            run_unit::agent_data_manager.data["usages"]["memory"]["prompt_cost"] = run_unit::agent_data_manager.data["usages"]["memory"]["completion_cost"].get<size_t>() + total_completion_tokens;
-            run_unit::agent_data_manager.data["usages"]["memory"]["prompt_cost"] = run_unit::agent_data_manager.data["usages"]["memory"]["total_cost"].get<size_t>() + total_prompt_tokens + total_completion_tokens;
+            run_unit::agent_data_manager.data["usages"]["memory"]["completion_cost"] = run_unit::agent_data_manager.data["usages"]["memory"]["completion_cost"].get<size_t>() + total_completion_tokens;
+            run_unit::agent_data_manager.data["usages"]["memory"]["total_cost"] = run_unit::agent_data_manager.data["usages"]["memory"]["total_cost"].get<size_t>() + total_prompt_tokens + total_completion_tokens;
         }
         catch (const std::exception &e)
         {
@@ -708,9 +708,9 @@ namespace app
                     {"usage", {{"prompt_cost", total_prompt_tokens}, {"completion_cost", total_completion_tokens}, {"total_cost", total_prompt_tokens + total_completion_tokens}}}};
                 if (run_unit::agent_data_manager.data["usages"].contains(sid))
                 {
-                    run_unit::agent_data_manager.data["usages"]["memory"]["prompt_cost"] = run_unit::agent_data_manager.data["usages"]["memory"]["prompt_cost"].get<size_t>() + total_prompt_tokens;
-                    run_unit::agent_data_manager.data["usages"]["memory"]["prompt_cost"] = run_unit::agent_data_manager.data["usages"]["memory"]["completion_cost"].get<size_t>() + total_completion_tokens;
-                    run_unit::agent_data_manager.data["usages"]["memory"]["prompt_cost"] = run_unit::agent_data_manager.data["usages"]["memory"]["total_cost"].get<size_t>() + total_prompt_tokens + total_completion_tokens;
+                    run_unit::agent_data_manager.data["usages"][sid]["prompt_cost"] = run_unit::agent_data_manager.data["usages"][sid]["prompt_cost"].get<size_t>() + total_prompt_tokens;
+                    run_unit::agent_data_manager.data["usages"][sid]["completion_cost"] = run_unit::agent_data_manager.data["usages"][sid]["completion_cost"].get<size_t>() + total_completion_tokens;
+                    run_unit::agent_data_manager.data["usages"][sid]["total_cost"] = run_unit::agent_data_manager.data["usages"][sid]["total_cost"].get<size_t>() + total_prompt_tokens + total_completion_tokens;
                 }
                 else
                 {
@@ -738,7 +738,7 @@ int main(int argc, char *argv[])
     try
     {
         int port = 8080;
-        std::string settings_path = "settings.json";
+        std::string settings_path = "D:\\Developments\\CXX\\Agent.cpp\\settings.json";
         std::string __pw = "";
         std::string apikey = "";
         for (int i = 1; i < argc; ++i)
