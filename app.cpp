@@ -18,7 +18,6 @@
 
 using json = nlohmann::json;
 namespace fs = std::filesystem;
-int system_check = run_unit::init_check("settings.json");
 namespace app
 {
     void replaceAll(std::string &str, const std::string &from, const std::string &to)
@@ -35,8 +34,7 @@ namespace app
     static std::string Admin;
     static std::string system_prompt;
     static size_t im_token_len = sizeof("<|im_start|>\n<|im_end|>") - 1;
-    LLMProviders::LlamaClient client(run_unit::settings["server_address"].get_ref<const std::string &>());
-    // LLMProviders::OpenAIClient client("https://api.deepseek.com", "sk-xxxxx");
+    auto client = LLMProviders::OpenAIClient();
 
     std::string to_hex_string(const uint8_t *hash, size_t len)
     {
@@ -49,8 +47,11 @@ namespace app
         return ss.str();
     }
 
-    int init_app(const std::string &password = "")
+    int init_app(const std::string &setting_path = "settings.json", const std::string &password = "", const std::string &apikey = "")
     {
+        run_unit::init_check(setting_path);
+        client.set_base_url(run_unit::settings["server_address"].get_ref<const std::string &>());
+        client.set_api_key(apikey);
         uint8_t password_hash[SHA3_256_DIGEST_SIZE];
         if (!SHA3_256((const uint8_t *)password.c_str(), password.length(), password_hash))
         {
@@ -58,7 +59,7 @@ namespace app
         }
         run_unit::settings.emplace("password", to_hex_string(password_hash, SHA3_256_DIGEST_SIZE));
         Admin = run_unit::settings["name"].get<std::string>();
-        system_prompt = tool_unit::readFile(run_unit::settings["prompt_path"].get_ref<const std::string &>());
+        system_prompt = tool_unit::readFile(run_unit::settings["workspace"].get_ref<const std::string &>() + run_unit::settings["prompt"].get_ref<const std::string &>());
         replaceAll(system_prompt, "    ", "");
         replaceAll(system_prompt, "\r\n", "");
         run_unit::Agent_session_context.push_back(
@@ -910,12 +911,40 @@ int main(int argc, char *argv[])
 {
     try
     {
-        app::init_app(argc > 1 ? argv[1] : "");
+        int port = 8080;
+        std::string settings_path = "settings.json";
+        for (int i = 1; i < argc; ++i)
+        {
+            std::string arg = argv[i];
+            if (arg == "-p" || arg == "--port")
+            {
+                if (i + 1 < argc)
+                {
+                    port = std::stoi(argv[++i]);
+                }
+                else
+                {
+                    throw std::runtime_error("Missing value after " + arg);
+                }
+            }
+            else if (arg == "--settings")
+            {
+                if (i + 1 < argc)
+                {
+                    settings_path = argv[++i];
+                }
+                else
+                {
+                    throw std::runtime_error("Missing value after " + arg);
+                }
+            }
+        }
 
+        app::init_app(settings_path);
         boost::asio::io_context io_context;
         rt::router router;
         app::server::register_routes(router);
-        servic::Server server(io_context, run_unit::settings["port"].get<int>());
+        servic::Server server(io_context, port);
         server.run(router);
     }
     catch (const std::exception &e)

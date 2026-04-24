@@ -275,21 +275,6 @@ namespace net_unit
 } // namespace net_unit
 namespace tool_unit
 {
-    void appendFile(const std::string &path, const std::string &content)
-    {
-        std::cout << "INFO - appendFile('" << path << "')" << std::endl;
-        std::ofstream file(path, std::ios::binary | std::ios::app);
-        if (!file.is_open())
-        {
-            throw std::runtime_error("Fail to open/create file:'" + path + "'" + " Please check the true path");
-        }
-        file.write(content.data(), content.size());
-        if (file.fail())
-        {
-            throw std::runtime_error("Fail to open/create file:'" + path + "'" + " Please check the true path");
-        }
-        file.close();
-    }
     std::string exec(const std::string &cmd)
     {
         FILE *pipe = popen(cmd.c_str(), "r");
@@ -579,9 +564,9 @@ namespace run_unit
         {
             throw std::runtime_error("Error - missing 'model' in settings");
         }
-        if (!settings.contains("prompt_path"))
+        if (!settings.contains("prompt"))
         {
-            throw std::runtime_error("Error - missing 'prompt_path' in settings");
+            throw std::runtime_error("Error - missing 'prompt' in settings");
         }
 
         std::filesystem::path workspace = settings["workspace"].get<std::string>();
@@ -621,14 +606,14 @@ namespace run_unit
             throw std::runtime_error("Error - model is empty. Please check your settings.");
         }
 
-        std::filesystem::path promptPath = settings["prompt_path"].get<std::string>();
+        std::filesystem::path promptPath = workspace / settings["prompt"].get<std::string>();
         if (promptPath.empty())
         {
-            throw std::runtime_error("Error - prompt_path is empty");
+            throw std::runtime_error("Error - prompt is empty");
         }
         if (!std::filesystem::exists(promptPath) || !std::filesystem::is_regular_file(promptPath))
         {
-            throw std::runtime_error("Error - prompt_path not found or is not a regular file. Please check your settings.");
+            throw std::runtime_error("Error - prompt not found or is not a regular file. Please check your settings.");
         }
         if (!settings.contains("server_address") || settings["server_address"].get<std::string>().empty())
         {
@@ -690,9 +675,9 @@ namespace run_unit
             std::cerr << "Error: missing 'model' field or not a string" << std::endl;
             return false;
         }
-        if (!j.contains("prompt_path") || !j["prompt_path"].is_string())
+        if (!j.contains("prompt") || !j["prompt"].is_string())
         {
-            std::cerr << "Error: missing 'prompt_path' field or not a string" << std::endl;
+            std::cerr << "Error: missing 'prompt' field or not a string" << std::endl;
             return false;
         }
         if (!j.contains("stream") || !j["stream"].is_boolean())
@@ -878,11 +863,11 @@ namespace LLMProviders
     {
     private:
         std::string base_url_; // 例如: "http://localhost:8080"
-        CURL *curl_;
+        CURL *curl_ = curl_easy_init();
 
     public:
         explicit LlamaClient(const std::string &base_url = "http://localhost:8080")
-            : base_url_(base_url), curl_(curl_easy_init())
+            : base_url_(base_url)
         {
         }
 
@@ -946,12 +931,12 @@ namespace LLMProviders
     {
     private:
         std::string base_url_;
-        CURL *curl_;
+        CURL *curl_ = curl_easy_init();
 
     public:
         explicit OllamaClient() = default;
         explicit OllamaClient(const std::string &base_url = "http://localhost:11434")
-            : base_url_(base_url), curl_(curl_easy_init()) {}
+            : base_url_(base_url) {}
 
         ~OllamaClient()
         {
@@ -1006,15 +991,21 @@ namespace LLMProviders
     class OpenAIClient
     {
     private:
-        std::string base_url_;
-        std::string api_key_;
-        CURL *curl_;
+        std::string base_url_ = "";
+        std::string api_key_ = "";
+        CURL *curl_ = curl_easy_init();
 
     public:
-        explicit OpenAIClient() = default;
         explicit OpenAIClient(const std::string &base_url = "http://localhost:11434", const std::string &api_key = "")
-            : base_url_(base_url), api_key_(api_key), curl_(curl_easy_init()) {}
-
+            : base_url_(base_url), api_key_(api_key) {}
+        void set_api_key(const std::string &api_key)
+        {
+            api_key_ = api_key;
+        }
+        void set_base_url(const std::string &base_url)
+        {
+            base_url_ = base_url;
+        }
         ~OpenAIClient()
         {
             if (curl_)
@@ -1123,7 +1114,7 @@ namespace cs_unit
              try
              {
                  int seed;
-                 sscanf(args.data(), "%d", &seed);
+                 sscanf_s(args.data(), "%d", &seed);
                  std::mt19937 gen(seed);
                  std::uniform_int_distribution<int> dist(-1e9, 1e9);
                  return std::to_string(dist(gen));

@@ -622,8 +622,8 @@
                         <div class="setting-description">对话使用的默认模型</div>
                     </div>
                     <div class="setting-row">
-                        <label>提示词路径 (prompt_path)</label>
-                        <input type="text" id="setting-prompt_path" value="${escapeHtml(settings.prompt_path || '')}" placeholder="agent.txt">
+                        <label>提示词路径 (prompt)</label>
+                        <input type="text" id="setting-prompt" value="${escapeHtml(settings.prompt || '')}" placeholder="agent.txt">
                         <div class="setting-description">系统提示词文件路径</div>
                     </div>
                 </div>
@@ -662,7 +662,7 @@
                 workspace: document.getElementById('setting-workspace')?.value || '',
                 server_address: document.getElementById('setting-server_address')?.value || '',
                 model: document.getElementById('setting-model')?.value || '',
-                prompt_path: document.getElementById('setting-prompt_path')?.value || '',
+                prompt: document.getElementById('setting-prompt')?.value || '',
                 stream: document.getElementById('setting-stream')?.checked || false,
                 max_mpc_rounds: parseInt(document.getElementById('setting-max_mpc_rounds')?.value) || 10,
                 max_context: parseInt(document.getElementById('setting-max_context')?.value) || 128000,
