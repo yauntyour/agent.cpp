@@ -85,6 +85,49 @@ auto file_parse(const std::string &file_path)
     return std::make_pair(p.stem().string(), p.extension().string());
 }
 
+std::vector<std::string> splitString(const std::string &s, char delimiter)
+{
+    std::vector<std::string> tokens;
+    std::string token;
+    std::istringstream tokenStream(s);
+    while (std::getline(tokenStream, token, delimiter))
+    {
+        tokens.push_back(token);
+    }
+    return tokens;
+}
+// 支持转义字符 '\|' 和 '\\' 的字符串分割
+std::vector<std::string> splitEscaped(const std::string &s, char delimiter = '|')
+{
+    std::vector<std::string> tokens;
+    std::string current;
+    bool escape = false;
+    for (size_t i = 0; i < s.size(); ++i)
+    {
+        char c = s[i];
+        if (escape)
+        {
+            // 转义字符后的字符原样保留
+            current.push_back(c);
+            escape = false;
+        }
+        else if (c == '\\')
+        {
+            escape = true;
+        }
+        else if (c == delimiter)
+        {
+            tokens.push_back(std::move(current));
+            current.clear();
+        }
+        else
+        {
+            current.push_back(c);
+        }
+    }
+    tokens.push_back(std::move(current));
+    return tokens;
+}
 namespace net_unit
 {
     void CURL_proxy(CURL *__handle__, const char *proxy, bool ssl = false)
@@ -341,9 +384,103 @@ namespace tool_unit
         return "data:image/jpeg;base64," + base;
     }
     std::list<std::string> image_queue;
+
+    void editFile(const std::string &path, const std::string &args)
+    {
+        // 读取原始文件
+        std::string content = readFile(path);
+        std::vector<std::string> lines;
+        std::istringstream iss(content);
+        std::string line;
+        while (std::getline(iss, line))
+        {
+            lines.push_back(line);
+        }
+
+        // 解析操作和参数（支持转义 '|'）
+        auto tokens = splitEscaped(args, '|');
+        if (tokens.empty())
+        {
+            throw std::runtime_error("edit: missing operation");
+        }
+
+        const std::string &op = tokens[0];
+
+        if (op == "replace_line")
+        {
+            if (tokens.size() < 3)
+                throw std::runtime_error("edit replace_line: need line_number and new_content");
+            size_t lineNum = std::stoul(tokens[1]);
+            if (lineNum == 0 || lineNum > lines.size())
+                throw std::runtime_error("edit replace_line: line number out of range");
+            lines[lineNum - 1] = tokens[2];
+        }
+        else if (op == "insert_after")
+        {
+            if (tokens.size() < 3)
+                throw std::runtime_error("edit insert_after: need line_number and content");
+            size_t lineNum = std::stoul(tokens[1]);
+            if (lineNum > lines.size())
+                throw std::runtime_error("edit insert_after: line number out of range");
+            lines.insert(lines.begin() + lineNum, tokens[2]);
+        }
+        else if (op == "delete_line")
+        {
+            if (tokens.size() < 2)
+                throw std::runtime_error("edit delete_line: need line_number");
+            size_t lineNum = std::stoul(tokens[1]);
+            if (lineNum == 0 || lineNum > lines.size())
+                throw std::runtime_error("edit delete_line: line number out of range");
+            lines.erase(lines.begin() + lineNum - 1);
+        }
+        else if (op == "append")
+        {
+            if (tokens.size() < 2)
+                throw std::runtime_error("edit append: need content");
+            lines.push_back(tokens[1]);
+        }
+        else if (op == "prepend")
+        {
+            if (tokens.size() < 2)
+                throw std::runtime_error("edit prepend: need content");
+            lines.insert(lines.begin(), tokens[1]);
+        }
+        else if (op == "replace")
+        {
+            if (tokens.size() < 3)
+                throw std::runtime_error("edit replace: need old_text and new_text");
+            std::string oldStr = tokens[1];
+            std::string newStr = tokens[2];
+            // 全文替换（按行处理）
+            for (auto &l : lines)
+            {
+                size_t pos = 0;
+                while ((pos = l.find(oldStr, pos)) != std::string::npos)
+                {
+                    l.replace(pos, oldStr.length(), newStr);
+                    pos += newStr.length();
+                }
+            }
+        }
+        else
+        {
+            throw std::runtime_error("edit: unknown operation '" + op + "'");
+        }
+
+        // 写回文件
+        std::ostringstream oss;
+        for (size_t i = 0; i < lines.size(); ++i)
+        {
+            oss << lines[i];
+            if (i != lines.size() - 1)
+                oss << '\n';
+        }
+        writeFile(path, oss.str());
+    }
 }
 namespace run_unit
 {
+    std::string cs_prompt = "";
     nlohmann::json settings;
     nlohmann::json tools_list;
     std::mutex ctx_lock;
@@ -639,6 +776,15 @@ namespace run_unit
         {
             tools_list = nlohmann::json::parse(tool_unit::readFile(tools_list_path.string()));
         }
+        std::filesystem::path cs_prompt_path = sysPath / "cs.txt";
+        if (!std::filesystem::exists(cs_prompt_path) || !std::filesystem::is_regular_file(cs_prompt_path))
+        {
+            throw std::runtime_error("Error - cs.txt not found. Please check your sys directory.");
+        }
+        else
+        {
+            cs_prompt = tool_unit::readFile(cs_prompt_path.string());
+        }
         agent_session_manager = SessionManager(workspace.string());
         return 0;
     }
@@ -819,6 +965,22 @@ namespace tool_unit
                 try
                 {
                     data += wget(std::string(args).c_str());
+                    data += "\n[TOOL_DONE]\n";
+                    succeed += 1;
+                }
+                catch (const std::exception &e)
+                {
+                    data += e.what();
+                    data += "\n[TOOL_ERR]\n";
+                }
+                count += 1;
+            }
+            else if (name == "edit")
+            {
+                try
+                {
+                    auto [file, rest] = parseArgs(args, '|'); // 分割出文件路径和操作参数
+                    editFile(std::string(file), std::string(rest));
                     data += "\n[TOOL_DONE]\n";
                     succeed += 1;
                 }

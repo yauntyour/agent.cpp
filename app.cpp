@@ -59,7 +59,7 @@ namespace app
         }
         run_unit::settings.emplace("password", to_hex_string(password_hash, SHA3_256_DIGEST_SIZE));
         Admin = run_unit::settings["name"].get<std::string>();
-        system_prompt = tool_unit::readFile(run_unit::settings["workspace"].get_ref<const std::string &>() + run_unit::settings["prompt"].get_ref<const std::string &>());
+        system_prompt = tool_unit::readFile(run_unit::settings["workspace"].get_ref<const std::string &>() + run_unit::settings["prompt"].get_ref<const std::string &>()) + run_unit::cs_prompt;
         replaceAll(system_prompt, "    ", "");
         replaceAll(system_prompt, "\r\n", "");
         run_unit::Agent_session_context.push_back(
@@ -913,6 +913,8 @@ int main(int argc, char *argv[])
     {
         int port = 8080;
         std::string settings_path = "settings.json";
+        std::string __pw = "";
+        std::string apikey = "";
         for (int i = 1; i < argc; ++i)
         {
             std::string arg = argv[i];
@@ -927,7 +929,7 @@ int main(int argc, char *argv[])
                     throw std::runtime_error("Missing value after " + arg);
                 }
             }
-            else if (arg == "--settings")
+            if (arg == "--settings")
             {
                 if (i + 1 < argc)
                 {
@@ -938,9 +940,31 @@ int main(int argc, char *argv[])
                     throw std::runtime_error("Missing value after " + arg);
                 }
             }
+            if (arg == "--password")
+            {
+                if (i + 1 < argc)
+                {
+                    __pw = argv[++i];
+                }
+                else
+                {
+                    throw std::runtime_error("Missing value after " + arg);
+                }
+            }
+            if (arg == "--apikey")
+            {
+                if (i + 1 < argc)
+                {
+                    apikey = argv[++i];
+                }
+                else
+                {
+                    throw std::runtime_error("Missing value after " + arg);
+                }
+            }
         }
 
-        app::init_app(settings_path);
+        app::init_app(settings_path, __pw, apikey);
         boost::asio::io_context io_context;
         rt::router router;
         app::server::register_routes(router);

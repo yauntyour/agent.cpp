@@ -21,8 +21,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-PROXY = "http://127.0.0.1:10809"
-BOT_API_TOKEN = "8784040222:AAE7EZHTR-pjq80vwxcV1FXdqSvISjOU_Xg"
+PROXY = ""
+BOT_API_TOKEN = ""
 
 
 # ---------- Markdown 感知分割函数 ----------
