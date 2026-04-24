@@ -201,8 +201,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           tag_name: nightly
           name: agent.cpp Nightly Build
-          body_path: release.md
-          prerelease: true
+          body: release.md
           files: artifacts/**/*
           fail_on_unmatched_files: true
           overwrite: true
