@@ -10,6 +10,25 @@
 
 ![WebUI 截图](./assets/WebUI.png)
 
+依赖需求：
+
+```bash
+#Linux：
+sudo apt-get install -y libcurl4-openssl-dev libboost-dev
+
+#Windows （msys2）：
+pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja mingw-w64-x86_64-curl mingw-w64-x86_64-boost
+
+#MacOS：
+brew install cmake ninja curl boost
+```
+
+懒狗安装指令：
+
+```bash
+rm -rf ./* && git clone --recurse-submodules https://github.com/yauntyour/agent.cpp.git && cd agent.cpp && mkdir build && cd build && cmake .. && cmake --build build && cmake --install build --prefix install
+```
+
 ## 核心特性
 
 - **极致轻量**：核心系统仅由数个 `.cpp`/`.hpp` 文件构成，充分利用 C++ 零拷贝与栈上分配特性，运行开销极低。

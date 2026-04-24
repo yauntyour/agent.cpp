@@ -34,7 +34,7 @@ jobs:
 
     steps:
       - name: Checkout code with submodules
-        uses: actions/checkout@v6 # 升级到 v6
+        uses: actions/checkout@v6
         with:
           submodules: recursive
 
@@ -111,17 +111,46 @@ jobs:
           cd build
           cpack -G TGZ
 
+      # ---------- 重命名 Nightly 包（去掉版本号） ----------
+      - name: Rename package for Nightly (Windows MSYS2)
+        if: (github.event_name == 'schedule' || github.event_name ==
+          'workflow_dispatch') && runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          cd build
+          OLD_NAME=$(ls *${{ matrix.asset_suffix }} | head -1)
+          NEW_NAME="${{ matrix.artifact_name }}${{ matrix.asset_suffix }}"
+          mv "$OLD_NAME" "$NEW_NAME"
+          echo "Renamed $OLD_NAME -> $NEW_NAME"
+
+      - name: Rename package for Nightly (Unix)
+        if: (github.event_name == 'schedule' || github.event_name ==
+          'workflow_dispatch') && runner.os != 'Windows'
+        shell: bash
+        run: |
+          cd build
+          OLD_NAME=$(ls *${{ matrix.asset_suffix }} | head -1)
+          NEW_NAME="${{ matrix.artifact_name }}${{ matrix.asset_suffix }}"
+          mv "$OLD_NAME" "$NEW_NAME"
+          echo "Renamed $OLD_NAME -> $NEW_NAME"
+
+      # ---------- 确定最终包名 ----------
       - name: Determine package file name
         id: package
         shell: bash
         run: |
           cd build
-          PKG_FILE=$(ls *${{ matrix.asset_suffix }} | head -1)
+          # Nightly 事件下已经是固定名称，Stable 事件则自动检测
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            PKG_FILE="${{ matrix.artifact_name }}${{ matrix.asset_suffix }}"
+          else
+            PKG_FILE=$(ls *${{ matrix.asset_suffix }} | head -1)
+          fi
           echo "pkg_file=$PKG_FILE" >> $GITHUB_OUTPUT
           echo "pkg_path=build/$PKG_FILE" >> $GITHUB_OUTPUT
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v6 # 升级到 v6
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.artifact_name }}
           path: ${{ steps.package.outputs.pkg_path }}
@@ -134,7 +163,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4 # 使用 v4（默认支持 Node.js 20/24）
+        uses: actions/download-artifact@v4
         with:
           path: artifacts
 
@@ -142,13 +171,13 @@ jobs:
         run: ls -R artifacts
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2 # 最新版已支持 Node.js 24
+        uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           tag_name: ${{ github.ref_name }}
           name: agent.cpp ${{ github.ref_name }}
           body_path: release.md
-          files: artifacts/**/* # 上传所有平台的包
+          files: artifacts/**/*
           fail_on_unmatched_files: true
 
   # ========== Nightly 版 Release（定时或手动触发） ==========
@@ -172,10 +201,8 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           tag_name: nightly
           name: agent.cpp Nightly Build
-          body: |
-            Automated nightly build from commit ${{ github.sha }}.
-            Built on $(date -u +'%Y-%m-%d %H:%M:%S UTC').
+          body_path: release.md
           prerelease: true
           files: artifacts/**/*
           fail_on_unmatched_files: true
-          overwrite: true # 覆盖旧的 nightly release
+          overwrite: true
