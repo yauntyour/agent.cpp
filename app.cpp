@@ -92,6 +92,8 @@ namespace app
     {
         try
         {
+            size_t total_prompt_tokens = 0;
+            size_t total_completion_tokens = 0;
             auto [aq, kq] = session_ptr->summary_query();
             nlohmann::json response;
             nlohmann::json req = {
@@ -99,13 +101,33 @@ namespace app
                 {"messages", {{{"role", "system"}, {"content", aq}}}},
                 {"stream", false}};
             client.generate(req, response);
+            if (response.contains("usage"))
+            {
+                auto &usage = response["usage"];
+                if (usage.contains("prompt_tokens"))
+                    total_prompt_tokens += usage["prompt_tokens"].get<size_t>();
+                if (usage.contains("completion_tokens"))
+                    total_completion_tokens += usage["completion_tokens"].get<size_t>();
+            }
             session_ptr->memory["abstracts"] = response["choices"][0]["message"]["content"].get<std::string>();
             std::cout << "Abstracts generated successfully." << std::endl;
 
             req["messages"][0]["content"] = kq;
             client.generate(req, response);
+            if (response.contains("usage"))
+            {
+                auto &usage = response["usage"];
+                if (usage.contains("prompt_tokens"))
+                    total_prompt_tokens += usage["prompt_tokens"].get<size_t>();
+                if (usage.contains("completion_tokens"))
+                    total_completion_tokens += usage["completion_tokens"].get<size_t>();
+            }
             session_ptr->memory["keywords"] = response["choices"][0]["message"]["content"].get<std::string>();
             std::cout << "Keywords generated successfully." << std::endl;
+
+            run_unit::agent_data_manager.data["usages"]["memory"]["prompt_cost"].get_ref<size_t &>() += total_prompt_tokens;
+            run_unit::agent_data_manager.data["usages"]["memory"]["completion_cost"].get_ref<size_t &>() += total_completion_tokens;
+            run_unit::agent_data_manager.data["usages"]["memory"]["total_cost"].get_ref<size_t &>() += total_prompt_tokens + total_completion_tokens;
         }
         catch (const std::exception &e)
         {
@@ -118,6 +140,8 @@ namespace app
     {
         try
         {
+            size_t total_prompt_tokens = 0;
+            size_t total_completion_tokens = 0;
             nlohmann::json response;
             nlohmann::json req = {
                 {"model", model},
@@ -132,6 +156,14 @@ namespace app
             }
 
             client.generate(req, response);
+            if (response.contains("usage"))
+            {
+                auto &usage = response["usage"];
+                if (usage.contains("prompt_tokens"))
+                    total_prompt_tokens += usage["prompt_tokens"].get<size_t>();
+                if (usage.contains("completion_tokens"))
+                    total_completion_tokens += usage["completion_tokens"].get<size_t>();
+            }
             auto output = response["choices"][0]["message"]["content"].get<std::string>();
             if (output.find("[PASS]") == std::string::npos)
             {
@@ -140,6 +172,14 @@ namespace app
 
                 req["messages"][2]["content"] = "Please evaluate the relevance of the following content to the memory content, refine the keywords for the memory, and output only the refined keywords for the memory content.";
                 client.generate(req, response);
+                if (response.contains("usage"))
+                {
+                    auto &usage = response["usage"];
+                    if (usage.contains("prompt_tokens"))
+                        total_prompt_tokens += usage["prompt_tokens"].get<size_t>();
+                    if (usage.contains("completion_tokens"))
+                        total_completion_tokens += usage["completion_tokens"].get<size_t>();
+                }
                 session_ptr->memory["keywords"] = response["choices"][0]["message"]["content"].get<std::string>();
                 std::cout << "Keywords updated successfully." << std::endl;
             }
@@ -147,6 +187,9 @@ namespace app
             {
                 std::cout << "Memory not need to update." << std::endl;
             }
+            run_unit::agent_data_manager.data["usages"]["memory"]["prompt_cost"].get_ref<size_t &>() += total_prompt_tokens;
+            run_unit::agent_data_manager.data["usages"]["memory"]["completion_cost"].get_ref<size_t &>() += total_completion_tokens;
+            run_unit::agent_data_manager.data["usages"]["memory"]["total_cost"].get_ref<size_t &>() += total_prompt_tokens + total_completion_tokens;
         }
         catch (const std::exception &e)
         {
@@ -176,16 +219,20 @@ namespace app
 
         int handle_root(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
         int handle_input_stream(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
-        int handle_session_clear(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
         int handle_models(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
-        int handle_new_session(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
         int handle_settings(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+        int handle_data(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+
         int handle_channels_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
         int handle_tools_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+
         int handle_todos_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
         int handle_todos_setting(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
         int handle_todos_delete(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
         int handle_todos_new(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+
+        int handle_new_session(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+        int handle_session_clear(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
         int handle_session_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
         int handle_session_get_msg(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
         int handle_session_memory(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
@@ -195,6 +242,7 @@ namespace app
             router.on("/", handle_root);
             router.on("/api/models", handle_models);
             router.on("/api/settings", handle_settings);
+            router.on("/api/data", handle_data);
 
             router.on("/api/input", handle_input_stream);
             router.on("/api/session", handle_session_list);
@@ -333,6 +381,19 @@ namespace app
                 return rt::FLAG_ERROR;
             }
         }
+        int handle_data(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+        {
+            try
+            {
+                output = build_http_response(200, "application/json", run_unit::agent_data_manager.data.dump());
+                return rt::FLAG_DONE;
+            }
+            catch (...)
+            {
+                output = build_http_response(500, "application/json", R"({"error":"Fail to get data"})");
+                return rt::FLAG_ERROR;
+            }
+        }
         int handle_channels_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
             output = build_http_response(200, "application/json", run_unit::settings["channels"].dump());
@@ -429,7 +490,9 @@ namespace app
             std::string model;
             std::string channel;
             bool think_mode = false;
-            size_t images_size = 0;
+            size_t total_prompt_tokens = 0;
+            size_t total_completion_tokens = 0;
+            std::string sid = "";
             std::shared_ptr<run_unit::SessionContext> session_ptr;
 
             try
@@ -462,7 +525,7 @@ namespace app
                 }
                 else if (request.contains("session_id"))
                 {
-                    std::string sid = request["session_id"].get<std::string>();
+                    sid = request["session_id"].get<std::string>();
                     session_ptr = run_unit::agent_session_manager.get(sid);
                     if (!session_ptr)
                     {
@@ -513,7 +576,6 @@ namespace app
                 {
                     for (auto &img : request["images"])
                     {
-                        images_size += img.get<std::string>().size();
                         contents.push_back({{"type", "image_url"}, {"image_url", {{"url", std::move(img.get<std::string>())}}}});
                     }
                 }
@@ -535,6 +597,15 @@ namespace app
                 {
                     output = build_http_response(500, "application/json", R"({"error":"LLM call failed"})");
                     return rt::FLAG_ERROR;
+                }
+
+                if (response.contains("usage"))
+                {
+                    auto &usage = response["usage"];
+                    if (usage.contains("prompt_tokens"))
+                        total_prompt_tokens += usage["prompt_tokens"].get<size_t>();
+                    if (usage.contains("completion_tokens"))
+                        total_completion_tokens += usage["completion_tokens"].get<size_t>();
                 }
 
                 auto choices = response["choices"][0];
@@ -572,7 +643,6 @@ namespace app
                     {
                         for (auto &img : tool_unit::image_queue)
                         {
-                            images_size += img.size();
                             sys_contents.push_back({{"type", "image_url"}, {"image_url", {{"url", img}}}});
                         }
                         tool_unit::image_queue.clear();
@@ -587,6 +657,14 @@ namespace app
                     {
                         output = build_http_response(500, "application/json", R"({"error":"LLM call failed in tool loop"})");
                         return rt::FLAG_ERROR;
+                    }
+                    if (response.contains("usage"))
+                    {
+                        auto &usage = response["usage"];
+                        if (usage.contains("prompt_tokens"))
+                            total_prompt_tokens += usage["prompt_tokens"].get<size_t>();
+                        if (usage.contains("completion_tokens"))
+                            total_completion_tokens += usage["completion_tokens"].get<size_t>();
                     }
                     choices = response["choices"][0];
                     std::string new_reply = choices["message"]["content"].get<std::string>();
@@ -627,7 +705,22 @@ namespace app
                     {"thinkings", thinkings},
                     {"messages", new_messages},
                     {"stream", false},
-                    {"think", think_mode}};
+                    {"think", think_mode},
+                    {"usage", {{"prompt_cost", total_prompt_tokens}, {"completion_cost", total_completion_tokens}, {"total_cost", total_prompt_tokens + total_completion_tokens}}}};
+                if (run_unit::agent_data_manager.data["usages"].contains(sid))
+                {
+                    run_unit::agent_data_manager.data["usages"][sid]["prompt_cost"].get_ref<size_t &>() += total_prompt_tokens;
+                    run_unit::agent_data_manager.data["usages"][sid]["completion_cost"].get_ref<size_t &>() += total_completion_tokens;
+                    run_unit::agent_data_manager.data["usages"][sid]["total_cost"].get_ref<size_t &>() += total_prompt_tokens + total_completion_tokens;
+                }
+                else
+                {
+                    run_unit::agent_data_manager.data["usages"][sid] = {
+                        {"prompt_cost", total_prompt_tokens},
+                        {"completion_cost", total_completion_tokens},
+                        {"total_cost", total_prompt_tokens + total_completion_tokens}};
+                }
+
                 output = build_http_response(200, "application/json", data.dump());
                 return rt::FLAG_DONE;
             }

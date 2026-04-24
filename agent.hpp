@@ -448,7 +448,40 @@ namespace run_unit
     std::mutex ctx_lock;
     std::string setting_file_path;
 
-    // 全局上下文已移除，所有上下文现在由 SessionContext 管理
+    class DataManager
+    {
+    private:
+        std::string data_file;
+
+    public:
+        nlohmann::json data;
+        DataManager() = default;
+        DataManager(const std::string &workspace) : data_file(workspace + "/sys/data.json")
+        {
+            try
+            {
+                data = nlohmann::json::parse(tool_unit::readFile(data_file));
+                if (!data.contains("usages"))
+                {
+                    data["usages"] = nlohmann::json();
+                    data["usages"]["memory"] = {
+                        {"prompt_cost", 0},
+                        {"completion_cost", 0},
+                        {"total_cost", 0}};
+                }
+            }
+            catch (const std::exception &e)
+            {
+                std::cerr << e.what() << '\n';
+            }
+        }
+        ~DataManager()
+        {
+            tool_unit::writeFile(data_file, data.dump(4));
+        }
+    };
+
+    DataManager agent_data_manager;
 
     struct SessionContext
     {
@@ -737,6 +770,11 @@ namespace run_unit
         else
             cs_prompt = tool_unit::readFile(cs_prompt_path.string());
 
+        std::filesystem::path data_path = sysPath / "data.json";
+        if (!std::filesystem::exists(data_path) || !std::filesystem::is_regular_file(data_path))
+            throw std::runtime_error("Error - data.json not found. Please check your sys directory.");
+
+        agent_data_manager = DataManager(workspace.string());
         agent_session_manager = SessionManager(workspace.string());
         return 0;
     }

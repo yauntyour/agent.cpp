@@ -329,7 +329,6 @@
 <body class="h-screen overflow-hidden flex flex-col">
     <div class="flex h-full" id="main-interface">
 
-        <!-- 左侧会话列表 -->
         <aside class="w-64 bg-[#09090b] border-r border-[#27272a] flex flex-col flex-shrink-0 z-10">
             <div class="p-4 border-b border-[#27272a] flex justify-between items-center bg-[#09090b]">
                 <h2 class="font-semibold text-sm tracking-wide text-zinc-100 uppercase">Sessions</h2>
@@ -339,20 +338,25 @@
                 </button>
             </div>
             <div class="flex-1 overflow-y-auto p-3 space-y-1" id="session-list"></div>
-            <div class="p-4 border-t border-[#27272a] bg-[#18181b]">
-                <div class="flex items-center space-x-3">
+
+            <div class="p-4 border-t border-[#27272a] bg-[#18181b] flex items-center justify-between">
+                <div class="flex items-center space-x-3 overflow-hidden">
                     <div
-                        class="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white text-sm font-bold shadow-sm">
+                        class="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white text-sm font-bold shadow-sm flex-shrink-0">
                         <i class="fa-solid fa-user"></i>
                     </div>
                     <div class="flex-1 min-w-0">
                         <p class="text-sm font-medium text-zinc-200 truncate" id="current-user-display">Local User</p>
                     </div>
                 </div>
+                <button id="data-stats-btn"
+                    class="text-zinc-400 hover:text-indigo-400 p-2 rounded-md hover:bg-zinc-800 transition-colors flex-shrink-0"
+                    title="查看使用统计">
+                    <i class="fa-solid fa-chart-pie"></i>
+                </button>
             </div>
         </aside>
 
-        <!-- 中间聊天主区域 -->
         <main class="flex-1 flex flex-col min-w-0 bg-[#09090b] relative">
             <header
                 class="h-14 bg-opacity-80 backdrop-blur-md border-b border-[#27272a] flex items-center justify-between px-5 flex-shrink-0 z-40 absolute top-0 w-full">
@@ -397,7 +401,6 @@
                 </div>
             </div>
 
-            <!-- 输入区域 -->
             <div class="p-4 bg-gradient-to-t from-[#09090b] to-transparent flex-shrink-0 pb-6">
                 <div class="max-w-4xl mx-auto">
                     <div
@@ -439,7 +442,6 @@
             </div>
         </main>
 
-        <!-- 右侧面板 -->
         <aside class="w-80 bg-[#09090b] border-l border-[#27272a] flex flex-col flex-shrink-0 z-10">
             <div class="flex border-b border-[#27272a] bg-[#18181b]">
                 <button
@@ -500,6 +502,23 @@
         </aside>
     </div>
 
+    <div id="stats-modal"
+        class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center opacity-0 transition-opacity duration-300">
+        <div class="bg-[#18181b] border border-[#27272a] rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col transform scale-95 transition-transform duration-300"
+            id="stats-modal-content">
+            <div class="p-4 border-b border-[#27272a] flex justify-between items-center bg-[#09090b] rounded-t-xl">
+                <h2 class="font-semibold text-sm tracking-wide text-zinc-100 uppercase flex items-center gap-2">
+                    <i class="fa-solid fa-chart-pie text-indigo-500"></i> 数据统计 (Tokens)
+                </h2>
+                <button id="close-stats-modal" class="text-zinc-500 hover:text-zinc-300 transition-colors p-1">
+                    <i class="fa-solid fa-times text-lg"></i>
+                </button>
+            </div>
+            <div class="p-5 overflow-y-auto flex-1 text-sm text-zinc-300 space-y-4" id="stats-container">
+            </div>
+        </div>
+    </div>
+
     <div class="fixed top-5 right-5 z-50 flex flex-col space-y-3" id="toast-container"></div>
 
     <script>
@@ -508,7 +527,7 @@
             user: "Local User",
             sessions: [],
             currentSessionId: null,
-            messages: [],               // 消息对象模型：{ role, content, images, thinkings?, isLoading? }
+            messages: [],               // 消息对象模型：{ role, content, images, thinkings?, isLoading?, usage? }
             settings: {},
             models: [],
             currentModel: null,
@@ -552,7 +571,13 @@
             fileUpload: document.getElementById('file-upload'),
             imagePreviewContainer: document.getElementById('image-preview-container'),
             settingsFormContainer: document.getElementById('settings-form-container'),
-            saveSettingsBtn: document.getElementById('save-settings-btn')
+            saveSettingsBtn: document.getElementById('save-settings-btn'),
+            // Data Stats Modal
+            dataStatsBtn: document.getElementById('data-stats-btn'),
+            statsModal: document.getElementById('stats-modal'),
+            statsModalContent: document.getElementById('stats-modal-content'),
+            closeStatsModalBtn: document.getElementById('close-stats-modal'),
+            statsContainer: document.getElementById('stats-container')
         };
 
         // ---------- 工具函数 ----------
@@ -897,7 +922,7 @@
             els.messagesContainer.scrollTop = els.messagesContainer.scrollHeight;
         }
 
-        // 核心：渲染单条消息（支持 thinkings）
+        // 核心：渲染单条消息（支持 thinkings 和 usage）
         function addMessageToUI(msg, id = null) {
             const div = document.createElement('div');
             div.className = `flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`;
@@ -956,6 +981,18 @@
                     });
                     bubbleDiv.appendChild(imgDiv);
                 }
+
+                // Token 消耗渲染
+                if (!isUser && msg.usage) {
+                    const usageDiv = document.createElement('div');
+                    usageDiv.className = 'mt-3 pt-2 border-t border-[#27272a]/50 text-[0.7rem] text-zinc-500 flex gap-4 font-mono select-none';
+                    usageDiv.innerHTML = `
+                        <span title="Prompt Tokens" class="flex items-center gap-1"><i class="fa-solid fa-arrow-right-to-bracket text-zinc-600"></i> ${msg.usage.prompt_cost}</span>
+                        <span title="Completion Tokens" class="flex items-center gap-1"><i class="fa-solid fa-arrow-right-from-bracket text-zinc-600"></i> ${msg.usage.completion_cost}</span>
+                        <span title="Total Tokens" class="text-indigo-400/80 flex items-center gap-1"><i class="fa-solid fa-coins"></i> ${msg.usage.total_cost}</span>
+                    `;
+                    bubbleDiv.appendChild(usageDiv);
+                }
             }
 
             const row = document.createElement('div');
@@ -1008,15 +1045,23 @@
                 const newMessages = parseMessagesFromResponse(res.data.messages);
                 const thinkArray = res.data?.thinkings || [];
 
-                // 4. 找出本轮新增的消息（从 oldLength-2 开始，减去用户消息和占位符）
-                const addedMessages = newMessages.slice(oldLength - 2); // oldLength-2 是加入占位符前的长度
+                // 4. 找出本轮新增的消息
+                const addedMessages = newMessages.slice(oldLength - 2);
                 const finalMessages = newMessages.slice(0, oldLength - 2).concat(addedMessages);
 
-                // 5. 将 thinkings 附加到本轮第一条 AI 消息上（如果有）
+                // 5. 将 thinkings 及 usage 附加到本轮第一/最后一条 AI 消息上（如果有）
                 if (thinkArray.length > 0) {
                     for (let m of finalMessages) {
                         if (m.role === 'ai') {
                             m.thinkings = thinkArray;
+                            break;
+                        }
+                    }
+                }
+                if (res.data.usage) {
+                    for (let i = finalMessages.length - 1; i >= 0; i--) {
+                        if (finalMessages[i].role === 'ai') {
+                            finalMessages[i].usage = res.data.usage;
                             break;
                         }
                     }
@@ -1095,6 +1140,91 @@
                      onclick="switchSession('${c.name}')">
                     <i class="fa-solid fa-hashtag text-zinc-600"></i> ${c.name}
                 </div>`).join('');
+        }
+
+        // ---------- 数据可视化统计 ----------
+        els.dataStatsBtn.onclick = async () => {
+            els.statsModal.classList.remove('hidden');
+            void els.statsModal.offsetWidth; // 触发回流
+            els.statsModal.classList.remove('opacity-0');
+            els.statsModalContent.classList.remove('scale-95');
+
+            els.statsContainer.innerHTML = '<div class="flex justify-center py-10"><i class="fa-solid fa-spinner fa-spin text-2xl text-indigo-500"></i></div>';
+
+            try {
+                const res = await axios.get(API_BASE + '/data');
+                const usages = res.data?.usages || {};
+                renderStats(usages);
+            } catch (error) {
+                els.statsContainer.innerHTML = '<div class="text-rose-400 text-center py-10">获取数据失败</div>';
+            }
+        };
+
+        function closeStatsModal() {
+            els.statsModal.classList.add('opacity-0');
+            els.statsModalContent.classList.add('scale-95');
+            setTimeout(() => els.statsModal.classList.add('hidden'), 300);
+        }
+
+        els.closeStatsModalBtn.onclick = closeStatsModal;
+        els.statsModal.onclick = (e) => {
+            if (e.target === els.statsModal) closeStatsModal();
+        }
+
+        function renderStats(usages) {
+            if (Object.keys(usages).length === 0) {
+                els.statsContainer.innerHTML = '<div class="text-zinc-500 text-center py-10">暂无使用数据</div>';
+                return;
+            }
+
+            let maxTotal = 0;
+            let totalOverall = 0;
+            const dataArr = [];
+            for (const [key, val] of Object.entries(usages)) {
+                if (val.total_cost > maxTotal) maxTotal = val.total_cost;
+                totalOverall += (val.total_cost || 0);
+                dataArr.push({ name: key, ...val });
+            }
+
+            dataArr.sort((a, b) => b.total_cost - a.total_cost);
+
+            let html = `
+                <div class="grid grid-cols-1 mb-6">
+                    <div class="bg-[#09090b] border border-[#27272a] rounded-lg p-4 flex flex-col items-center justify-center">
+                        <span class="text-zinc-500 text-xs mb-1 uppercase tracking-wider">系统总计消耗 Tokens</span>
+                        <span class="text-3xl font-mono text-indigo-400 font-semibold shadow-sm">${totalOverall.toLocaleString()}</span>
+                    </div>
+                </div>
+                <div class="space-y-3">
+            `;
+
+            dataArr.forEach(item => {
+                const pct = maxTotal > 0 ? (item.total_cost / maxTotal) * 100 : 0;
+                const promptPct = item.total_cost > 0 ? (item.prompt_cost / item.total_cost) * 100 : 0;
+                const compPct = item.total_cost > 0 ? (item.completion_cost / item.total_cost) * 100 : 0;
+
+                html += `
+                    <div class="bg-[#09090b] border border-[#27272a] rounded-lg p-3 hover:border-zinc-700 transition-colors">
+                        <div class="flex justify-between items-center mb-2">
+                            <span class="font-medium text-zinc-200 text-xs flex items-center"><i class="fa-solid fa-hashtag text-zinc-600 mr-2"></i>${escapeHtml(item.name)}</span>
+                            <span class="font-mono text-xs text-zinc-400 font-semibold">${item.total_cost.toLocaleString()}</span>
+                        </div>
+                        <div class="w-full bg-zinc-800 rounded-full h-2.5 mb-2 overflow-hidden">
+                            <div class="flex h-full transition-all duration-500 ease-out" style="width: ${pct}%">
+                                <div class="bg-indigo-500 h-full" style="width: ${promptPct}%" title="Prompt: ${item.prompt_cost}"></div>
+                                <div class="bg-purple-500 h-full" style="width: ${compPct}%" title="Completion: ${item.completion_cost}"></div>
+                            </div>
+                        </div>
+                        <div class="flex justify-between text-[0.65rem] font-mono text-zinc-500">
+                            <span><span class="inline-block w-2 h-2 rounded-full bg-indigo-500 mr-1"></span>Prompt: ${item.prompt_cost.toLocaleString()}</span>
+                            <span><span class="inline-block w-2 h-2 rounded-full bg-purple-500 mr-1"></span>Completion: ${item.completion_cost.toLocaleString()}</span>
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += '</div>';
+            els.statsContainer.innerHTML = html;
         }
 
         // ---------- 事件绑定与初始化 ----------
