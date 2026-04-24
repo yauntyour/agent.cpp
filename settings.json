@@ -1,20 +1,19 @@
 {
-    "port": 8080,
-    "name": "user",
-    "agent_nickname": "nick",
-    "workspace": ".",
-    "server_address": "http://localhost:11434",
-    "model": "name",
-    "prompt_path": "agent.txt",
-    "stream": false,
-    "max_mpc_rounds": 10,
-    "max_context": 128000,
+    "agent_name": "assistant",
     "channels": [
         {
             "name": "Telegram",
+            "path": "sys/tg_bot.py",
             "status": "active",
-            "user_count": 1,
-            "path": "sys/tg_bot.py"
+            "user_count": 1
         }
-    ]
+    ],
+    "max_context": 1048576,
+    "max_mpc_rounds": 5,
+    "model": "deepseek-v4-pro",
+    "prompt": "agent.txt",
+    "server_address": "https://api.deepseek.com",
+    "stream": false,
+    "user_name": "user",
+    "workspace": "./workspace/"
 }

@@ -14,7 +14,6 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 find_package(CURL REQUIRED)
 
 # ---------- Boost (header-only) ----------
-# 强制 header-only 模式，不查找编译后的库文件
 set(Boost_NO_BOOST_CMAKE ON)
 find_package(Boost REQUIRED)
 
@@ -32,45 +31,39 @@ add_executable(app
     app.cpp
 )
 
-# 链接库（仅头文件目标 + CURL）
+# 链接库
 target_link_libraries(app PRIVATE
     CURL::libcurl
     Boost::boost
     nlohmann_json::nlohmann_json
 )
 
-# Windows 需要 Winsock
 if(WIN32)
     target_link_libraries(app PRIVATE ws2_32 wsock32)
 endif()
 
-# 需要打包的资产文件（相对于源码根目录）
-set(ASSET_FILES
-    webui.html
-    agent.txt
-    settings.json
-)
-
-set(ASSET_DIRS
-    sys
-    tools
-)
-
-# 安装规则
+# ========== 安装规则 ==========
+# 1. app 可执行文件放在根目录
 install(TARGETS app RUNTIME DESTINATION .)
 
-foreach(file ${ASSET_FILES})
-    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/${file} DESTINATION .)
-endforeach()
+# 2. settings.json 单独放在根目录
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/settings.json DESTINATION .)
 
-foreach(dir ${ASSET_DIRS})
-    install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/${dir}/ DESTINATION ./${dir})
-endforeach()
+# 3. 其余资源文件放入 workspace/ 子目录
+install(FILES
+    ${CMAKE_CURRENT_SOURCE_DIR}/webui.html
+    ${CMAKE_CURRENT_SOURCE_DIR}/agent.txt
+    DESTINATION workspace
+)
 
-# 运行时需要的空目录
-install(DIRECTORY DESTINATION ./sessions)
-install(DIRECTORY DESTINATION ./memorys)
-install(DIRECTORY DESTINATION ./assets)
+# 4. 目录资源放入 workspace/ 下的对应子目录
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/sys/ DESTINATION workspace/sys)
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tools/ DESTINATION workspace/tools)
+
+# 5. 运行时需要的空目录也放在 workspace/ 下
+install(DIRECTORY DESTINATION workspace/sessions)
+install(DIRECTORY DESTINATION workspace/memorys)
+install(DIRECTORY DESTINATION workspace/assets)
 
 # ---------- CPack ----------
 set(CPACK_PACKAGE_NAME ${PROJECT_NAME})
