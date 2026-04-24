@@ -4,122 +4,132 @@
 <head>
     <meta charset="utf-8" />
     <meta content="width=device-width, initial-scale=1.0" name="viewport" />
-    <title>Chat WebUI · 深度思考可见</title>
+    <title>Loading</title>
     <link rel="icon"
-        href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧠</text></svg>">
+        href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <script src="https://image.uc.cn/s/uae/g/3n/mos-production/fontawesome-free-7.1.0-web/js/all.min.js"></script>
     <link href="https://image.uc.cn/s/uae/g/3n/mos-production/fontawesome-free-7.1.0-web/css/fontawesome.min.css"
         rel="stylesheet" />
     <script src="https://image.uc.cn/s/uae/g/3n/mos-production/cdn-staticfile-net/axios/1.6.7/axios.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
     <style>
-        /* --- 滚动条优化 --- */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            background-color: #09090b;
+            color: #e4e4e7;
+        }
+
         ::-webkit-scrollbar {
             width: 6px;
             height: 6px;
         }
 
         ::-webkit-scrollbar-track {
-            background: #0f172a;
+            background: transparent;
         }
 
         ::-webkit-scrollbar-thumb {
-            background: #334155;
+            background: #27272a;
             border-radius: 4px;
         }
 
         ::-webkit-scrollbar-thumb:hover {
-            background: #475569;
+            background: #3f3f46;
         }
 
-        /* --- 基础开关样式 --- */
         .toggle-checkbox:checked {
             right: 0;
-            border-color: #2563eb;
+            border-color: #6366f1;
         }
 
         .toggle-checkbox:checked+.toggle-label {
-            background-color: #2563eb;
+            background-color: #6366f1;
         }
 
-        /* --- 消息气泡与响应美化 --- */
         .message-bubble {
             word-wrap: break-word;
             word-break: break-word;
             overflow-wrap: break-word;
             min-width: 0;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
         }
 
-        /* --- 核心：Markdown 颜色优化 --- */
         .prose {
-            color: #ffffff !important;
+            color: #e4e4e7 !important;
             max-width: none;
-            line-height: 1.6;
+            line-height: 1.7;
+            font-size: 0.95rem;
         }
 
         .prose a {
-            color: #60a5fa;
-            text-decoration: underline;
+            color: #818cf8;
+            text-decoration: none;
+            border-bottom: 1px solid transparent;
+            transition: border-color 0.2s;
+        }
+
+        .prose a:hover {
+            border-color: #818cf8;
         }
 
         .prose blockquote {
-            border-left: 4px solid #3b82f6;
-            background-color: #1e293b;
-            color: #cbd5e1;
-            padding: 0.5rem 1rem;
+            border-left: 3px solid #6366f1;
+            background-color: #18181b;
+            color: #a1a1aa;
+            padding: 0.75rem 1.25rem;
             margin: 1rem 0;
+            border-radius: 0 0.5rem 0.5rem 0;
             font-style: italic;
         }
 
-        .prose ul>li::marker,
-        .prose ol>li::marker {
-            color: #60a5fa;
-        }
-
         .prose strong {
-            color: #60a5fa;
-            font-weight: 700;
+            color: #f4f4f5;
+            font-weight: 600;
         }
 
         .prose pre {
-            background-color: #020617 !important;
-            padding: 1.25em 1em;
-            border-radius: 0.75rem;
+            background-color: #18181b !important;
+            padding: 1.25em;
+            border-radius: 0.5rem;
             overflow-x: auto;
             margin: 1.2em 0;
             position: relative;
-            border: 1px solid #334155;
+            border: 1px solid #27272a;
         }
 
         .prose code {
-            color: #fbbf24;
-            background-color: #1e293b;
+            color: #fca5a5;
+            background-color: #27272a;
             padding: 0.2em 0.4em;
             border-radius: 0.25em;
-            font-family: 'Fira Code', 'Consolas', monospace;
-            font-size: 0.9em;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85em;
         }
 
         .prose pre code {
             background-color: transparent;
             padding: 0;
-            color: #e2e8f0;
+            color: #d4d4d8;
         }
 
         .copy-btn {
             position: absolute;
-            top: 8px;
-            right: 8px;
-            background: #1e293b;
-            color: #94a3b8;
-            border: 1px solid #334155;
-            padding: 4px 10px;
-            border-radius: 6px;
+            top: 10px;
+            right: 10px;
+            background: #27272a;
+            color: #a1a1aa;
+            border: 1px solid #3f3f46;
+            padding: 4px 8px;
+            border-radius: 4px;
             font-size: 11px;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: all 0.2s ease;
             opacity: 0;
+            font-family: 'Inter', sans-serif;
         }
 
         .prose pre:hover .copy-btn {
@@ -127,34 +137,44 @@
         }
 
         .copy-btn:hover {
-            background: #334155;
-            color: #ffffff;
+            background: #3f3f46;
+            color: #f4f4f5;
         }
 
-        /* 深度思考区域样式 */
         .think-container {
-            background: #0f172a;
-            border-left: 4px solid #3b82f6;
+            background: #18181b;
+            border-left: 3px solid #8b5cf6;
             border-radius: 0.5rem;
-            margin-bottom: 1rem;
-            padding: 0.5rem 0.75rem;
-            font-size: 0.8rem;
+            margin-bottom: 1.25rem;
+            box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.05);
+            overflow: hidden;
         }
 
         .think-summary {
-            font-size: 0.75rem;
+            padding: 0.75rem 1rem;
+            font-size: 0.8rem;
             font-weight: 500;
-            color: #93c5fd;
+            color: #c4b5fd;
             cursor: pointer;
             user-select: none;
-            display: inline-flex;
+            display: flex;
             align-items: center;
             gap: 0.5rem;
+            background: rgba(139, 92, 246, 0.05);
+            transition: background 0.2s;
+        }
+
+        .think-summary:hover {
+            background: rgba(139, 92, 246, 0.1);
+        }
+
+        .think-summary::-webkit-details-marker {
+            display: none;
         }
 
         .think-summary i {
             font-size: 0.7rem;
-            transition: transform 0.2s;
+            transition: transform 0.3s ease;
         }
 
         details[open] .think-summary i {
@@ -162,43 +182,26 @@
         }
 
         .think-steps {
-            margin-top: 0.5rem;
-            padding-left: 0.75rem;
-            border-top: 1px solid #334155;
-            padding-top: 0.5rem;
+            padding: 0 1rem 1rem 1rem;
+            font-size: 0.85rem;
         }
 
         .think-step {
             display: flex;
-            gap: 0.5rem;
-            margin-bottom: 0.5rem;
-            color: #cbd5e6;
-            line-height: 1.4;
+            gap: 0.75rem;
+            margin-top: 0.75rem;
+            color: #a1a1aa;
+            line-height: 1.5;
         }
 
         .think-step-marker {
-            font-weight: 600;
-            color: #60a5fa;
-            font-family: monospace;
-        }
-
-        .loader {
-            border: 3px solid #f3f3f3;
-            border-radius: 50%;
-            border-top: 3px solid #3498db;
-            width: 20px;
-            height: 20px;
-            animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin {
-            0% {
-                transform: rotate(0deg);
-            }
-
-            100% {
-                transform: rotate(360deg);
-            }
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.75rem;
+            color: #8b5cf6;
+            background: rgba(139, 92, 246, 0.1);
+            padding: 0.1rem 0.4rem;
+            border-radius: 0.25rem;
+            height: fit-content;
         }
 
         @keyframes slideIn {
@@ -214,14 +217,14 @@
         }
 
         .toast-enter {
-            animation: slideIn 0.3s ease-out forwards;
+            animation: slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
         }
 
-        /* 打字光标动画 */
         .typing-cursor::after {
             content: "▋";
             animation: blink 1s step-end infinite;
-            margin-left: 2px;
+            margin-left: 4px;
+            color: #6366f1;
         }
 
         @keyframes blink {
@@ -236,13 +239,12 @@
             }
         }
 
-        /* 设置表单样式 */
         .settings-group {
-            background: #0f172a;
-            border-radius: 0.75rem;
-            padding: 1rem;
-            margin-bottom: 1.5rem;
-            border: 1px solid #334155;
+            background: #18181b;
+            border-radius: 0.5rem;
+            padding: 1.25rem;
+            margin-bottom: 1.25rem;
+            border: 1px solid #27272a;
         }
 
         .settings-label {
@@ -250,210 +252,248 @@
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.05em;
-            color: #94a3b8;
-            margin-bottom: 0.75rem;
+            color: #a1a1aa;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
         }
 
         .setting-row {
-            display: flex;
-            flex-direction: column;
-            gap: 0.25rem;
             margin-bottom: 1rem;
         }
 
-        .setting-row label {
-            font-size: 0.875rem;
-            font-weight: 500;
-            color: #e2e8f0;
+        .setting-row:last-child {
+            margin-bottom: 0;
         }
 
-        .setting-row input,
+        .setting-row label {
+            display: block;
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: #d4d4d8;
+            margin-bottom: 0.4rem;
+        }
+
+        .setting-row input[type="text"],
+        .setting-row input[type="number"],
         .setting-row textarea {
-            background: #1e293b;
-            border: 1px solid #334155;
-            border-radius: 0.5rem;
+            width: 100%;
+            background: #09090b;
+            border: 1px solid #27272a;
+            border-radius: 0.375rem;
             padding: 0.5rem 0.75rem;
-            color: #f1f5f9;
+            color: #f4f4f5;
             font-size: 0.875rem;
             transition: all 0.2s;
+            font-family: inherit;
         }
 
         .setting-row input:focus,
         .setting-row textarea:focus {
             outline: none;
-            border-color: #3b82f6;
-            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+            border-color: #6366f1;
+            box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
         }
 
         .setting-row input[type="checkbox"] {
-            width: 1.25rem;
-            height: 1.25rem;
-            margin-right: 0.5rem;
-            accent-color: #3b82f6;
+            width: 1.1rem;
+            height: 1.1rem;
+            accent-color: #6366f1;
+            cursor: pointer;
         }
 
         .checkbox-wrapper {
             display: flex;
             align-items: center;
+            gap: 0.5rem;
+        }
+
+        .checkbox-wrapper label {
+            margin-bottom: 0;
+            cursor: pointer;
         }
 
         .setting-description {
             font-size: 0.7rem;
-            color: #64748b;
-            margin-top: 0.25rem;
+            color: #71717a;
+            margin-top: 0.3rem;
+        }
+
+        textarea#user-input {
+            transition: height 0.1s ease;
         }
     </style>
 </head>
 
-<body class="bg-slate-900 text-slate-200 font-sans h-screen overflow-hidden flex flex-col">
+<body class="h-screen overflow-hidden flex flex-col">
     <div class="flex h-full" id="main-interface">
-        <aside class="w-64 bg-slate-800 border-r border-slate-700 flex flex-col flex-shrink-0">
-            <div class="p-4 border-b border-slate-700 flex justify-between items-center">
-                <h2 class="font-bold text-lg text-white">Sessions</h2>
-                <div class="flex gap-2">
-                    <button class="text-blue-400 hover:text-blue-300 transition" id="new-session-btn"
-                        title="New Session">
-                        <i class="fa-solid fa-plus"></i>
-                    </button>
-                </div>
+
+        <!-- 左侧会话列表 -->
+        <aside class="w-64 bg-[#09090b] border-r border-[#27272a] flex flex-col flex-shrink-0 z-10">
+            <div class="p-4 border-b border-[#27272a] flex justify-between items-center bg-[#09090b]">
+                <h2 class="font-semibold text-sm tracking-wide text-zinc-100 uppercase">Sessions</h2>
+                <button class="text-indigo-400 hover:text-indigo-300 transition-colors p-1 rounded-md hover:bg-zinc-800"
+                    id="new-session-btn" title="新建会话">
+                    <i class="fa-solid fa-plus"></i>
+                </button>
             </div>
-            <div class="flex-1 overflow-y-auto p-2 space-y-1" id="session-list"></div>
-            <div class="p-4 border-t border-slate-700">
+            <div class="flex-1 overflow-y-auto p-3 space-y-1" id="session-list"></div>
+            <div class="p-4 border-t border-[#27272a] bg-[#18181b]">
                 <div class="flex items-center space-x-3">
-                    <div class="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white">
+                    <div
+                        class="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white text-sm font-bold shadow-sm">
                         <i class="fa-solid fa-user"></i>
                     </div>
                     <div class="flex-1 min-w-0">
-                        <p class="text-sm font-medium text-white truncate" id="current-user-display">Local User</p>
+                        <p class="text-sm font-medium text-zinc-200 truncate" id="current-user-display">Local User</p>
                     </div>
                 </div>
             </div>
         </aside>
 
-        <main class="flex-1 flex flex-col min-w-0 bg-slate-900 overflow-hidden">
+        <!-- 中间聊天主区域 -->
+        <main class="flex-1 flex flex-col min-w-0 bg-[#09090b] relative">
             <header
-                class="h-14 bg-slate-800 border-b border-slate-700 flex items-center justify-between px-4 flex-shrink-0 z-40">
+                class="h-14 bg-opacity-80 backdrop-blur-md border-b border-[#27272a] flex items-center justify-between px-5 flex-shrink-0 z-40 absolute top-0 w-full">
                 <div class="relative inline-block text-left">
                     <button type="button" id="model-dropdown-btn"
-                        class="flex items-center space-x-2 px-2 py-1 rounded hover:bg-slate-700 transition-colors focus:outline-none">
-                        <span class="w-2 h-2 rounded-full bg-slate-500" id="connection-status-dot"></span>
-                        <span class="text-sm text-slate-300" id="model-name-display">Model: Loading...</span>
-                        <i class="fa-solid fa-chevron-down text-xs text-slate-400 ml-1"></i>
+                        class="flex items-center space-x-2 px-3 py-1.5 rounded-md hover:bg-zinc-800 transition-colors focus:outline-none border border-transparent hover:border-zinc-700">
+                        <span class="w-2 h-2 rounded-full bg-zinc-500 shadow-[0_0_8px_rgba(0,0,0,0.5)]"
+                            id="connection-status-dot"></span>
+                        <span class="text-sm font-medium text-zinc-300" id="model-name-display">加载模型中...</span>
+                        <i class="fa-solid fa-chevron-down text-[10px] text-zinc-500 ml-1"></i>
                     </button>
                     <div id="model-dropdown-menu"
-                        class="absolute left-0 mt-2 w-56 rounded-md shadow-lg bg-slate-800 border border-slate-700 hidden z-50">
+                        class="absolute left-0 mt-2 w-64 rounded-lg shadow-xl bg-zinc-900 border border-zinc-800 hidden z-50 overflow-hidden">
                         <div class="py-1 max-h-60 overflow-y-auto" id="model-dropdown-list"></div>
                     </div>
                 </div>
-                <div class="flex items-center gap-4">
-                    <div class="flex gap-3">
-                        <button class="text-purple-400 hover:text-purple-300 transition" id="summary-session-btn"
-                            title="Generate Memory Summary">
+                <div class="flex items-center gap-5">
+                    <div class="flex gap-2">
+                        <button
+                            class="w-8 h-8 flex items-center justify-center rounded-md text-purple-400 hover:text-purple-300 hover:bg-purple-400/10 transition-colors"
+                            id="summary-session-btn" title="生成记忆摘要">
                             <i class="fa-solid fa-brain"></i>
                         </button>
-                        <button class="text-red-400 hover:text-red-300 transition" id="clear-session-btn"
-                            title="Clear Current Session Context">
+                        <button
+                            class="w-8 h-8 flex items-center justify-center rounded-md text-rose-400 hover:text-rose-300 hover:bg-rose-400/10 transition-colors"
+                            id="clear-session-btn" title="清空上下文">
                             <i class="fa-solid fa-trash-can"></i>
                         </button>
                     </div>
-                    <div class="text-xs text-slate-500 border-l border-slate-600 pl-4" id="current-session-id-display">
-                        Session: -</div>
+                    <div class="text-xs font-mono text-zinc-500 bg-zinc-900 px-2 py-1 rounded border border-zinc-800"
+                        id="current-session-id-display">ID: -</div>
                 </div>
             </header>
 
-            <div class="flex-1 overflow-y-auto p-4 space-y-4" id="messages-container">
-                <div class="flex justify-center mt-10">
-                    <div class="text-center text-slate-500">
-                        <i class="fa-solid fa-brain text-4xl mb-3 opacity-50"></i>
-                        <p>WebUI Powered by Yauntyours</p>
+            <div class="flex-1 overflow-y-auto p-4 pt-20 pb-4 space-y-6" id="messages-container">
+                <div class="flex justify-center mt-20">
+                    <div class="text-center text-zinc-600">
+                        <i class="fa-solid fa-bolt text-5xl mb-4 opacity-40"></i>
+                        <h3 class="text-lg font-medium text-zinc-400">Yauntyours WebUI</h3>
+                        <p class="text-sm mt-1">准备就绪，开始对话。</p>
                     </div>
                 </div>
             </div>
 
-            <div class="p-4 bg-slate-800 border-t border-slate-700 flex-shrink-0">
-                <div
-                    class="bg-slate-900 rounded-lg border border-slate-700 focus-within:border-blue-600 transition flex flex-col">
-                    <div id="image-preview-container" class="flex flex-wrap gap-2 px-3 pt-2 hidden"></div>
-                    <div class="relative flex items-center p-1">
-                        <button class="text-slate-400 hover:text-blue-400 p-2 rounded transition ml-1" id="attach-btn"
-                            title="上传文件 (图片/文本)">
-                            <i class="fa-solid fa-paperclip text-lg"></i>
-                        </button>
-                        <input type="file" id="file-upload" class="hidden" multiple>
-                        <textarea
-                            class="flex-1 bg-transparent text-white p-2 resize-none focus:outline-none max-h-48 overflow-y-auto"
-                            id="user-input" placeholder="输入消息... (支持上传文本与图像, 切换会话可以重置会话上下文)" rows="1"></textarea>
-                        <button class="text-blue-500 hover:text-blue-400 p-2 rounded transition mr-1" id="send-btn"
-                            title="send-btn">
-                            <i class="fa-solid fa-paper-plane text-xl"></i>
-                        </button>
-                    </div>
-                </div>
-
-                <div class="flex justify-between items-center mt-2 px-1">
-                    <div class="flex items-center">
-                        <div
-                            class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
-                            <input
-                                class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer border-slate-300 transition-all duration-300 left-0 top-0"
-                                id="think-toggle" name="toggle" type="checkbox">
-                            <label
-                                class="toggle-label block overflow-hidden h-5 rounded-full bg-slate-600 cursor-pointer transition-colors duration-300"
-                                for="think-toggle"></label>
+            <!-- 输入区域 -->
+            <div class="p-4 bg-gradient-to-t from-[#09090b] to-transparent flex-shrink-0 pb-6">
+                <div class="max-w-4xl mx-auto">
+                    <div
+                        class="bg-[#18181b] rounded-xl border border-[#27272a] shadow-lg focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500 transition-all flex flex-col overflow-hidden">
+                        <div id="image-preview-container"
+                            class="flex flex-wrap gap-2 px-3 pt-3 hidden border-b border-[#27272a]"></div>
+                        <div class="relative flex items-end p-2">
+                            <button class="text-zinc-400 hover:text-indigo-400 p-2.5 rounded-lg transition-colors"
+                                id="attach-btn" title="上传文件/图片">
+                                <i class="fa-solid fa-paperclip text-lg"></i>
+                            </button>
+                            <input type="file" id="file-upload" class="hidden" multiple>
+                            <textarea
+                                class="flex-1 bg-transparent text-zinc-100 p-2.5 resize-none focus:outline-none max-h-60 overflow-y-auto text-[0.95rem] leading-relaxed"
+                                id="user-input" placeholder="输入消息... (Shift+Enter 换行)" rows="1"></textarea>
+                            <button
+                                class="text-white bg-indigo-600 hover:bg-indigo-500 p-2 rounded-lg transition-colors m-1 shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center w-10 h-10"
+                                id="send-btn" title="发送">
+                                <i class="fa-solid fa-arrow-up"></i>
+                            </button>
                         </div>
-                        <span class="text-xs text-slate-400">Deep Think</span>
                     </div>
-                    <div class="text-xs text-slate-500" id="input-hint">↵ 发送消息</div>
+
+                    <div class="flex justify-between items-center mt-3 px-2">
+                        <div class="flex items-center gap-2">
+                            <div class="relative inline-block w-9 align-middle select-none">
+                                <input
+                                    class="toggle-checkbox absolute block w-4 h-4 rounded-full bg-white border-4 appearance-none cursor-pointer border-zinc-400 transition-all duration-300 left-0 top-0.5"
+                                    id="think-toggle" name="toggle" type="checkbox">
+                                <label
+                                    class="toggle-label block overflow-hidden h-5 rounded-full bg-zinc-700 cursor-pointer transition-colors duration-300"
+                                    for="think-toggle"></label>
+                            </div>
+                            <span class="text-xs font-medium text-zinc-400">深度思考模式</span>
+                        </div>
+                        <div class="text-xs text-zinc-600">Powered by Local Agent</div>
+                    </div>
                 </div>
             </div>
         </main>
 
-        <aside class="w-80 bg-slate-800 border-l border-slate-700 flex flex-col flex-shrink-0">
-            <div class="flex border-b border-slate-700">
+        <!-- 右侧面板 -->
+        <aside class="w-80 bg-[#09090b] border-l border-[#27272a] flex flex-col flex-shrink-0 z-10">
+            <div class="flex border-b border-[#27272a] bg-[#18181b]">
                 <button
-                    class="flex-1 py-3 text-sm font-medium text-blue-400 border-b-2 border-blue-500 focus:outline-none hover:bg-slate-700 transition tab-btn"
-                    data-tab="settings">Settings</button>
+                    class="flex-1 py-3 text-xs font-semibold uppercase tracking-wider text-indigo-400 border-b-2 border-indigo-500 focus:outline-none hover:bg-zinc-800 transition tab-btn"
+                    data-tab="settings">配置</button>
                 <button
-                    class="flex-1 py-3 text-sm font-medium text-slate-400 hover:text-slate-200 focus:outline-none hover:bg-slate-700 transition tab-btn"
-                    data-tab="tools">Tools</button>
+                    class="flex-1 py-3 text-xs font-semibold uppercase tracking-wider text-zinc-500 hover:text-zinc-300 focus:outline-none hover:bg-zinc-800 transition tab-btn"
+                    data-tab="tools">工具</button>
                 <button
-                    class="flex-1 py-3 text-sm font-medium text-slate-400 hover:text-slate-200 focus:outline-none hover:bg-slate-700 transition tab-btn"
-                    data-tab="todos">Todos</button>
+                    class="flex-1 py-3 text-xs font-semibold uppercase tracking-wider text-zinc-500 hover:text-zinc-300 focus:outline-none hover:bg-zinc-800 transition tab-btn"
+                    data-tab="todos">任务</button>
                 <button
-                    class="flex-1 py-3 text-sm font-medium text-slate-400 hover:text-slate-200 focus:outline-none hover:bg-slate-700 transition tab-btn"
-                    data-tab="channels">Channels</button>
+                    class="flex-1 py-3 text-xs font-semibold uppercase tracking-wider text-zinc-500 hover:text-zinc-300 focus:outline-none hover:bg-zinc-800 transition tab-btn"
+                    data-tab="channels">频道</button>
             </div>
+
             <div class="tab-content flex-1 overflow-y-auto p-4" id="tab-settings">
                 <div id="settings-form-container"></div>
                 <div class="mt-4">
                     <button id="save-settings-btn"
-                        class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition flex items-center justify-center gap-2">
-                        <i class="fa-solid fa-floppy-disk"></i> 保存所有设置
+                        class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-2 px-4 rounded-lg transition-colors flex items-center justify-center gap-2 shadow-sm">
+                        <i class="fa-solid fa-floppy-disk"></i> 应用配置
                     </button>
                 </div>
-                <div class="mt-6">
-                    <h3 class="text-sm font-bold text-white uppercase tracking-wider mb-3">System Logs</h3>
-                    <div class="bg-slate-900 p-2 rounded h-48 overflow-y-auto text-xs font-mono text-slate-400 space-y-1"
+                <div class="mt-8">
+                    <h3
+                        class="text-[0.65rem] font-bold text-zinc-500 uppercase tracking-widest mb-2 flex items-center gap-2">
+                        <i class="fa-solid fa-terminal"></i> 系统日志
+                    </h3>
+                    <div class="bg-black border border-[#27272a] p-3 rounded-lg h-40 overflow-y-auto text-[0.7rem] font-mono text-zinc-400 space-y-1.5 shadow-inner"
                         id="system-logs">
-                        <div class="text-green-500">[System] UI Initialized</div>
+                        <div class="text-emerald-500">[System] 核心初始化成功。</div>
                     </div>
                 </div>
             </div>
+
             <div class="tab-content flex-1 overflow-y-auto p-4 hidden" id="tab-tools">
                 <div class="space-y-3" id="tools-list"></div>
             </div>
+
             <div class="tab-content flex-1 overflow-y-auto p-4 hidden flex flex-col" id="tab-todos">
-                <div class="flex mb-4">
+                <div class="flex mb-4 shadow-sm">
                     <input
-                        class="flex-1 bg-slate-900 border border-slate-700 rounded-l px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-600"
-                        id="new-todo-input" placeholder="Add new todo..." type="text" />
-                    <button class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-r text-sm transition"
-                        id="add-todo-btn" title="add-todo-btn">
+                        class="flex-1 bg-[#18181b] border border-[#27272a] rounded-l-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500 transition-colors"
+                        id="new-todo-input" placeholder="新任务..." type="text" />
+                    <button
+                        class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-r-lg text-sm transition-colors"
+                        id="add-todo-btn">
                         <i class="fa-solid fa-plus"></i>
                     </button>
                 </div>
                 <div class="space-y-2 flex-1" id="todos-list"></div>
             </div>
+
             <div class="tab-content flex-1 overflow-y-auto p-4 hidden" id="tab-channels">
                 <div class="space-y-2" id="channels-list"></div>
             </div>
@@ -463,12 +503,12 @@
     <div class="fixed top-5 right-5 z-50 flex flex-col space-y-3" id="toast-container"></div>
 
     <script>
-        // --- State Management ---
+        // ---------- 全局状态 ----------
         const state = {
             user: "Local User",
             sessions: [],
             currentSessionId: null,
-            messages: [],
+            messages: [],               // 消息对象模型：{ role, content, images, thinkings?, isLoading? }
             settings: {},
             models: [],
             currentModel: null,
@@ -483,9 +523,8 @@
 
         const API_BASE = '/api';
 
-        // --- DOM Elements ---
+        // ---------- DOM 元素缓存 ----------
         const els = {
-            mainInterface: document.getElementById('main-interface'),
             sessionList: document.getElementById('session-list'),
             newSessionBtn: document.getElementById('new-session-btn'),
             clearSessionBtn: document.getElementById('clear-session-btn'),
@@ -516,21 +555,21 @@
             saveSettingsBtn: document.getElementById('save-settings-btn')
         };
 
-        // --- Utilities ---
+        // ---------- 工具函数 ----------
         function showToast(message, type = 'info') {
             const container = document.getElementById('toast-container');
             const toast = document.createElement('div');
             let icon = '<i class="fa-solid fa-circle-info text-blue-400"></i>';
-            if (type === 'success') icon = '<i class="fa-solid fa-circle-check text-green-400"></i>';
-            else if (type === 'error') icon = '<i class="fa-solid fa-circle-exclamation text-red-400"></i>';
+            if (type === 'success') icon = '<i class="fa-solid fa-circle-check text-emerald-400"></i>';
+            else if (type === 'error') icon = '<i class="fa-solid fa-circle-exclamation text-rose-400"></i>';
 
-            toast.className = `bg-slate-700 text-white px-4 py-3 rounded shadow-lg flex items-center space-x-3 min-w-[300px] toast-enter border border-slate-600`;
+            toast.className = `bg-zinc-800 text-zinc-100 px-4 py-3 rounded-lg shadow-xl flex items-center space-x-3 min-w-[300px] toast-enter border border-zinc-700`;
             toast.innerHTML = `${icon}<span class="text-sm font-medium">${message}</span>`;
             container.appendChild(toast);
             setTimeout(() => {
                 toast.style.opacity = '0';
                 toast.style.transform = 'translateX(100%)';
-                toast.style.transition = 'all 0.3s ease-in';
+                toast.style.transition = 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)';
                 setTimeout(() => toast.remove(), 300);
             }, 3000);
         }
@@ -539,7 +578,7 @@
             const time = new Date().toLocaleTimeString();
             const div = document.createElement('div');
             div.textContent = `[${time}] ${msg}`;
-            div.className = type === 'error' ? 'text-red-400' : (type === 'success' ? 'text-green-400' : 'text-slate-400');
+            div.className = type === 'error' ? 'text-rose-400' : (type === 'success' ? 'text-emerald-400' : 'text-zinc-500');
             els.systemLogs.appendChild(div);
             els.systemLogs.scrollTop = els.systemLogs.scrollHeight;
         }
@@ -551,15 +590,15 @@
                 if (pre.querySelector('.copy-btn')) return;
                 const btn = document.createElement('button');
                 btn.className = 'copy-btn';
-                btn.innerText = 'Copy';
+                btn.innerHTML = '<i class="fa-regular fa-copy"></i> 复制';
                 btn.onclick = () => {
                     const code = pre.querySelector('code')?.innerText || '';
                     navigator.clipboard.writeText(code).then(() => {
-                        btn.innerText = 'Copied!';
-                        btn.classList.add('text-green-400');
+                        btn.innerHTML = '<i class="fa-solid fa-check"></i> 已复制';
+                        btn.classList.add('text-emerald-400', 'border-emerald-500/50');
                         setTimeout(() => {
-                            btn.innerText = 'Copy';
-                            btn.classList.remove('text-green-400');
+                            btn.innerHTML = '<i class="fa-regular fa-copy"></i> 复制';
+                            btn.classList.remove('text-emerald-400', 'border-emerald-500/50');
                         }, 2000);
                     });
                 };
@@ -569,85 +608,46 @@
 
         function renderFixCodeBlock(text) {
             if (!text) return text;
-            let output = text.replace(/<cs>([\s\S]*?)<\/cs>/g, function (match, codeContent) {
-                return '```yaml\n' + codeContent + '\n```';
-            });
-            output = output.replace(/<tool>([\s\S]*?)<\/tool>/g, function (match, codeContent) {
-                return '```yaml\n' + codeContent + '\n```';
-            });
+            let output = text.replace(/<cs>([\s\S]*?)<\/cs>/g, (_, content) => '```yaml\n# 系统调用\n' + content + '\n```');
+            output = output.replace(/<tool>([\s\S]*?)<\/tool>/g, (_, content) => '```yaml\n# 工具调用\n' + content + '\n```');
             return output;
         }
 
         function escapeHtml(str) {
             if (!str) return '';
-            return str.replace(/[&<>]/g, function (m) {
-                if (m === '&') return '&amp;';
-                if (m === '<') return '&lt;';
-                if (m === '>') return '&gt;';
-                return m;
-            }).replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, function (c) {
-                return c;
-            });
+            return str.replace(/[&<>]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[m]);
         }
 
-        // --- 动态渲染设置表单 ---
+        els.userInput.addEventListener('input', function () {
+            this.style.height = 'auto';
+            this.style.height = (this.scrollHeight) + 'px';
+        });
+
+        // ---------- 设置表单 ----------
         function renderSettingsForm(settings) {
             if (!els.settingsFormContainer) return;
             const formHtml = `
                 <div class="settings-group">
-                    <div class="settings-label">⚙️ 基本设置</div>
-                    <div class="setting-row">
-                        <label>用户名 (name)</label>
-                        <input type="text" id="setting-name" value="${escapeHtml(settings.name || '')}" placeholder="用户名">
-                        <div class="setting-description">用于标识当前用户</div>
-                    </div>
-                    <div class="setting-row">
-                        <label>Agent 昵称 (agent_nickname)</label>
-                        <input type="text" id="setting-agent_nickname" value="${escapeHtml(settings.agent_nickname || '')}" placeholder="Agent 昵称">
-                        <div class="setting-description">AI 助手的显示名称</div>
-                    </div>
-                    <div class="setting-row">
-                        <label>工作目录 (workspace)</label>
-                        <input type="text" id="setting-workspace" value="${escapeHtml(settings.workspace || '')}" placeholder="工作目录">
-                        <div class="setting-description">文件操作的基础路径</div>
-                    </div>
-                    <div class="setting-row">
-                        <label>服务器地址 (server_address)</label>
-                        <input type="text" id="setting-server_address" value="${escapeHtml(settings.server_address || '')}" placeholder="http://localhost:11434">
-                        <div class="setting-description">Ollama API 服务地址</div>
-                    </div>
-                    <div class="setting-row">
-                        <label>默认模型 (model)</label>
-                        <input type="text" id="setting-model" value="${escapeHtml(settings.model || '')}" placeholder="模型名称">
-                        <div class="setting-description">对话使用的默认模型</div>
-                    </div>
-                    <div class="setting-row">
-                        <label>提示词路径 (prompt)</label>
-                        <input type="text" id="setting-prompt" value="${escapeHtml(settings.prompt || '')}" placeholder="agent.txt">
-                        <div class="setting-description">系统提示词文件路径</div>
-                    </div>
+                    <div class="settings-label"><i class="fa-solid fa-sliders"></i> 基本信息</div>
+                    <div class="setting-row"><label>用户昵称</label><input type="text" id="setting-name" value="${escapeHtml(settings.user_name || '')}" placeholder="Admin"></div>
+                    <div class="setting-row"><label>Agent昵称</label><input type="text" id="setting-agent_name" value="${escapeHtml(settings.agent_name || '')}" placeholder="Assistant"></div>
+                    <div class="setting-row"><label>工作区路径</label><input type="text" id="setting-workspace" value="${escapeHtml(settings.workspace || '')}" placeholder="/path/to/workspace"></div>
+                    <div class="setting-row"><label>服务器地址</label><input type="text" id="setting-server_address" value="${escapeHtml(settings.server_address || '')}" placeholder="http://localhost:11434"></div>
+                    <div class="setting-row"><label>默认模型</label><input type="text" id="setting-model" value="${escapeHtml(settings.model || '')}" placeholder="llama3"></div>
+                    <div class="setting-row"><label>系统提示词</label><input type="text" id="setting-prompt" value="${escapeHtml(settings.prompt || '')}" placeholder="sys/prompt.txt"></div>
                 </div>
                 <div class="settings-group">
-                    <div class="settings-label">🎛️ 运行参数</div>
+                    <div class="settings-label"><i class="fa-solid fa-gear"></i> 运行参数</div>
                     <div class="setting-row checkbox-wrapper">
                         <input type="checkbox" id="setting-stream" ${settings.stream ? 'checked' : ''}>
-                        <label>流式响应 (stream)</label>
+                        <label for="setting-stream">启用流式传输</label>
                     </div>
-                    <div class="setting-row">
-                        <label>最大 MPC 轮次 (max_mpc_rounds)</label>
-                        <input type="number" id="setting-max_mpc_rounds" value="${settings.max_mpc_rounds || 10}" min="1" max="50">
-                    </div>
-                    <div class="setting-row">
-                        <label>最大上下文长度 (max_context)</label>
-                        <input type="number" id="setting-max_context" value="${settings.max_context || 128000}" min="1000" max="1000000">
-                    </div>
+                    <div class="setting-row"><label>最大工具/系统调用轮数</label><input type="number" id="setting-max_mpc_rounds" value="${settings.max_mpc_rounds || 10}" min="1" max="50"></div>
+                    <div class="setting-row"><label>上下文窗口大小</label><input type="number" id="setting-max_context" value="${settings.max_context || 128000}" min="1000"></div>
                 </div>
                 <div class="settings-group">
-                    <div class="settings-label">📡 频道配置 (channels)</div>
-                    <div class="setting-row">
-                        <label>频道列表 (JSON 格式)</label>
-                        <textarea id="setting-channels" rows="6" class="font-mono text-sm">${escapeHtml(JSON.stringify(settings.channels || [], null, 2))}</textarea>
-                    </div>
+                    <div class="settings-label"><i class="fa-solid fa-network-wired"></i> 频道</div>
+                    <div class="setting-row"><textarea id="setting-channels" rows="4" class="font-mono text-xs">${escapeHtml(JSON.stringify(settings.channels || [], null, 2))}</textarea></div>
                 </div>
             `;
             els.settingsFormContainer.innerHTML = formHtml;
@@ -655,10 +655,10 @@
 
         function collectSettingsFromForm() {
             let channels = [];
-            try { channels = JSON.parse(document.getElementById('setting-channels')?.value || '[]'); } catch (e) { channels = state.settings.channels; }
+            try { channels = JSON.parse(document.getElementById('setting-channels')?.value || '[]'); } catch (e) { channels = state.settings.channels || []; }
             return {
-                name: document.getElementById('setting-name')?.value || '',
-                agent_nickname: document.getElementById('setting-agent_nickname')?.value || '',
+                user_name: document.getElementById('setting-name')?.value || '',
+                agent_name: document.getElementById('setting-agent_name')?.value || '',
                 workspace: document.getElementById('setting-workspace')?.value || '',
                 server_address: document.getElementById('setting-server_address')?.value || '',
                 model: document.getElementById('setting-model')?.value || '',
@@ -674,31 +674,29 @@
             const newSettings = collectSettingsFromForm();
             state.settings = newSettings;
             try {
-                const response = await api.post('/settings', { updata: true, settings: state.settings });
+                const response = await axios.post(API_BASE + '/settings', { updata: true, settings: state.settings });
                 if (response.status === 200) {
                     state.settings = response.data;
                     showToast('设置已保存', 'success');
-                    log('设置已保存', 'success');
+                    log('配置更新成功', 'success');
                     await getModels();
-                    if (state.settings.model && state.models.some(m => m.name === state.settings.model)) selectModel(state.settings.model, true);
+                    if (state.settings.model && state.models.some(m => m.name === state.settings.model))
+                        selectModel(state.settings.model, true);
                 } else throw new Error('保存失败');
-            } catch (error) {
-                showToast('保存设置失败: ' + (error.response?.data?.error || error.message), 'error');
-            }
+            } catch (error) { showToast('保存设置失败', 'error'); }
         }
 
         async function loadSettings() {
             try {
-                const response = await api.post('/settings', { updata: false });
+                const response = await axios.post(API_BASE + '/settings', { updata: false });
                 if (response.status === 200) state.settings = response.data;
-                else throw new Error('设置加载失败');
-            } catch (e) { showToast('设置加载失败', 'error'); }
+            } catch (e) { showToast('加载设置失败', 'error'); }
             renderSettingsForm(state.settings);
         }
 
-        // --- 图片压缩与附件 ---
+        // ---------- 文件上传 ----------
         els.attachBtn.onclick = () => els.fileUpload.click();
-        function compressImage(file, maxResolution = 1024, quality = 0.7) {
+        function compressImage(file, maxResolution = 1024, quality = 0.8) {
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
                 reader.onload = (event) => {
@@ -726,11 +724,14 @@
             if (!files.length) return;
             for (const file of files) {
                 if (file.type.startsWith('image/')) {
-                    try { state.pendingImages.push(await compressImage(file, 1024, 0.7)); renderImagePreviews(); }
-                    catch (err) { showToast("图像处理失败", "error"); }
+                    try { state.pendingImages.push(await compressImage(file, 1024, 0.8)); renderImagePreviews(); }
+                    catch (err) { showToast("图片处理失败", "error"); }
                 } else {
                     const reader = new FileReader();
-                    reader.onload = (event) => { els.userInput.value += (els.userInput.value.trim() ? '\n\n' : '') + `[File: ${file.name}]\n${event.target.result}`; };
+                    reader.onload = (event) => {
+                        els.userInput.value += (els.userInput.value.trim() ? '\n\n' : '') + `[File: ${file.name}]\n${event.target.result}`;
+                        els.userInput.dispatchEvent(new Event('input'));
+                    };
                     reader.readAsText(file);
                 }
             }
@@ -739,73 +740,24 @@
         function renderImagePreviews() {
             if (state.pendingImages.length === 0) { els.imagePreviewContainer.classList.add('hidden'); els.imagePreviewContainer.innerHTML = ''; return; }
             els.imagePreviewContainer.classList.remove('hidden');
-            els.imagePreviewContainer.innerHTML = state.pendingImages.map((img, index) => `<div class="relative group mt-2 mb-2"><img src="${img}" class="w-16 h-16 object-cover rounded border border-slate-600"><button class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition" onclick="window.removePendingImage(${index})"><i class="fa-solid fa-times"></i></button></div>`).join('');
+            els.imagePreviewContainer.innerHTML = state.pendingImages.map((img, idx) =>
+                `<div class="relative group mt-1 mb-2">
+                    <img src="${img}" class="w-14 h-14 object-cover rounded-md border border-zinc-600 shadow-sm">
+                    <button class="absolute -top-1.5 -right-1.5 bg-rose-500 text-white rounded-full w-4 h-4 flex items-center justify-center text-[10px] opacity-0 group-hover:opacity-100 transition shadow-md"
+                        onclick="removePendingImage(${idx})"><i class="fa-solid fa-times"></i></button>
+                </div>`).join('');
         }
         window.removePendingImage = (index) => { state.pendingImages.splice(index, 1); renderImagePreviews(); };
 
-        // --- API Service ---
-        const api = axios.create({ baseURL: API_BASE, headers: { 'Content-Type': 'application/json' } });
-
-        // --- 消息UI渲染 (统一) ---
-        function addMessageToUI(role, content, id = null, images = []) {
-            const div = document.createElement('div');
-            div.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'}`;
-            if (id) div.id = `msg-${id}`;
-            const emoji = role === 'user' ? '⭐' : '💖';
-            const bubbleClass = role === 'user' ? 'bg-blue-600 text-white' : 'bg-slate-800 border border-slate-700 text-slate-200';
-            const innerContent = role === 'user' ? escapeHtml(content).replace(/\n/g, '<br>') : marked.parse(renderFixCodeBlock(content));
-            let imagesHtml = '';
-            if (images && images.length) imagesHtml = `<div class="flex flex-wrap gap-2 mt-2 pt-2 border-t ${role === 'user' ? 'border-blue-500' : 'border-slate-700'}">` + images.map(img => `<img src="${img.startsWith('data:') ? img : 'data:image/jpeg;base64,' + img}" class="max-w-xs max-h-64 object-contain rounded border border-slate-600 cursor-pointer" onclick="window.open(this.src)">`).join('') + `</div>`;
-            div.innerHTML = `<div class="flex max-w-[85%] ${role === 'user' ? 'flex-row-reverse space-x-reverse' : 'flex-row'} items-start space-x-3 min-w-0"><div class="w-8 h-8 rounded flex-shrink-0 flex items-center justify-center ${role === 'user' ? 'bg-blue-500' : 'bg-slate-700'} text-lg">${emoji}</div><div class="${bubbleClass} px-4 py-2 rounded-lg shadow-md message-bubble overflow-hidden"><div class="prose prose-sm text-white">${innerContent}</div>${imagesHtml}</div></div>`;
-            els.messagesContainer.appendChild(div);
-            els.messagesContainer.scrollTop = els.messagesContainer.scrollHeight;
-            if (role === 'ai' && !id) attachCopyButtons(div.querySelector('.prose'));
-        }
-
-        function renderMessages() {
-            els.messagesContainer.innerHTML = '';
-            if (!state.messages.length) {
-                els.messagesContainer.innerHTML = `<div class="flex justify-center mt-10"><div class="text-center text-slate-500"><i class="fa-solid fa-comment-dots text-4xl mb-3 opacity-50"></i><p>会话已清空，开始新对话吧 ✨</p></div></div>`;
-                return;
-            }
-            state.messages.forEach(m => addMessageToUI(m.role, m.content, null, m.images || []));
-        }
-
-        // --- 核心：切换会话修复版 ---
-        async function switchSession(sessionId) {
-            if (state.isTyping) { showToast("请等待当前消息回复完成", "error"); return; }
-            try {
-                const res = await api.post('/session/set', { session_id: sessionId });
-                state.currentSessionId = sessionId;
-                els.currentSessionIdDisplay.textContent = `Session: ${sessionId}`;
-                const rawMessages = res.data.messages || [];
-                state.messages = rawMessages.map(msg => {
-                    let role = 'ai', content = msg;
-                    if (typeof msg === 'string') {
-                        if (msg.startsWith('User:')) { role = 'user'; content = msg.slice(5).trim(); }
-                        else if (msg.startsWith('AI:')) { role = 'ai'; content = msg.slice(3).trim(); }
-                        else if (msg.startsWith('Assistant:')) { role = 'ai'; content = msg.slice(10).trim(); }
-                    }
-                    return { role, content, images: [] };
-                });
-                renderMessages();
-                renderSessions(); // 更新侧边栏高亮
-                log(`已切换到会话: ${sessionId}`, 'success');
-            } catch (error) {
-                log(`切换会话失败: ${error.message}`, 'error');
-                showToast("切换会话失败", "error");
-            }
-        }
-
-        // --- 会话管理 ---
+        // ---------- 会话管理 ----------
         async function loadSessions() {
             try {
-                const res = await api.get('/session');
+                const res = await axios.get(API_BASE + '/session');
                 state.sessions = res.data.session_list || [];
                 renderSessions();
                 if (state.sessions.length > 0 && !state.currentSessionId) await switchSession(state.sessions[0]);
                 else if (state.sessions.length === 0) await newSession();
-            } catch (e) { log('加载会话失败', 'error'); }
+            } catch (e) { log('加载会话列表失败', 'error'); }
         }
 
         function renderSessions() {
@@ -813,17 +765,34 @@
             state.sessions.forEach(id => {
                 const isActive = id === state.currentSessionId;
                 const div = document.createElement('div');
-                div.className = `p-3 rounded cursor-pointer flex justify-between items-center group ${isActive ? 'bg-blue-600 text-white' : 'hover:bg-slate-700 text-slate-300'}`;
+                div.className = `px-3 py-2.5 rounded-lg cursor-pointer flex justify-between items-center group transition-colors ${isActive ? 'bg-indigo-600 text-white shadow-md' : 'hover:bg-[#18181b] text-zinc-400 hover:text-zinc-200'}`;
                 div.onclick = () => switchSession(id);
-                div.innerHTML = `<div class="truncate text-sm font-medium">${id}</div>`;
+                div.innerHTML = `<div class="flex items-center gap-3 w-full"><i class="fa-regular fa-message text-xs ${isActive ? 'text-indigo-200' : 'text-zinc-600'}"></i><span class="truncate text-sm font-medium flex-1">${id}</span></div>`;
                 els.sessionList.appendChild(div);
             });
         }
 
-        async function newSession() {
-            if (state.isTyping) { showToast("请等待当前消息回复完成", "error"); return; }
+        async function switchSession(sessionId) {
+            if (state.isTyping) { showToast("请等待当前生成完成", "error"); return; }
             try {
-                const res = await api.post('/session/new');
+                const res = await axios.post(API_BASE + '/session/msg', { session_id: sessionId });
+                state.currentSessionId = sessionId;
+                els.currentSessionIdDisplay.textContent = `ID: ${sessionId}`;
+                const rawMessages = res.data.messages || [];
+                state.messages = parseMessagesFromResponse(rawMessages);
+                renderMessages();
+                renderSessions();
+                log(`已切换到会话: ${sessionId}`, 'success');
+            } catch (error) {
+                log(`切换会话失败`, 'error');
+                showToast("无法加载会话", "error");
+            }
+        }
+
+        async function newSession() {
+            if (state.isTyping) { showToast("请等待当前生成完成", "error"); return; }
+            try {
+                const res = await axios.post(API_BASE + '/session/new');
                 if (res.data.status === 'OK') {
                     const newId = res.data.session_id;
                     if (!state.sessions.includes(newId)) state.sessions.push(newId);
@@ -831,151 +800,340 @@
                     renderSessions();
                     showToast("新会话已创建", "success");
                 }
-            } catch (e) { log('新建会话失败', 'error'); showToast("新建会话失败", "error"); }
+            } catch (e) { showToast("创建会话失败", "error"); }
         }
 
         async function clearCurrentSession() {
             if (!state.currentSessionId) return;
-            if (!confirm("⚠️ 确定清除当前会话的上下文吗？")) return;
+            if (!confirm("⚠️ 确认清空当前会话的全部上下文？")) return;
             try {
-                await api.post('/session/clear');
+                await axios.post(API_BASE + '/session/clear');
                 await switchSession(state.currentSessionId);
-                showToast("会话上下文已清除", "success");
-            } catch (error) { showToast("清除失败", "error"); }
+                showToast("上下文已清空", "success");
+            } catch (error) { showToast("清空失败", "error"); }
         }
 
         async function generateSessionSummary() {
-            if (!state.currentSessionId) { showToast("当前没有打开的会话", "error"); return; }
-            if (!confirm("🧠 确定要为当前会话生成记忆摘要吗？")) return;
+            if (!state.currentSessionId) return;
+            if (!confirm("🧠 为当前会话生成记忆摘要？")) return;
             const btn = els.summarySessionBtn;
             const originalHTML = btn.innerHTML;
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
             btn.disabled = true;
             try {
-                const res = await api.post('/session/memory');
-                if (res.data.status === 'done') showToast("✅ 记忆摘要生成成功并已更新上下文", "success");
-                else throw new Error("生成摘要失败");
-            } catch (error) { showToast("生成摘要失败", "error"); }
+                const res = await axios.post(API_BASE + '/session/memory');
+                if (res.data.status === 'done') showToast("✅ 记忆已更新", "success");
+                else throw new Error("生成失败");
+            } catch (error) { showToast("记忆生成失败", "error"); }
             finally { btn.innerHTML = originalHTML; btn.disabled = false; }
         }
 
+        // ---------- 模型列表 ----------
         async function getModels() {
             try {
-                const response = await api.get('/models');
-                state.models = (response.data.data || []).map(m => ({ name: m.aliases?.[0] || m.id, available: m.status?.value === 'loaded' }));
+                const response = await axios.get(API_BASE + '/models');
+                state.models = (response.data.data || []).map(m => ({
+                    name: m.aliases?.[0] || m.id,
+                    available: m.status?.value === 'loaded'
+                }));
                 if (state.models.length === 0) state.models.push({ name: 'default', available: true });
                 if (!state.currentModel && state.models.length) selectModel(state.models[0].name, state.models[0].available);
                 renderModels();
-            } catch (error) { log('Failed to load models', 'error'); }
+            } catch (e) { log('加载模型列表失败', 'error'); }
         }
+
         function renderModels() {
             els.modelDropdownList.innerHTML = '';
             state.models.forEach(model => {
                 const isAvailable = model.available !== false;
                 const btn = document.createElement('button');
-                btn.className = `w-full flex items-center space-x-2 px-4 py-2 text-sm ${isAvailable ? 'text-slate-300 hover:bg-slate-700' : 'text-slate-500 cursor-not-allowed'}`;
-                btn.onclick = () => isAvailable && (selectModel(model.name, true), els.modelDropdownMenu.classList.add('hidden'));
-                btn.innerHTML = `<span class="w-2 h-2 rounded-full ${isAvailable ? 'bg-green-500' : 'bg-red-500'}"></span><span>${model.name}</span>`;
+                btn.className = `w-full flex items-center space-x-3 px-4 py-2.5 text-sm transition-colors ${isAvailable ? 'text-zinc-200 hover:bg-zinc-800' : 'text-zinc-600 cursor-not-allowed'}`;
+                btn.onclick = () => { if (isAvailable) { selectModel(model.name, true); els.modelDropdownMenu.classList.add('hidden'); } };
+                btn.innerHTML = `<span class="w-2 h-2 rounded-full shadow-sm ${isAvailable ? 'bg-emerald-500 shadow-emerald-500/50' : 'bg-rose-500 shadow-rose-500/50'}"></span><span class="font-medium">${model.name}</span>`;
                 els.modelDropdownList.appendChild(btn);
             });
         }
-        function selectModel(name, ok) { state.currentModel = name; els.modelNameDisplay.textContent = `Model: ${name}`; els.connectionStatusDot.className = `w-2 h-2 rounded-full ${ok ? 'bg-green-500' : 'bg-red-500'}`; }
 
-        // --- 发送消息 (兼容当前会话)---
+        function selectModel(name, ok) {
+            state.currentModel = name;
+            els.modelNameDisplay.textContent = name;
+            els.connectionStatusDot.className = `w-2 h-2 rounded-full shadow-sm ${ok ? 'bg-emerald-500 shadow-emerald-500/50' : 'bg-rose-500 shadow-rose-500/50'}`;
+        }
+
+        // ---------- 消息渲染 ----------
+        function parseMessagesFromResponse(rawMessages) {
+            if (!Array.isArray(rawMessages)) return [];
+            const userName = state.settings.user_name || 'Admin';
+            const agentName = state.settings.agent_name || 'agent';
+            return rawMessages.map(msg => {
+                let role = 'ai';
+                if (msg.role === userName || msg.role === 'user' || msg.role === 'Admin') role = 'user';
+                else if (msg.role === agentName || msg.role === 'assistant') role = 'ai';
+
+                let content = '';
+                let images = [];
+                if (typeof msg.content === 'string') {
+                    content = msg.content;
+                } else if (Array.isArray(msg.content)) {
+                    msg.content.forEach(part => {
+                        if (part.type === 'text') content += part.text + '\n';
+                        else if (part.type === 'image_url') {
+                            const url = typeof part.image_url === 'string' ? part.image_url : part.image_url.url;
+                            images.push(url);
+                        }
+                    });
+                }
+                return { role, content: content.trim(), images };
+            });
+        }
+
+        function renderMessages() {
+            els.messagesContainer.innerHTML = '';
+            if (!state.messages.length) {
+                els.messagesContainer.innerHTML = `<div class="flex justify-center mt-20"><div class="text-center text-zinc-600"><i class="fa-solid fa-comments text-5xl mb-4 opacity-40"></i><h3 class="text-lg font-medium text-zinc-400">上下文为空</h3><p class="text-sm mt-1">开始一段新对话吧。</p></div></div>`;
+                return;
+            }
+            state.messages.forEach((msg, idx) => addMessageToUI(msg));
+            els.messagesContainer.scrollTop = els.messagesContainer.scrollHeight;
+        }
+
+        // 核心：渲染单条消息（支持 thinkings）
+        function addMessageToUI(msg, id = null) {
+            const div = document.createElement('div');
+            div.className = `flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`;
+            if (id) div.id = `msg-${id}`;
+
+            const isUser = msg.role === 'user';
+            const iconHTML = isUser ? '🌟' : '🐳';
+            const iconBg = isUser ? 'bg-indigo-600 shadow-indigo-500/30' : 'bg-zinc-800 border border-zinc-700';
+            const bubbleClass = isUser ? 'bg-indigo-600 text-white' : 'bg-[#18181b] border border-[#27272a] text-zinc-200';
+
+            const bubbleDiv = document.createElement('div');
+            bubbleDiv.className = `${bubbleClass} px-4 py-3 rounded-2xl ${isUser ? 'rounded-br-sm' : 'rounded-bl-sm'} shadow-sm message-bubble overflow-hidden relative`;
+
+            // 加载动画状态
+            if (msg.isLoading) {
+                bubbleDiv.innerHTML = '<span class="typing-cursor">思考中...</span>';
+            } else {
+                // 思考步骤（仅 AI 消息且存在 thinkings）
+                if (!isUser && msg.thinkings && msg.thinkings.length > 0) {
+                    const details = document.createElement('details');
+                    details.className = 'think-container';
+                    const summary = document.createElement('summary');
+                    summary.className = 'think-summary';
+                    summary.innerHTML = '<i class="fa-solid fa-chevron-right"></i> <span>🧠 内心独白~💕</span>';
+                    details.appendChild(summary);
+
+                    const stepsDiv = document.createElement('div');
+                    stepsDiv.className = 'think-steps';
+                    msg.thinkings.forEach((step, idx) => {
+                        const stepDiv = document.createElement('div');
+                        stepDiv.className = 'think-step';
+                        stepDiv.innerHTML = `<span class="think-step-marker">${idx + 1}</span><span>${escapeHtml(String(step)).replace(/\n/g, '<br>')}</span>`;
+                        stepsDiv.appendChild(stepDiv);
+                    });
+                    details.appendChild(stepsDiv);
+                    bubbleDiv.appendChild(details);
+                }
+
+                // 文本内容
+                const proseDiv = document.createElement('div');
+                proseDiv.className = 'prose prose-sm max-w-none text-zinc-200';
+                proseDiv.innerHTML = isUser ? escapeHtml(msg.content).replace(/\n/g, '<br>') : marked.parse(renderFixCodeBlock(msg.content));
+                attachCopyButtons(proseDiv);
+                bubbleDiv.appendChild(proseDiv);
+
+                // 图片
+                if (msg.images && msg.images.length > 0) {
+                    const imgDiv = document.createElement('div');
+                    imgDiv.className = 'flex flex-wrap gap-2 mt-3 pt-3 border-t border-[#27272a]';
+                    msg.images.forEach(img => {
+                        const el = document.createElement('img');
+                        el.src = img.startsWith('data:') ? img : 'data:image/jpeg;base64,' + img;
+                        el.className = 'max-w-xs max-h-64 object-contain rounded-md border border-zinc-600 cursor-pointer shadow-sm hover:opacity-90';
+                        el.onclick = () => window.open(el.src);
+                        imgDiv.appendChild(el);
+                    });
+                    bubbleDiv.appendChild(imgDiv);
+                }
+            }
+
+            const row = document.createElement('div');
+            row.className = `flex max-w-[85%] ${isUser ? 'flex-row-reverse space-x-reverse' : 'flex-row'} items-end space-x-3 min-w-0`;
+            const avatar = document.createElement('div');
+            avatar.className = `w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-zinc-100 ${iconBg} shadow-sm z-10 mb-1`;
+            avatar.innerHTML = iconHTML;
+
+            row.appendChild(avatar);
+            row.appendChild(bubbleDiv);
+            div.appendChild(row);
+            els.messagesContainer.appendChild(div);
+        }
+
+        // ---------- 发送消息 ----------
         async function sendMessage() {
             const content = els.userInput.value.trim();
             const imagesToSend = [...state.pendingImages];
             if ((!content && imagesToSend.length === 0) || state.isTyping || !state.currentSessionId) return;
-            addMessageToUI('user', content, null, imagesToSend);
+
+            // 1. 将用户消息添加到状态
+            const userMsg = { role: 'user', content, images: imagesToSend };
+            state.messages.push(userMsg);
             els.userInput.value = '';
+            els.userInput.style.height = 'auto';
             state.pendingImages = [];
             renderImagePreviews();
+
+            // 2. 添加临时加载消息
+            const placeholder = { role: 'ai', content: '', images: [], thinkings: [], isLoading: true };
+            state.messages.push(placeholder);
+            const oldLength = state.messages.length; // 包含占位符后的长度，用来定位新增消息
+            renderMessages();  // 立即显示用户消息和加载动画
+
             state.isTyping = true;
-            const aiMessageId = Date.now();
-            addMessageToUI('ai', '<span class="typing-cursor">Thinking...</span>', aiMessageId);
+            els.sendBtn.disabled = true;
+
             try {
-                const payload = { messages: content, model: state.currentModel, think: state.thinkMode };
+                const payload = {
+                    messages: content,
+                    model: state.currentModel || 'default',
+                    think: state.thinkMode,
+                    session_id: state.currentSessionId
+                };
                 if (imagesToSend.length) payload.images = imagesToSend;
-                const res = await api.post('/input', payload);
-                let responseContent = '', thinkArray = [], aiImages = [];
-                if (res.data && Array.isArray(res.data.messages)) {
-                    for (const item of res.data.messages) {
-                        if (item.type === 'response') responseContent = item.content || '';
-                        else if (item.type === 'think') thinkArray = Array.isArray(item.content) ? item.content : [item.content];
-                        else if (item.type === 'images') aiImages = Array.isArray(item.content) ? item.content : [];
-                    }
-                } else responseContent = res.data.messages?.[0]?.content || "无法解析响应格式";
-                state.messages.push({ role: 'ai', content: responseContent, images: aiImages });
-                const useStream = state.settings.stream;
-                const msgDiv = document.getElementById(`msg-${aiMessageId}`);
-                if (msgDiv) {
-                    const bubble = msgDiv.querySelector('.bg-slate-800');
-                    if (bubble) {
-                        const newBubble = (() => {
-                            const div = document.createElement('div');
-                            div.className = 'bg-slate-800 border border-slate-700 px-4 py-2 rounded-lg shadow-md message-bubble w-full';
-                            if (state.thinkMode && thinkArray.length) {
-                                const details = document.createElement('details');
-                                details.innerHTML = `<summary class="think-summary text-xs font-medium text-blue-300 cursor-pointer list-none"><i class="fa-solid fa-chevron-right text-[10px]"></i> 🧠 深度思考轨迹 · 点击展开推理细节</summary><div class="think-steps mt-2">${thinkArray.map((step, idx) => `<div class="think-step"><span class="think-step-marker">${idx + 1}.</span><span>${escapeHtml(String(step))}</span></div>`).join('')}</div>`;
-                                div.appendChild(details);
-                            }
-                            const proseDiv = document.createElement('div');
-                            proseDiv.className = 'prose prose-sm max-w-none';
-                            proseDiv.innerHTML = marked.parse(renderFixCodeBlock(responseContent));
-                            attachCopyButtons(proseDiv);
-                            div.appendChild(proseDiv);
-                            if (aiImages.length) {
-                                const imgDiv = document.createElement('div');
-                                imgDiv.className = 'flex flex-wrap gap-2 mt-4 pt-3 border-t border-slate-700';
-                                aiImages.forEach(img => { const el = document.createElement('img'); el.src = img.startsWith('data:') ? img : 'data:image/jpeg;base64,' + img; el.className = 'max-w-sm max-h-80 object-contain rounded border border-slate-600 cursor-pointer'; el.onclick = () => window.open(el.src); imgDiv.appendChild(el); });
-                                div.appendChild(imgDiv);
-                            }
-                            return div;
-                        })();
-                        bubble.replaceWith(newBubble);
+
+                const res = await axios.post(API_BASE + '/input', payload);
+
+                // 3. 解析后端返回的完整消息历史
+                const newMessages = parseMessagesFromResponse(res.data.messages);
+                const thinkArray = res.data?.thinkings || [];
+
+                // 4. 找出本轮新增的消息（从 oldLength-2 开始，减去用户消息和占位符）
+                const addedMessages = newMessages.slice(oldLength - 2); // oldLength-2 是加入占位符前的长度
+                const finalMessages = newMessages.slice(0, oldLength - 2).concat(addedMessages);
+
+                // 5. 将 thinkings 附加到本轮第一条 AI 消息上（如果有）
+                if (thinkArray.length > 0) {
+                    for (let m of finalMessages) {
+                        if (m.role === 'ai') {
+                            m.thinkings = thinkArray;
+                            break;
+                        }
                     }
                 }
-                log(`AI响应完成`, 'success');
+
+                // 6. 移除占位符，替换为实际消息
+                state.messages = finalMessages.filter(m => !m.isLoading);
+                renderMessages();
+                log('响应接收成功', 'success');
+
             } catch (error) {
-                const errorMsg = error.response?.data?.error || '请求失败';
-                const msgDiv = document.getElementById(`msg-${aiMessageId}`);
-                if (msgDiv) { const prose = msgDiv.querySelector('.prose'); if (prose) prose.innerHTML = `<span class="text-red-400">❌ ${escapeHtml(errorMsg)}</span>`; }
-                else addMessageToUI('ai', `错误: ${errorMsg}`);
-                log(`发送失败: ${errorMsg}`, 'error');
-            } finally { state.isTyping = false; }
+                const errorMsg = error.response?.data?.error || error.message || '请求失败';
+                // 移除占位符，添加错误消息
+                state.messages = state.messages.filter(m => !m.isLoading);
+                state.messages.push({ role: 'ai', content: `❌ 错误: ${errorMsg}`, images: [] });
+                renderMessages();
+                log(`请求错误: ${errorMsg}`, 'error');
+            } finally {
+                state.isTyping = false;
+                els.sendBtn.disabled = false;
+            }
         }
 
-        async function loadTools() { try { const res = await api.get('/tools'); state.tools = res.data || []; renderTools(); } catch (e) { } }
-        function renderTools() { els.toolsList.innerHTML = state.tools.map(t => `<div class="bg-slate-900 p-2 rounded border border-slate-700"><div class="text-blue-400 text-sm">${t.name}</div><div class="text-xs text-slate-500">${t.description}</div></div>`).join(''); }
-        async function loadTodos() { try { const res = await api.get('/todos'); state.todos = res.data || []; renderTodos(); } catch (e) { } }
-        window.deleteTodo = async function (id) { if (!confirm('删除待办?')) return; await api.get(`/todos/delete/${id}`); state.todos = state.todos.filter(t => t.id != id); renderTodos(); };
-        window.doneTodo = async function (id, isDone) { const todo = state.todos.find(t => t.id == id); if (todo) { todo.done = !isDone; await api.post(`/todos/${id}`, todo); renderTodos(); } };
-        els.addTodoBtn.onclick = async () => { if (!els.newTodoInput.value.trim()) return; const res = await api.post('/todos/new', { id: String(Date.now()), done: false, content: els.newTodoInput.value }); state.todos.push(res.data); renderTodos(); els.newTodoInput.value = ''; };
-        function renderTodos() { if (!state.todos?.length) { els.todosList.innerHTML = '<div class="text-gray-500 text-sm p-4 text-center">暂无待办</div>'; return; } els.todosList.innerHTML = state.todos.map(t => `<div class="flex items-center justify-between bg-slate-900 p-3 rounded-lg text-sm mb-2 border border-slate-800"><div class="flex items-center gap-3 flex-1 cursor-pointer" onclick="doneTodo(${t.id}, ${t.done})"><div class="w-5 h-5 rounded border flex items-center justify-center ${t.done ? 'bg-green-600 border-green-600' : 'border-gray-500'}">${t.done ? '<svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>' : ''}</div><p class="text-gray-300 truncate ${t.done ? 'line-through opacity-60' : ''}">${escapeHtml(t.content)}</p></div><button onclick="event.stopPropagation(); deleteTodo(${t.id})" class="bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white px-3 py-1 rounded text-xs">删除</button></div>`).join(''); }
-        async function loadChannels() { try { const res = await api.get('/channels'); state.channels = res.data || []; renderChannels(); } catch (e) { } }
-        function renderChannels() { els.channelsList.innerHTML = state.channels.map(c => `<div class="p-2 hover:bg-slate-700 rounded cursor-pointer text-sm"># ${c.name}</div>`).join(''); }
-
-        async function init() {
-            els.currentUserDisplay.textContent = state.user;
-            await loadSettings();
-            await getModels();
-            await loadSessions();  // 内部自动创建或选中默认会话
-            await loadTools();
-            await loadTodos();
-            await loadChannels();
-            els.saveSettingsBtn.onclick = saveSettings;
+        // ---------- 工具 / 任务 / 频道 ----------
+        async function loadTools() {
+            try { const res = await axios.get(API_BASE + '/tools'); state.tools = res.data || []; renderTools(); } catch (e) { }
+        }
+        function renderTools() {
+            els.toolsList.innerHTML = state.tools.map(t => `<div class="bg-[#18181b] p-3 rounded-lg border border-[#27272a]"><div class="text-indigo-400 font-medium text-sm mb-1 flex items-center gap-2"><i class="fa-solid fa-wrench text-xs"></i> ${t.name}</div><div class="text-xs text-zinc-500 leading-relaxed">${t.description || ''}</div></div>`).join('');
         }
 
-        // --- 事件绑定 ---
+        async function loadTodos() {
+            try { const res = await axios.get(API_BASE + '/todos'); state.todos = res.data || []; renderTodos(); } catch (e) { }
+        }
+        window.deleteTodo = async function (id) {
+            if (!confirm('删除该任务？')) return;
+            await axios.get(API_BASE + `/todos/delete/${id}`);
+            state.todos = state.todos.filter(t => t.id != id);
+            renderTodos();
+        };
+        window.doneTodo = async function (id, isDone) {
+            const todo = state.todos.find(t => t.id == id);
+            if (todo) { todo.done = !isDone; await axios.post(API_BASE + `/todos/${id}`, todo); renderTodos(); }
+        };
+        els.addTodoBtn.onclick = async () => {
+            const val = els.newTodoInput.value.trim();
+            if (!val) return;
+            const newItem = { id: String(Date.now()), done: false, content: val };
+            const res = await axios.post(API_BASE + '/todos/new', newItem);
+            state.todos.push(res.data);
+            renderTodos();
+            els.newTodoInput.value = '';
+        };
+        function renderTodos() {
+            if (!state.todos?.length) { els.todosList.innerHTML = '<div class="text-zinc-600 text-sm p-4 text-center">暂无任务</div>'; return; }
+            els.todosList.innerHTML = state.todos.map(t => `
+                <div class="flex items-center justify-between bg-[#18181b] p-3 rounded-lg text-sm mb-2 border border-[#27272a] shadow-sm transition-all hover:border-zinc-700">
+                    <div class="flex items-center gap-3 flex-1 cursor-pointer" onclick="doneTodo(${t.id}, ${t.done})">
+                        <div class="w-5 h-5 rounded flex items-center justify-center transition-colors ${t.done ? 'bg-emerald-600 border-emerald-600' : 'border border-zinc-600 bg-zinc-900'}">
+                            ${t.done ? '<i class="fa-solid fa-check text-xs text-white"></i>' : ''}
+                        </div>
+                        <p class="text-zinc-300 truncate ${t.done ? 'line-through opacity-50' : ''}">${escapeHtml(t.content)}</p>
+                    </div>
+                    <button onclick="event.stopPropagation(); deleteTodo(${t.id})" class="text-zinc-500 hover:text-rose-400 p-1 rounded transition-colors ml-2" title="删除">
+                        <i class="fa-solid fa-trash-can"></i>
+                    </button>
+                </div>`).join('');
+        }
+
+        async function loadChannels() {
+            try { const res = await axios.get(API_BASE + '/channels'); state.channels = res.data || []; renderChannels(); } catch (e) { }
+        }
+        function renderChannels() {
+            els.channelsList.innerHTML = state.channels.map(c => `
+                <div class="p-3 hover:bg-[#18181b] rounded-lg border border-transparent hover:border-[#27272a] cursor-pointer text-sm font-medium text-zinc-300 transition-colors flex items-center gap-2"
+                     onclick="switchSession('${c.name}')">
+                    <i class="fa-solid fa-hashtag text-zinc-600"></i> ${c.name}
+                </div>`).join('');
+        }
+
+        // ---------- 事件绑定与初始化 ----------
         els.thinkToggle.onchange = (e) => state.thinkMode = e.target.checked;
         els.newSessionBtn.onclick = newSession;
         els.clearSessionBtn.onclick = clearCurrentSession;
         els.summarySessionBtn.onclick = generateSessionSummary;
-        els.tabBtns.forEach(btn => { btn.onclick = () => { els.tabBtns.forEach(b => b.classList.replace('text-blue-400', 'text-slate-400')); btn.classList.replace('text-slate-400', 'text-blue-400'); els.tabContents.forEach(c => c.classList.add('hidden')); document.getElementById(`tab-${btn.dataset.tab}`).classList.remove('hidden'); }; });
-        els.userInput.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } };
+
+        els.tabBtns.forEach(btn => {
+            btn.onclick = () => {
+                els.tabBtns.forEach(b => { b.classList.replace('text-indigo-400', 'text-zinc-500'); b.classList.remove('border-indigo-500'); b.classList.add('border-transparent'); });
+                btn.classList.replace('text-zinc-500', 'text-indigo-400');
+                btn.classList.remove('border-transparent');
+                btn.classList.add('border-indigo-500');
+                els.tabContents.forEach(c => c.classList.add('hidden'));
+                document.getElementById(`tab-${btn.dataset.tab}`).classList.remove('hidden');
+            };
+        });
+
+        els.userInput.onkeydown = (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+        };
         els.sendBtn.onclick = sendMessage;
+
         els.modelDropdownBtn.onclick = (e) => { e.stopPropagation(); els.modelDropdownMenu.classList.toggle('hidden'); };
-        document.onclick = () => els.modelDropdownMenu.classList.add('hidden');
+        document.addEventListener('click', () => els.modelDropdownMenu.classList.add('hidden'));
+
+        async function init() {
+            await loadSettings();
+            await getModels();
+            await loadSessions();
+            await loadTools();
+            await loadTodos();
+            await loadChannels();
+            els.saveSettingsBtn.onclick = saveSettings;
+            state.user = state.settings.user_name || state.user;
+            els.currentUserDisplay.textContent = state.user;
+            document.title = state.user + " · Chat WebUI · 深度思考";
+        }
         init();
     </script>
 </body>

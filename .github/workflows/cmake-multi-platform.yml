@@ -154,36 +154,9 @@ jobs:
         with:
           name: ${{ matrix.artifact_name }}
           path: ${{ steps.package.outputs.pkg_path }}
-
-  # ========== 稳定版 Release（仅在 tag 推送时触发） ==========
-  release-stable:
-    name: Create Stable Release
-    if: startsWith(github.ref, 'refs/tags/') && github.event_name != 'schedule'
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: List artifacts
-        run: ls -R artifacts
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          tag_name: ${{ github.ref_name }}
-          name: agent.cpp ${{ github.ref_name }}
-          body_path: release.md
-          files: artifacts/**/*
-          fail_on_unmatched_files: true
-
-  # ========== Nightly 版 Release（定时或手动触发） ==========
   release-nightly:
     name: Create Nightly Release
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
     needs: build
     runs-on: ubuntu-latest
     steps:
