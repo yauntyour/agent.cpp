@@ -10,10 +10,10 @@
     ],
     "max_context": 1048576,
     "max_mpc_rounds": 5,
-    "model": "deepseek-v4-pro",
+    "model": "uGemma4",
     "prompt": "agent.txt",
-    "server_address": "https://api.deepseek.com",
+    "server_address": "http://localhost:11434",
     "stream": false,
-    "user_name": "user",
+    "user_name": "Yauntyours",
     "workspace": "./workspace/"
 }

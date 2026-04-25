@@ -738,7 +738,7 @@ int main(int argc, char *argv[])
     try
     {
         int port = 8080;
-        std::string settings_path = "D:\\Developments\\CXX\\Agent.cpp\\settings.json";
+        std::string settings_path = "settings.json";
         std::string __pw = "";
         std::string apikey = "";
         for (int i = 1; i < argc; ++i)
