@@ -74,4 +74,8 @@ set(CPACK_GENERATOR "ZIP;TGZ")
 if(WIN32)
     set(CPACK_GENERATOR "ZIP")
 endif()
+
+# 去掉版本号，只保留 name-系统名
+set(CPACK_PACKAGE_FILE_NAME "${PROJECT_NAME}-${CMAKE_SYSTEM_NAME}")
+
 include(CPack)

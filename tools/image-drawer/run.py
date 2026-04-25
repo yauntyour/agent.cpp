@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-skills.py - 调用 sd-cli 服务的 /generate API 生成图像
+image-drawer.py - 调用 sd-cli 服务的 /generate API 生成图像并保存到本地
 
 用法示例:
-    python skills.py --prompt "一只猫" --output cat.png
-    python skills.py --prompt "风景画" --output landscape.jpg --steps 12 --height 768 --width 768 --negative-prompt "模糊，失真"
+    python image-drawer.py --prompt "一只猫" --output cat.png
+    python image-drawer.py --prompt "风景画" --output landscape.jpg --steps 12 --height 768 --width 768 --negative-prompt "模糊，失真"
 """
 
 import argparse
 import os
+import base64
 import requests
 import sys
 from typing import Optional
@@ -24,12 +25,12 @@ def generate_image(
     negative_prompt: Optional[str] = None,
 ) -> bool:
     """
-    调用 /generate API 生成图像
+    调用 /generate API 获取图像数据并保存到本地
 
     参数:
         server_url: API 服务地址（如 http://localhost:8000）
         prompt: 提示词
-        output: 输出图像路径
+        output: 本地输出图像路径（最终保存位置）
         steps: 推理步数（可选）
         height: 图像高度（可选）
         width: 图像宽度（可选）
@@ -42,7 +43,6 @@ def generate_image(
 
     payload = {
         "prompt": prompt,
-        "output": os.getcwd() + "/assets/" + output,
     }
     if steps is not None:
         payload["steps"] = steps
@@ -60,10 +60,14 @@ def generate_image(
 
         result = response.json()
         if result.get("status") == "success":
-            print(f"✅ 图像生成成功！可以使用Image工具读取啦~")
-            print(f"✅ 保存的路径： {result.get('output')}")
-            if result.get("stdout"):
-                print(f"详细信息:{result['stdout']}")
+            # 解码 base64 并写入文件
+            image_data = base64.b64decode(result["image_base64"])
+            os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
+            with open(output, "wb") as f:
+                f.write(image_data)
+            print(f"✅ 图像已保存到：{output}")
+            if result.get("message"):
+                print(f"详细信息: {result['message']}")
             return True
         else:
             print(f"❌ 生成失败: {result.get('detail', '未知错误')}")
@@ -72,7 +76,7 @@ def generate_image(
         print(f"❌ 无法连接到服务 {server_url}，请确保服务已启动")
         return False
     except requests.exceptions.Timeout:
-        print("❌ 请求超时，生成可能仍在进行，请检查输出路径")
+        print("❌ 请求超时，生成可能仍在进行，请检查服务状态")
         return False
     except requests.exceptions.HTTPError as e:
         print(f"❌ HTTP 错误 {e.response.status_code}: {e.response.text}")
@@ -95,16 +99,16 @@ def print_tool_help():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="调用 sd-cli 服务的 /generate API 生成图像",
-        add_help=False,  # 禁用默认的 -h/--help，以便统一使用 tool.md
+        description="调用 sd-cli 服务的 /generate API 生成图像并保存到本地",
+        add_help=False,
     )
     parser.add_argument("--prompt", required=True, help="提示词")
     parser.add_argument(
         "--output",
         default="output.png",
-        help="输出图像路径（默认 output.png）",
+        help="输出图像路径（默认 output.png，会保存在 ./assets/ 目录下）",
     )
-    parser.add_argument("--steps", type=int, help="推理步数（可选，覆盖服务默认值）")
+    parser.add_argument("--steps", type=int, help="推理步数（可选，9-12 推荐）")
     parser.add_argument("--height", type=int, help="图像高度（可选）")
     parser.add_argument("--width", type=int, help="图像宽度（可选）")
     parser.add_argument("--negative-prompt", help="负提示词（可选）")
@@ -118,23 +122,24 @@ def main():
     try:
         args = parser.parse_args()
     except SystemExit as e:
-        # 捕获 argparse 因参数错误或用户输入 -h 触发的退出
         print_tool_help()
-        # 如果是 -h 请求帮助，以状态码 0 退出；参数错误则用 2
         if e.code == 0:
             sys.exit(0)
         else:
             sys.exit(2)
 
-    # 处理显式的 --help 参数（因为禁用了默认 help）
     if args.help:
         print_tool_help()
         sys.exit(0)
 
+    # 构造本地输出路径（保持原有行为：保存到 ./assets/ 目录）
+    output_dir = os.path.join(os.getcwd(), "assets")
+    output_path = os.path.join(output_dir, args.output)
+
     success = generate_image(
         server_url=args.server_url,
         prompt=args.prompt,
-        output=args.output,
+        output=output_path,
         steps=args.steps,
         height=args.height,
         width=args.width,
@@ -144,7 +149,6 @@ def main():
 
 
 if __name__ == "__main__":
-    # 如果没有任何参数，直接打印帮助并退出（原有行为）
     if len(sys.argv) == 1:
         print_tool_help()
         sys.exit(-1)
