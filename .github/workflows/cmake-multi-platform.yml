@@ -25,12 +25,15 @@ jobs:
           - os: ubuntu-latest
             artifact_name: agent-cpp-linux
             asset_suffix: .tar.gz
+            executable_name: agent-cpp-linux
           - os: windows-latest
             artifact_name: agent-cpp-windows
             asset_suffix: .zip
+            executable_name: agent-cpp-windows.exe
           - os: macos-latest
             artifact_name: agent-cpp-macos
             asset_suffix: .tar.gz
+            executable_name: agent-cpp-macos
 
     steps:
       - name: Checkout code with submodules
@@ -149,11 +152,35 @@ jobs:
           echo "pkg_file=$PKG_FILE" >> $GITHUB_OUTPUT
           echo "pkg_path=build/$PKG_FILE" >> $GITHUB_OUTPUT
 
+      # ---------- 准备单独的可执行文件 ----------
+      - name: Prepare executable artifact
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            SRC="install/app.exe"
+          else
+            SRC="install/app"
+          fi
+          DST="${{ matrix.executable_name }}"
+          cp "$SRC" "$DST"
+          if [ "$RUNNER_OS" != "Windows" ]; then
+            chmod +x "$DST"
+          fi
+          echo "exec_path=$DST" >> $GITHUB_OUTPUT
+
+      - name: Upload executable artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.artifact_name }}-executable
+          path: ${{ matrix.executable_name }}
+
+      # ---------- 上传压缩包 ----------
       - name: Upload artifact
         uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.artifact_name }}
           path: ${{ steps.package.outputs.pkg_path }}
+
   release-nightly:
     name: Create Nightly Release
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
