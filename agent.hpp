@@ -978,9 +978,16 @@ namespace tool_unit
             {
                 try
                 {
+#ifdef _WIN32
                     data += exec("cmd /c chcp 65001>nul && python.exe " +
                                  run_unit::settings["workspace"].get_ref<const std::string &>() +
                                  "/tools/" + std::string(name) + "/run.py" + " 2>&1 " + std::string(args));
+#else
+                    data += exec("python3 " +
+                                 run_unit::settings["workspace"].get_ref<const std::string &>() +
+                                 "/tools/" + std::string(name) + "/run.py" + " 2>&1 " + std::string(args));
+#endif //_WIN32
+
                     data += "\n[TOOL_DONE]\n";
                     succeed += 1;
                 }
@@ -1012,7 +1019,11 @@ namespace cs_unit
          {
              try
              {
+#ifdef _WIN32
                  return tool_unit::exec("cmd /c chcp 65001>nul && python.exe " + run_unit::settings["workspace"].get_ref<const std::string &>() + "/sys/sys_state.py 2>&1");
+#else
+                return tool_unit::exec("python3 " + run_unit::settings["workspace"].get_ref<const std::string &>() + "/sys/sys_state.py 2>&1");
+#endif //_WIN32
              }
              catch (const std::exception &e)
              {
@@ -1023,7 +1034,11 @@ namespace cs_unit
          {
              try
              {
+#ifdef _WIN32
                  return tool_unit::exec("cmd /c chcp 65001>nul && python.exe " + run_unit::settings["workspace"].get_ref<const std::string &>() + "/sys/sys_tools.py 2>&1");
+#else
+                return tool_unit::exec("python3 " + run_unit::settings["workspace"].get_ref<const std::string &>() + "/sys/sys_tools.py 2>&1");
+#endif //_WIN32
              }
              catch (const std::exception &e)
              {
