@@ -17,15 +17,29 @@
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
 
-        body {
-            font-family: 'Inter', system-ui, sans-serif;
-            background-color: #09090b;
-            color: #e4e4e7;
+        :root {
+            --bg-base: #09090b;
+            --bg-panel: #121214;
+            --bg-surface: #18181b;
+            --border-color: #27272a;
+            --border-hover: #3f3f46;
+            --accent-color: #6366f1;
+            --accent-hover: #4f46e5;
+            --text-main: #e4e4e7;
+            --text-muted: #a1a1aa;
         }
 
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* 优雅的滚动条 */
         ::-webkit-scrollbar {
-            width: 6px;
-            height: 6px;
+            width: 5px;
+            height: 5px;
         }
 
         ::-webkit-scrollbar-track {
@@ -33,33 +47,56 @@
         }
 
         ::-webkit-scrollbar-thumb {
-            background: #27272a;
-            border-radius: 4px;
+            background: var(--border-color);
+            border-radius: 8px;
         }
 
         ::-webkit-scrollbar-thumb:hover {
-            background: #3f3f46;
+            background: var(--border-hover);
         }
 
+        /* 毛玻璃与通用容器质感 */
+        .glass-panel {
+            background: rgba(24, 24, 27, 0.6);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .input-container {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-color);
+            box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.4);
+            transition: all 0.3s ease;
+        }
+
+        .input-container:focus-within {
+            border-color: var(--accent-color);
+            box-shadow: 0 4px 24px -2px rgba(99, 102, 241, 0.2);
+        }
+
+        /* Toggle 按钮 */
         .toggle-checkbox:checked {
             right: 0;
-            border-color: #6366f1;
+            border-color: var(--accent-color);
         }
 
         .toggle-checkbox:checked+.toggle-label {
-            background-color: #6366f1;
+            background-color: var(--accent-color);
         }
 
+        /* 消息气泡优化 */
         .message-bubble {
             word-wrap: break-word;
             word-break: break-word;
             overflow-wrap: break-word;
             min-width: 0;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            box-shadow: 0 4px 12px -2px rgba(0, 0, 0, 0.15);
+            transition: transform 0.2s ease;
         }
 
         .prose {
-            color: #e4e4e7 !important;
+            color: var(--text-main) !important;
             max-width: none;
             line-height: 1.7;
             font-size: 0.95rem;
@@ -68,44 +105,39 @@
         .prose a {
             color: #818cf8;
             text-decoration: none;
-            border-bottom: 1px solid transparent;
-            transition: border-color 0.2s;
+            transition: all 0.2s;
         }
 
         .prose a:hover {
-            border-color: #818cf8;
+            text-shadow: 0 0 8px rgba(129, 140, 248, 0.4);
         }
 
         .prose blockquote {
-            border-left: 3px solid #6366f1;
-            background-color: #18181b;
-            color: #a1a1aa;
-            padding: 0.75rem 1.25rem;
+            border-left: 3px solid var(--accent-color);
+            background-color: var(--bg-panel);
+            color: var(--text-muted);
+            padding: 0.85rem 1.25rem;
             margin: 1rem 0;
             border-radius: 0 0.5rem 0.5rem 0;
             font-style: italic;
         }
 
-        .prose strong {
-            color: #f4f4f5;
-            font-weight: 600;
-        }
-
         .prose pre {
-            background-color: #18181b !important;
+            background-color: var(--bg-panel) !important;
             padding: 1.25em;
-            border-radius: 0.5rem;
+            border-radius: 0.75rem;
             overflow-x: auto;
             margin: 1.2em 0;
             position: relative;
-            border: 1px solid #27272a;
+            border: 1px solid var(--border-color);
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
         }
 
         .prose code {
             color: #fca5a5;
-            background-color: #27272a;
+            background-color: rgba(252, 165, 165, 0.1);
             padding: 0.2em 0.4em;
-            border-radius: 0.25em;
+            border-radius: 0.3em;
             font-family: 'JetBrains Mono', monospace;
             font-size: 0.85em;
         }
@@ -118,18 +150,19 @@
 
         .copy-btn {
             position: absolute;
-            top: 10px;
-            right: 10px;
-            background: #27272a;
-            color: #a1a1aa;
-            border: 1px solid #3f3f46;
-            padding: 4px 8px;
-            border-radius: 4px;
+            top: 12px;
+            right: 12px;
+            background: var(--bg-surface);
+            color: var(--text-muted);
+            border: 1px solid var(--border-color);
+            padding: 5px 10px;
+            border-radius: 6px;
             font-size: 11px;
             cursor: pointer;
             transition: all 0.2s ease;
             opacity: 0;
             font-family: 'Inter', sans-serif;
+            backdrop-filter: blur(4px);
         }
 
         .prose pre:hover .copy-btn {
@@ -137,21 +170,23 @@
         }
 
         .copy-btn:hover {
-            background: #3f3f46;
-            color: #f4f4f5;
+            background: var(--border-hover);
+            color: white;
         }
 
+        /* 深度思考模块优化 */
         .think-container {
-            background: #18181b;
+            background: var(--bg-panel);
             border-left: 3px solid #8b5cf6;
-            border-radius: 0.5rem;
+            border-radius: 0.75rem;
             margin-bottom: 1.25rem;
-            box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.05);
+            box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.1);
             overflow: hidden;
+            transition: all 0.3s ease;
         }
 
         .think-summary {
-            padding: 0.75rem 1rem;
+            padding: 0.85rem 1rem;
             font-size: 0.8rem;
             font-weight: 500;
             color: #c4b5fd;
@@ -165,7 +200,7 @@
         }
 
         .think-summary:hover {
-            background: rgba(139, 92, 246, 0.1);
+            background: rgba(139, 92, 246, 0.15);
         }
 
         .think-summary::-webkit-details-marker {
@@ -182,16 +217,16 @@
         }
 
         .think-steps {
-            padding: 0 1rem 1rem 1rem;
+            padding: 0 1.2rem 1.2rem 1.2rem;
             font-size: 0.85rem;
         }
 
         .think-step {
             display: flex;
             gap: 0.75rem;
-            margin-top: 0.75rem;
+            margin-top: 0.85rem;
             color: #a1a1aa;
-            line-height: 1.5;
+            line-height: 1.6;
         }
 
         .think-step-marker {
@@ -199,11 +234,12 @@
             font-size: 0.75rem;
             color: #8b5cf6;
             background: rgba(139, 92, 246, 0.1);
-            padding: 0.1rem 0.4rem;
-            border-radius: 0.25rem;
+            padding: 0.15rem 0.4rem;
+            border-radius: 0.3rem;
             height: fit-content;
         }
 
+        /* 动画效果 */
         @keyframes slideIn {
             from {
                 transform: translateX(100%);
@@ -224,7 +260,7 @@
             content: "▋";
             animation: blink 1s step-end infinite;
             margin-left: 4px;
-            color: #6366f1;
+            color: var(--accent-color);
         }
 
         @keyframes blink {
@@ -239,12 +275,13 @@
             }
         }
 
+        /* 配置面板样式 */
         .settings-group {
-            background: #18181b;
-            border-radius: 0.5rem;
+            background: var(--bg-surface);
+            border-radius: 0.75rem;
             padding: 1.25rem;
             margin-bottom: 1.25rem;
-            border: 1px solid #27272a;
+            border: 1px solid var(--border-color);
         }
 
         .settings-label {
@@ -252,7 +289,7 @@
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.05em;
-            color: #a1a1aa;
+            color: var(--text-muted);
             margin-bottom: 1rem;
             display: flex;
             align-items: center;
@@ -279,11 +316,11 @@
         .setting-row input[type="number"],
         .setting-row textarea {
             width: 100%;
-            background: #09090b;
-            border: 1px solid #27272a;
-            border-radius: 0.375rem;
-            padding: 0.5rem 0.75rem;
-            color: #f4f4f5;
+            background: var(--bg-base);
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            padding: 0.6rem 0.75rem;
+            color: var(--text-main);
             font-size: 0.875rem;
             transition: all 0.2s;
             font-family: inherit;
@@ -292,32 +329,8 @@
         .setting-row input:focus,
         .setting-row textarea:focus {
             outline: none;
-            border-color: #6366f1;
+            border-color: var(--accent-color);
             box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
-        }
-
-        .setting-row input[type="checkbox"] {
-            width: 1.1rem;
-            height: 1.1rem;
-            accent-color: #6366f1;
-            cursor: pointer;
-        }
-
-        .checkbox-wrapper {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-
-        .checkbox-wrapper label {
-            margin-bottom: 0;
-            cursor: pointer;
-        }
-
-        .setting-description {
-            font-size: 0.7rem;
-            color: #71717a;
-            margin-top: 0.3rem;
         }
 
         textarea#user-input {
@@ -332,17 +345,17 @@
         <aside class="w-64 bg-[#09090b] border-r border-[#27272a] flex flex-col flex-shrink-0 z-10">
             <div class="p-4 border-b border-[#27272a] flex justify-between items-center bg-[#09090b]">
                 <h2 class="font-semibold text-sm tracking-wide text-zinc-100 uppercase">Sessions</h2>
-                <button class="text-indigo-400 hover:text-indigo-300 transition-colors p-1 rounded-md hover:bg-zinc-800"
+                <button class="text-indigo-400 hover:text-indigo-300 transition-all p-1.5 rounded-md hover:bg-zinc-800"
                     id="new-session-btn" title="新建会话">
                     <i class="fa-solid fa-plus"></i>
                 </button>
             </div>
-            <div class="flex-1 overflow-y-auto p-3 space-y-1" id="session-list"></div>
+            <div class="flex-1 overflow-y-auto p-3 space-y-1.5" id="session-list"></div>
 
-            <div class="p-4 border-t border-[#27272a] bg-[#18181b] flex items-center justify-between">
+            <div class="p-4 border-t border-[#27272a] bg-[#121214] flex items-center justify-between">
                 <div class="flex items-center space-x-3 overflow-hidden">
                     <div
-                        class="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white text-sm font-bold shadow-sm flex-shrink-0">
+                        class="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white text-sm font-bold shadow-[0_0_10px_rgba(79,70,229,0.4)] flex-shrink-0">
                         <i class="fa-solid fa-user"></i>
                     </div>
                     <div class="flex-1 min-w-0">
@@ -359,7 +372,7 @@
 
         <main class="flex-1 flex flex-col min-w-0 bg-[#09090b] relative">
             <header
-                class="h-14 bg-opacity-80 backdrop-blur-md border-b border-[#27272a] flex items-center justify-between px-5 flex-shrink-0 z-40 absolute top-0 w-full">
+                class="h-14 glass-panel flex items-center justify-between px-5 flex-shrink-0 z-40 absolute top-0 w-full">
                 <div class="relative inline-block text-left">
                     <button type="button" id="model-dropdown-btn"
                         class="flex items-center space-x-2 px-3 py-1.5 rounded-md hover:bg-zinc-800 transition-colors focus:outline-none border border-transparent hover:border-zinc-700">
@@ -369,24 +382,24 @@
                         <i class="fa-solid fa-chevron-down text-[10px] text-zinc-500 ml-1"></i>
                     </button>
                     <div id="model-dropdown-menu"
-                        class="absolute left-0 mt-2 w-64 rounded-lg shadow-xl bg-zinc-900 border border-zinc-800 hidden z-50 overflow-hidden">
+                        class="absolute left-0 mt-2 w-64 rounded-xl shadow-2xl bg-zinc-900 border border-zinc-800 hidden z-50 overflow-hidden">
                         <div class="py-1 max-h-60 overflow-y-auto" id="model-dropdown-list"></div>
                     </div>
                 </div>
                 <div class="flex items-center gap-5">
                     <div class="flex gap-2">
                         <button
-                            class="w-8 h-8 flex items-center justify-center rounded-md text-purple-400 hover:text-purple-300 hover:bg-purple-400/10 transition-colors"
+                            class="w-8 h-8 flex items-center justify-center rounded-md text-purple-400 hover:text-white hover:bg-purple-500 transition-all"
                             id="summary-session-btn" title="生成记忆摘要">
                             <i class="fa-solid fa-brain"></i>
                         </button>
                         <button
-                            class="w-8 h-8 flex items-center justify-center rounded-md text-rose-400 hover:text-rose-300 hover:bg-rose-400/10 transition-colors"
+                            class="w-8 h-8 flex items-center justify-center rounded-md text-rose-400 hover:text-white hover:bg-rose-500 transition-all"
                             id="clear-session-btn" title="清空上下文">
                             <i class="fa-solid fa-trash-can"></i>
                         </button>
                     </div>
-                    <div class="text-xs font-mono text-zinc-500 bg-zinc-900 px-2 py-1 rounded border border-zinc-800"
+                    <div class="text-xs font-mono text-zinc-400 bg-zinc-900/80 px-2.5 py-1.5 rounded-md border border-zinc-800"
                         id="current-session-id-display">ID: -</div>
                 </div>
             </header>
@@ -401,10 +414,9 @@
                 </div>
             </div>
 
-            <div class="p-4 bg-gradient-to-t from-[#09090b] to-transparent flex-shrink-0 pb-6">
+            <div class="p-4 bg-gradient-to-t from-[#09090b] via-[#09090b] to-transparent flex-shrink-0 pb-6">
                 <div class="max-w-4xl mx-auto">
-                    <div
-                        class="bg-[#18181b] rounded-xl border border-[#27272a] shadow-lg focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500 transition-all flex flex-col overflow-hidden">
+                    <div class="input-container rounded-xl flex flex-col overflow-hidden">
                         <div id="image-preview-container"
                             class="flex flex-wrap gap-2 px-3 pt-3 hidden border-b border-[#27272a]"></div>
                         <div class="relative flex items-end p-2">
@@ -417,7 +429,7 @@
                                 class="flex-1 bg-transparent text-zinc-100 p-2.5 resize-none focus:outline-none max-h-60 overflow-y-auto text-[0.95rem] leading-relaxed"
                                 id="user-input" placeholder="输入消息... (Shift+Enter 换行)" rows="1"></textarea>
                             <button
-                                class="text-white bg-indigo-600 hover:bg-indigo-500 p-2 rounded-lg transition-colors m-1 shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center w-10 h-10"
+                                class="text-white bg-indigo-600 hover:bg-indigo-500 p-2 rounded-lg transition-transform hover:scale-105 active:scale-95 m-1 shadow-[0_4px_14px_rgba(99,102,241,0.4)] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center w-10 h-10"
                                 id="send-btn" title="发送">
                                 <i class="fa-solid fa-arrow-up"></i>
                             </button>
@@ -443,18 +455,18 @@
         </main>
 
         <aside class="w-80 bg-[#09090b] border-l border-[#27272a] flex flex-col flex-shrink-0 z-10">
-            <div class="flex border-b border-[#27272a] bg-[#18181b]">
+            <div class="flex border-b border-[#27272a] bg-[#121214]">
                 <button
                     class="flex-1 py-3 text-xs font-semibold uppercase tracking-wider text-indigo-400 border-b-2 border-indigo-500 focus:outline-none hover:bg-zinc-800 transition tab-btn"
                     data-tab="settings">配置</button>
                 <button
-                    class="flex-1 py-3 text-xs font-semibold uppercase tracking-wider text-zinc-500 hover:text-zinc-300 focus:outline-none hover:bg-zinc-800 transition tab-btn"
+                    class="flex-1 py-3 text-xs font-semibold uppercase tracking-wider text-zinc-500 hover:text-zinc-300 focus:outline-none hover:bg-zinc-800 transition border-b-2 border-transparent tab-btn"
                     data-tab="tools">工具</button>
                 <button
-                    class="flex-1 py-3 text-xs font-semibold uppercase tracking-wider text-zinc-500 hover:text-zinc-300 focus:outline-none hover:bg-zinc-800 transition tab-btn"
+                    class="flex-1 py-3 text-xs font-semibold uppercase tracking-wider text-zinc-500 hover:text-zinc-300 focus:outline-none hover:bg-zinc-800 transition border-b-2 border-transparent tab-btn"
                     data-tab="todos">任务</button>
                 <button
-                    class="flex-1 py-3 text-xs font-semibold uppercase tracking-wider text-zinc-500 hover:text-zinc-300 focus:outline-none hover:bg-zinc-800 transition tab-btn"
+                    class="flex-1 py-3 text-xs font-semibold uppercase tracking-wider text-zinc-500 hover:text-zinc-300 focus:outline-none hover:bg-zinc-800 transition border-b-2 border-transparent tab-btn"
                     data-tab="channels">频道</button>
             </div>
 
@@ -462,7 +474,7 @@
                 <div id="settings-form-container"></div>
                 <div class="mt-4">
                     <button id="save-settings-btn"
-                        class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-2 px-4 rounded-lg transition-colors flex items-center justify-center gap-2 shadow-sm">
+                        class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-2 px-4 rounded-lg transition-all flex items-center justify-center gap-2 shadow-md hover:shadow-indigo-500/30">
                         <i class="fa-solid fa-floppy-disk"></i> 应用配置
                     </button>
                 </div>
@@ -489,9 +501,7 @@
                         id="new-todo-input" placeholder="新任务..." type="text" />
                     <button
                         class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-r-lg text-sm transition-colors"
-                        id="add-todo-btn">
-                        <i class="fa-solid fa-plus"></i>
-                    </button>
+                        id="add-todo-btn"><i class="fa-solid fa-plus"></i></button>
                 </div>
                 <div class="space-y-2 flex-1" id="todos-list"></div>
             </div>
@@ -506,15 +516,16 @@
         class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center opacity-0 transition-opacity duration-300">
         <div class="bg-[#18181b] border border-[#27272a] rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col transform scale-95 transition-transform duration-300"
             id="stats-modal-content">
-            <div class="p-4 border-b border-[#27272a] flex justify-between items-center bg-[#09090b] rounded-t-xl">
+            <div class="p-4 border-b border-[#27272a] flex justify-between items-center bg-[#121214] rounded-t-xl">
                 <h2 class="font-semibold text-sm tracking-wide text-zinc-100 uppercase flex items-center gap-2">
                     <i class="fa-solid fa-chart-pie text-indigo-500"></i> 数据统计 (Tokens)
                 </h2>
-                <button id="close-stats-modal" class="text-zinc-500 hover:text-zinc-300 transition-colors p-1">
+                <button id="close-stats-modal"
+                    class="text-zinc-500 hover:text-zinc-300 transition-colors p-1 rounded hover:bg-zinc-800">
                     <i class="fa-solid fa-times text-lg"></i>
                 </button>
             </div>
-            <div class="p-5 overflow-y-auto flex-1 text-sm text-zinc-300 space-y-4" id="stats-container">
+            <div class="p-6 overflow-y-auto flex-1 text-sm text-zinc-300 space-y-4" id="stats-container">
             </div>
         </div>
     </div>
@@ -524,59 +535,30 @@
     <script>
         // ---------- 全局状态 ----------
         const state = {
-            user: "Local User",
-            sessions: [],
-            currentSessionId: null,
-            messages: [],               // 消息对象模型：{ role, content, images, thinkings?, isLoading?, usage? }
-            settings: {},
-            models: [],
-            currentModel: null,
-            thinkMode: false,
-            activeTab: 'settings',
-            tools: [],
-            todos: [],
-            channels: [],
-            isTyping: false,
-            pendingImages: [],
+            user: "Local User", sessions: [], currentSessionId: null, messages: [], settings: {}, models: [], currentModel: null,
+            thinkMode: false, activeTab: 'settings', tools: [], todos: [], channels: [], isTyping: false, pendingImages: [],
         };
 
         const API_BASE = '/api';
 
         // ---------- DOM 元素缓存 ----------
         const els = {
-            sessionList: document.getElementById('session-list'),
-            newSessionBtn: document.getElementById('new-session-btn'),
-            clearSessionBtn: document.getElementById('clear-session-btn'),
-            summarySessionBtn: document.getElementById('summary-session-btn'),
-            messagesContainer: document.getElementById('messages-container'),
-            userInput: document.getElementById('user-input'),
-            sendBtn: document.getElementById('send-btn'),
-            thinkToggle: document.getElementById('think-toggle'),
-            tabBtns: document.querySelectorAll('.tab-btn'),
-            tabContents: document.querySelectorAll('.tab-content'),
-            currentUserDisplay: document.getElementById('current-user-display'),
-            systemLogs: document.getElementById('system-logs'),
-            toolsList: document.getElementById('tools-list'),
-            todosList: document.getElementById('todos-list'),
-            newTodoInput: document.getElementById('new-todo-input'),
-            addTodoBtn: document.getElementById('add-todo-btn'),
-            channelsList: document.getElementById('channels-list'),
-            currentSessionIdDisplay: document.getElementById('current-session-id-display'),
-            modelDropdownBtn: document.getElementById('model-dropdown-btn'),
-            modelDropdownMenu: document.getElementById('model-dropdown-menu'),
-            modelDropdownList: document.getElementById('model-dropdown-list'),
-            modelNameDisplay: document.getElementById('model-name-display'),
-            connectionStatusDot: document.getElementById('connection-status-dot'),
-            attachBtn: document.getElementById('attach-btn'),
-            fileUpload: document.getElementById('file-upload'),
-            imagePreviewContainer: document.getElementById('image-preview-container'),
-            settingsFormContainer: document.getElementById('settings-form-container'),
-            saveSettingsBtn: document.getElementById('save-settings-btn'),
-            // Data Stats Modal
-            dataStatsBtn: document.getElementById('data-stats-btn'),
-            statsModal: document.getElementById('stats-modal'),
-            statsModalContent: document.getElementById('stats-modal-content'),
-            closeStatsModalBtn: document.getElementById('close-stats-modal'),
+            sessionList: document.getElementById('session-list'), newSessionBtn: document.getElementById('new-session-btn'),
+            clearSessionBtn: document.getElementById('clear-session-btn'), summarySessionBtn: document.getElementById('summary-session-btn'),
+            messagesContainer: document.getElementById('messages-container'), userInput: document.getElementById('user-input'),
+            sendBtn: document.getElementById('send-btn'), thinkToggle: document.getElementById('think-toggle'),
+            tabBtns: document.querySelectorAll('.tab-btn'), tabContents: document.querySelectorAll('.tab-content'),
+            currentUserDisplay: document.getElementById('current-user-display'), systemLogs: document.getElementById('system-logs'),
+            toolsList: document.getElementById('tools-list'), todosList: document.getElementById('todos-list'),
+            newTodoInput: document.getElementById('new-todo-input'), addTodoBtn: document.getElementById('add-todo-btn'),
+            channelsList: document.getElementById('channels-list'), currentSessionIdDisplay: document.getElementById('current-session-id-display'),
+            modelDropdownBtn: document.getElementById('model-dropdown-btn'), modelDropdownMenu: document.getElementById('model-dropdown-menu'),
+            modelDropdownList: document.getElementById('model-dropdown-list'), modelNameDisplay: document.getElementById('model-name-display'),
+            connectionStatusDot: document.getElementById('connection-status-dot'), attachBtn: document.getElementById('attach-btn'),
+            fileUpload: document.getElementById('file-upload'), imagePreviewContainer: document.getElementById('image-preview-container'),
+            settingsFormContainer: document.getElementById('settings-form-container'), saveSettingsBtn: document.getElementById('save-settings-btn'),
+            dataStatsBtn: document.getElementById('data-stats-btn'), statsModal: document.getElementById('stats-modal'),
+            statsModalContent: document.getElementById('stats-modal-content'), closeStatsModalBtn: document.getElementById('close-stats-modal'),
             statsContainer: document.getElementById('stats-container')
         };
 
@@ -588,7 +570,7 @@
             if (type === 'success') icon = '<i class="fa-solid fa-circle-check text-emerald-400"></i>';
             else if (type === 'error') icon = '<i class="fa-solid fa-circle-exclamation text-rose-400"></i>';
 
-            toast.className = `bg-zinc-800 text-zinc-100 px-4 py-3 rounded-lg shadow-xl flex items-center space-x-3 min-w-[300px] toast-enter border border-zinc-700`;
+            toast.className = `bg-[#18181b] text-zinc-100 px-4 py-3 rounded-lg shadow-[0_4px_20px_rgba(0,0,0,0.5)] flex items-center space-x-3 min-w-[300px] toast-enter border border-[#27272a]`;
             toast.innerHTML = `${icon}<span class="text-sm font-medium">${message}</span>`;
             container.appendChild(toast);
             setTimeout(() => {
@@ -682,16 +664,11 @@
             let channels = [];
             try { channels = JSON.parse(document.getElementById('setting-channels')?.value || '[]'); } catch (e) { channels = state.settings.channels || []; }
             return {
-                user_name: document.getElementById('setting-name')?.value || '',
-                agent_name: document.getElementById('setting-agent_name')?.value || '',
-                workspace: document.getElementById('setting-workspace')?.value || '',
-                server_address: document.getElementById('setting-server_address')?.value || '',
-                model: document.getElementById('setting-model')?.value || '',
-                prompt: document.getElementById('setting-prompt')?.value || '',
-                stream: document.getElementById('setting-stream')?.checked || false,
-                max_mpc_rounds: parseInt(document.getElementById('setting-max_mpc_rounds')?.value) || 10,
-                max_context: parseInt(document.getElementById('setting-max_context')?.value) || 128000,
-                channels: channels
+                user_name: document.getElementById('setting-name')?.value || '', agent_name: document.getElementById('setting-agent_name')?.value || '',
+                workspace: document.getElementById('setting-workspace')?.value || '', server_address: document.getElementById('setting-server_address')?.value || '',
+                model: document.getElementById('setting-model')?.value || '', prompt: document.getElementById('setting-prompt')?.value || '',
+                stream: document.getElementById('setting-stream')?.checked || false, max_mpc_rounds: parseInt(document.getElementById('setting-max_mpc_rounds')?.value) || 10,
+                max_context: parseInt(document.getElementById('setting-max_context')?.value) || 128000, channels: channels
             };
         }
 
@@ -705,8 +682,7 @@
                     showToast('设置已保存', 'success');
                     log('配置更新成功', 'success');
                     await getModels();
-                    if (state.settings.model && state.models.some(m => m.name === state.settings.model))
-                        selectModel(state.settings.model, true);
+                    if (state.settings.model && state.models.some(m => m.name === state.settings.model)) selectModel(state.settings.model, true);
                 } else throw new Error('保存失败');
             } catch (error) { showToast('保存设置失败', 'error'); }
         }
@@ -768,7 +744,7 @@
             els.imagePreviewContainer.innerHTML = state.pendingImages.map((img, idx) =>
                 `<div class="relative group mt-1 mb-2">
                     <img src="${img}" class="w-14 h-14 object-cover rounded-md border border-zinc-600 shadow-sm">
-                    <button class="absolute -top-1.5 -right-1.5 bg-rose-500 text-white rounded-full w-4 h-4 flex items-center justify-center text-[10px] opacity-0 group-hover:opacity-100 transition shadow-md"
+                    <button class="absolute -top-1.5 -right-1.5 bg-rose-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] opacity-0 group-hover:opacity-100 transition shadow-md hover:bg-rose-600"
                         onclick="removePendingImage(${idx})"><i class="fa-solid fa-times"></i></button>
                 </div>`).join('');
         }
@@ -790,9 +766,9 @@
             state.sessions.forEach(id => {
                 const isActive = id === state.currentSessionId;
                 const div = document.createElement('div');
-                div.className = `px-3 py-2.5 rounded-lg cursor-pointer flex justify-between items-center group transition-colors ${isActive ? 'bg-indigo-600 text-white shadow-md' : 'hover:bg-[#18181b] text-zinc-400 hover:text-zinc-200'}`;
+                div.className = `px-3 py-2.5 rounded-lg cursor-pointer flex justify-between items-center group transition-all ${isActive ? 'bg-indigo-600/10 border border-indigo-500/50 text-indigo-400 shadow-sm' : 'hover:bg-[#18181b] border border-transparent text-zinc-400 hover:text-zinc-200'}`;
                 div.onclick = () => switchSession(id);
-                div.innerHTML = `<div class="flex items-center gap-3 w-full"><i class="fa-regular fa-message text-xs ${isActive ? 'text-indigo-200' : 'text-zinc-600'}"></i><span class="truncate text-sm font-medium flex-1">${id}</span></div>`;
+                div.innerHTML = `<div class="flex items-center gap-3 w-full"><i class="fa-regular fa-message text-xs ${isActive ? 'text-indigo-400' : 'text-zinc-600'}"></i><span class="truncate text-sm font-medium flex-1">${id}</span></div>`;
                 els.sessionList.appendChild(div);
             });
         }
@@ -803,15 +779,11 @@
                 const res = await axios.post(API_BASE + '/session/msg', { session_id: sessionId });
                 state.currentSessionId = sessionId;
                 els.currentSessionIdDisplay.textContent = `ID: ${sessionId}`;
-                const rawMessages = res.data.messages || [];
-                state.messages = parseMessagesFromResponse(rawMessages);
+                state.messages = parseMessagesFromResponse(res.data.messages || []);
                 renderMessages();
                 renderSessions();
                 log(`已切换到会话: ${sessionId}`, 'success');
-            } catch (error) {
-                log(`切换会话失败`, 'error');
-                showToast("无法加载会话", "error");
-            }
+            } catch (error) { showToast("无法加载会话", "error"); }
         }
 
         async function newSession() {
@@ -857,10 +829,7 @@
         async function getModels() {
             try {
                 const response = await axios.get(API_BASE + '/models');
-                state.models = (response.data.data || []).map(m => ({
-                    name: m.aliases?.[0] || m.id,
-                    available: m.status?.value === 'loaded'
-                }));
+                state.models = (response.data.data || []).map(m => ({ name: m.aliases?.[0] || m.id, available: m.status?.value === 'loaded' }));
                 if (state.models.length === 0) state.models.push({ name: 'default', available: true });
                 if (!state.currentModel && state.models.length) selectModel(state.models[0].name, state.models[0].available);
                 renderModels();
@@ -874,7 +843,7 @@
                 const btn = document.createElement('button');
                 btn.className = `w-full flex items-center space-x-3 px-4 py-2.5 text-sm transition-colors ${isAvailable ? 'text-zinc-200 hover:bg-zinc-800' : 'text-zinc-600 cursor-not-allowed'}`;
                 btn.onclick = () => { if (isAvailable) { selectModel(model.name, true); els.modelDropdownMenu.classList.add('hidden'); } };
-                btn.innerHTML = `<span class="w-2 h-2 rounded-full shadow-sm ${isAvailable ? 'bg-emerald-500 shadow-emerald-500/50' : 'bg-rose-500 shadow-rose-500/50'}"></span><span class="font-medium">${model.name}</span>`;
+                btn.innerHTML = `<span class="w-2 h-2 rounded-full shadow-sm ${isAvailable ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.5)]' : 'bg-rose-500 shadow-[0_0_6px_rgba(244,63,94,0.5)]'}"></span><span class="font-medium">${model.name}</span>`;
                 els.modelDropdownList.appendChild(btn);
             });
         }
@@ -882,7 +851,7 @@
         function selectModel(name, ok) {
             state.currentModel = name;
             els.modelNameDisplay.textContent = name;
-            els.connectionStatusDot.className = `w-2 h-2 rounded-full shadow-sm ${ok ? 'bg-emerald-500 shadow-emerald-500/50' : 'bg-rose-500 shadow-rose-500/50'}`;
+            els.connectionStatusDot.className = `w-2 h-2 rounded-full shadow-sm ${ok ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.5)]' : 'bg-rose-500 shadow-[0_0_6px_rgba(244,63,94,0.5)]'}`;
         }
 
         // ---------- 消息渲染 ----------
@@ -895,11 +864,9 @@
                 if (msg.role === userName || msg.role === 'user' || msg.role === 'Admin') role = 'user';
                 else if (msg.role === agentName || msg.role === 'assistant') role = 'ai';
 
-                let content = '';
-                let images = [];
-                if (typeof msg.content === 'string') {
-                    content = msg.content;
-                } else if (Array.isArray(msg.content)) {
+                let content = ''; let images = [];
+                if (typeof msg.content === 'string') content = msg.content;
+                else if (Array.isArray(msg.content)) {
                     msg.content.forEach(part => {
                         if (part.type === 'text') content += part.text + '\n';
                         else if (part.type === 'image_url') {
@@ -922,7 +889,6 @@
             els.messagesContainer.scrollTop = els.messagesContainer.scrollHeight;
         }
 
-        // 核心：渲染单条消息（支持 thinkings 和 usage）
         function addMessageToUI(msg, id = null) {
             const div = document.createElement('div');
             div.className = `flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`;
@@ -930,17 +896,15 @@
 
             const isUser = msg.role === 'user';
             const iconHTML = isUser ? '🌟' : '🐳';
-            const iconBg = isUser ? 'bg-indigo-600 shadow-indigo-500/30' : 'bg-zinc-800 border border-zinc-700';
+            const iconBg = isUser ? 'bg-indigo-600 shadow-[0_0_10px_rgba(79,70,229,0.3)]' : 'bg-zinc-800 border border-zinc-700';
             const bubbleClass = isUser ? 'bg-indigo-600 text-white' : 'bg-[#18181b] border border-[#27272a] text-zinc-200';
 
             const bubbleDiv = document.createElement('div');
-            bubbleDiv.className = `${bubbleClass} px-4 py-3 rounded-2xl ${isUser ? 'rounded-br-sm' : 'rounded-bl-sm'} shadow-sm message-bubble overflow-hidden relative`;
+            bubbleDiv.className = `${bubbleClass} px-4 py-3.5 rounded-2xl ${isUser ? 'rounded-br-sm' : 'rounded-bl-sm'} shadow-sm message-bubble overflow-hidden relative`;
 
-            // 加载动画状态
             if (msg.isLoading) {
                 bubbleDiv.innerHTML = '<span class="typing-cursor">思考中...</span>';
             } else {
-                // 思考步骤（仅 AI 消息且存在 thinkings）
                 if (!isUser && msg.thinkings && msg.thinkings.length > 0) {
                     const details = document.createElement('details');
                     details.className = 'think-container';
@@ -961,35 +925,32 @@
                     bubbleDiv.appendChild(details);
                 }
 
-                // 文本内容
                 const proseDiv = document.createElement('div');
                 proseDiv.className = 'prose prose-sm max-w-none text-zinc-200';
                 proseDiv.innerHTML = isUser ? escapeHtml(msg.content).replace(/\n/g, '<br>') : marked.parse(renderFixCodeBlock(msg.content));
                 attachCopyButtons(proseDiv);
                 bubbleDiv.appendChild(proseDiv);
 
-                // 图片
                 if (msg.images && msg.images.length > 0) {
                     const imgDiv = document.createElement('div');
                     imgDiv.className = 'flex flex-wrap gap-2 mt-3 pt-3 border-t border-[#27272a]';
                     msg.images.forEach(img => {
                         const el = document.createElement('img');
                         el.src = img.startsWith('data:') ? img : 'data:image/jpeg;base64,' + img;
-                        el.className = 'max-w-xs max-h-64 object-contain rounded-md border border-zinc-600 cursor-pointer shadow-sm hover:opacity-90';
+                        el.className = 'max-w-xs max-h-64 object-contain rounded-lg border border-zinc-600 cursor-pointer shadow-md hover:opacity-90 transition-opacity';
                         el.onclick = () => window.open(el.src);
                         imgDiv.appendChild(el);
                     });
                     bubbleDiv.appendChild(imgDiv);
                 }
 
-                // Token 消耗渲染
                 if (!isUser && msg.usage) {
                     const usageDiv = document.createElement('div');
-                    usageDiv.className = 'mt-3 pt-2 border-t border-[#27272a]/50 text-[0.7rem] text-zinc-500 flex gap-4 font-mono select-none';
+                    usageDiv.className = 'mt-3 pt-2 border-t border-[#27272a] text-[0.7rem] text-zinc-500 flex gap-4 font-mono select-none';
                     usageDiv.innerHTML = `
-                        <span title="Prompt Tokens" class="flex items-center gap-1"><i class="fa-solid fa-arrow-right-to-bracket text-zinc-600"></i> ${msg.usage.prompt_cost}</span>
-                        <span title="Completion Tokens" class="flex items-center gap-1"><i class="fa-solid fa-arrow-right-from-bracket text-zinc-600"></i> ${msg.usage.completion_cost}</span>
-                        <span title="Total Tokens" class="text-indigo-400/80 flex items-center gap-1"><i class="fa-solid fa-coins"></i> ${msg.usage.total_cost}</span>
+                        <span title="Prompt Tokens" class="flex items-center gap-1.5"><i class="fa-solid fa-arrow-right-to-bracket text-zinc-600"></i> ${msg.usage.prompt_cost || 0}</span>
+                        <span title="Completion Tokens" class="flex items-center gap-1.5"><i class="fa-solid fa-arrow-right-from-bracket text-zinc-600"></i> ${msg.usage.completion_cost || 0}</span>
+                        <span title="Total Tokens" class="text-indigo-400/90 flex items-center gap-1.5"><i class="fa-solid fa-coins"></i> ${msg.usage.total_cost || 0}</span>
                     `;
                     bubbleDiv.appendChild(usageDiv);
                 }
@@ -998,13 +959,10 @@
             const row = document.createElement('div');
             row.className = `flex max-w-[85%] ${isUser ? 'flex-row-reverse space-x-reverse' : 'flex-row'} items-end space-x-3 min-w-0`;
             const avatar = document.createElement('div');
-            avatar.className = `w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-zinc-100 ${iconBg} shadow-sm z-10 mb-1`;
+            avatar.className = `w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-zinc-100 ${iconBg} z-10 mb-1`;
             avatar.innerHTML = iconHTML;
 
-            row.appendChild(avatar);
-            row.appendChild(bubbleDiv);
-            div.appendChild(row);
-            els.messagesContainer.appendChild(div);
+            row.appendChild(avatar); row.appendChild(bubbleDiv); div.appendChild(row); els.messagesContainer.appendChild(div);
         }
 
         // ---------- 发送消息 ----------
@@ -1013,107 +971,51 @@
             const imagesToSend = [...state.pendingImages];
             if ((!content && imagesToSend.length === 0) || state.isTyping || !state.currentSessionId) return;
 
-            // 1. 将用户消息添加到状态
             const userMsg = { role: 'user', content, images: imagesToSend };
             state.messages.push(userMsg);
-            els.userInput.value = '';
-            els.userInput.style.height = 'auto';
-            state.pendingImages = [];
-            renderImagePreviews();
+            els.userInput.value = ''; els.userInput.style.height = 'auto'; state.pendingImages = []; renderImagePreviews();
 
-            // 2. 添加临时加载消息
             const placeholder = { role: 'ai', content: '', images: [], thinkings: [], isLoading: true };
             state.messages.push(placeholder);
-            const oldLength = state.messages.length; // 包含占位符后的长度，用来定位新增消息
-            renderMessages();  // 立即显示用户消息和加载动画
-
-            state.isTyping = true;
-            els.sendBtn.disabled = true;
+            const oldLength = state.messages.length;
+            renderMessages();
+            state.isTyping = true; els.sendBtn.disabled = true;
 
             try {
-                const payload = {
-                    messages: content,
-                    model: state.currentModel || 'default',
-                    think: state.thinkMode,
-                    session_id: state.currentSessionId
-                };
+                const payload = { messages: content, model: state.currentModel || 'default', think: state.thinkMode, session_id: state.currentSessionId };
                 if (imagesToSend.length) payload.images = imagesToSend;
-
                 const res = await axios.post(API_BASE + '/input', payload);
 
-                // 3. 解析后端返回的完整消息历史
                 const newMessages = parseMessagesFromResponse(res.data.messages);
                 const thinkArray = res.data?.thinkings || [];
-
-                // 4. 找出本轮新增的消息
                 const addedMessages = newMessages.slice(oldLength - 2);
                 const finalMessages = newMessages.slice(0, oldLength - 2).concat(addedMessages);
 
-                // 5. 将 thinkings 及 usage 附加到本轮第一/最后一条 AI 消息上（如果有）
-                if (thinkArray.length > 0) {
-                    for (let m of finalMessages) {
-                        if (m.role === 'ai') {
-                            m.thinkings = thinkArray;
-                            break;
-                        }
-                    }
-                }
-                if (res.data.usage) {
-                    for (let i = finalMessages.length - 1; i >= 0; i--) {
-                        if (finalMessages[i].role === 'ai') {
-                            finalMessages[i].usage = res.data.usage;
-                            break;
-                        }
-                    }
-                }
+                if (thinkArray.length > 0) { for (let m of finalMessages) { if (m.role === 'ai') { m.thinkings = thinkArray; break; } } }
+                if (res.data.usage) { for (let i = finalMessages.length - 1; i >= 0; i--) { if (finalMessages[i].role === 'ai') { finalMessages[i].usage = res.data.usage; break; } } }
 
-                // 6. 移除占位符，替换为实际消息
                 state.messages = finalMessages.filter(m => !m.isLoading);
                 renderMessages();
                 log('响应接收成功', 'success');
-
             } catch (error) {
                 const errorMsg = error.response?.data?.error || error.message || '请求失败';
-                // 移除占位符，添加错误消息
                 state.messages = state.messages.filter(m => !m.isLoading);
                 state.messages.push({ role: 'ai', content: `❌ 错误: ${errorMsg}`, images: [] });
-                renderMessages();
-                log(`请求错误: ${errorMsg}`, 'error');
-            } finally {
-                state.isTyping = false;
-                els.sendBtn.disabled = false;
-            }
+                renderMessages(); log(`请求错误: ${errorMsg}`, 'error');
+            } finally { state.isTyping = false; els.sendBtn.disabled = false; }
         }
 
         // ---------- 工具 / 任务 / 频道 ----------
-        async function loadTools() {
-            try { const res = await axios.get(API_BASE + '/tools'); state.tools = res.data || []; renderTools(); } catch (e) { }
-        }
-        function renderTools() {
-            els.toolsList.innerHTML = state.tools.map(t => `<div class="bg-[#18181b] p-3 rounded-lg border border-[#27272a]"><div class="text-indigo-400 font-medium text-sm mb-1 flex items-center gap-2"><i class="fa-solid fa-wrench text-xs"></i> ${t.name}</div><div class="text-xs text-zinc-500 leading-relaxed">${t.description || ''}</div></div>`).join('');
-        }
+        async function loadTools() { try { const res = await axios.get(API_BASE + '/tools'); state.tools = res.data || []; renderTools(); } catch (e) { } }
+        function renderTools() { els.toolsList.innerHTML = state.tools.map(t => `<div class="bg-[#18181b] p-3 rounded-lg border border-[#27272a] transition-colors hover:border-zinc-700"><div class="text-indigo-400 font-medium text-sm mb-1 flex items-center gap-2"><i class="fa-solid fa-wrench text-xs"></i> ${t.name}</div><div class="text-xs text-zinc-500 leading-relaxed">${t.description || ''}</div></div>`).join(''); }
 
-        async function loadTodos() {
-            try { const res = await axios.get(API_BASE + '/todos'); state.todos = res.data || []; renderTodos(); } catch (e) { }
-        }
-        window.deleteTodo = async function (id) {
-            if (!confirm('删除该任务？')) return;
-            await axios.get(API_BASE + `/todos/delete/${id}`);
-            state.todos = state.todos.filter(t => t.id != id);
-            renderTodos();
-        };
-        window.doneTodo = async function (id, isDone) {
-            const todo = state.todos.find(t => t.id == id);
-            if (todo) { todo.done = !isDone; await axios.post(API_BASE + `/todos/${id}`, todo); renderTodos(); }
-        };
+        async function loadTodos() { try { const res = await axios.get(API_BASE + '/todos'); state.todos = res.data || []; renderTodos(); } catch (e) { } }
+        window.deleteTodo = async function (id) { if (!confirm('删除该任务？')) return; await axios.get(API_BASE + `/todos/delete/${id}`); state.todos = state.todos.filter(t => t.id != id); renderTodos(); };
+        window.doneTodo = async function (id, isDone) { const todo = state.todos.find(t => t.id == id); if (todo) { todo.done = !isDone; await axios.post(API_BASE + `/todos/${id}`, todo); renderTodos(); } };
         els.addTodoBtn.onclick = async () => {
-            const val = els.newTodoInput.value.trim();
-            if (!val) return;
+            const val = els.newTodoInput.value.trim(); if (!val) return;
             const newItem = { id: String(Date.now()), done: false, content: val };
-            const res = await axios.post(API_BASE + '/todos/new', newItem);
-            state.todos.push(res.data);
-            renderTodos();
-            els.newTodoInput.value = '';
+            const res = await axios.post(API_BASE + '/todos/new', newItem); state.todos.push(res.data); renderTodos(); els.newTodoInput.value = '';
         };
         function renderTodos() {
             if (!state.todos?.length) { els.todosList.innerHTML = '<div class="text-zinc-600 text-sm p-4 text-center">暂无任务</div>'; return; }
@@ -1125,54 +1027,33 @@
                         </div>
                         <p class="text-zinc-300 truncate ${t.done ? 'line-through opacity-50' : ''}">${escapeHtml(t.content)}</p>
                     </div>
-                    <button onclick="event.stopPropagation(); deleteTodo(${t.id})" class="text-zinc-500 hover:text-rose-400 p-1 rounded transition-colors ml-2" title="删除">
-                        <i class="fa-solid fa-trash-can"></i>
-                    </button>
+                    <button onclick="event.stopPropagation(); deleteTodo(${t.id})" class="text-zinc-500 hover:text-rose-400 p-1.5 rounded transition-colors ml-2" title="删除"><i class="fa-solid fa-trash-can"></i></button>
                 </div>`).join('');
         }
 
-        async function loadChannels() {
-            try { const res = await axios.get(API_BASE + '/channels'); state.channels = res.data || []; renderChannels(); } catch (e) { }
-        }
-        function renderChannels() {
-            els.channelsList.innerHTML = state.channels.map(c => `
-                <div class="p-3 hover:bg-[#18181b] rounded-lg border border-transparent hover:border-[#27272a] cursor-pointer text-sm font-medium text-zinc-300 transition-colors flex items-center gap-2"
-                     onclick="switchSession('${c.name}')">
-                    <i class="fa-solid fa-hashtag text-zinc-600"></i> ${c.name}
-                </div>`).join('');
-        }
+        async function loadChannels() { try { const res = await axios.get(API_BASE + '/channels'); state.channels = res.data || []; renderChannels(); } catch (e) { } }
+        function renderChannels() { els.channelsList.innerHTML = state.channels.map(c => `<div class="p-3 hover:bg-[#18181b] rounded-lg border border-transparent hover:border-[#27272a] cursor-pointer text-sm font-medium text-zinc-300 transition-colors flex items-center gap-2" onclick="switchSession('${c.name}')"><i class="fa-solid fa-hashtag text-zinc-600"></i> ${c.name}</div>`).join(''); }
 
-        // ---------- 数据可视化统计 ----------
+        // ---------- 数据可视化统计 (Bug Fix) ----------
         els.dataStatsBtn.onclick = async () => {
-            els.statsModal.classList.remove('hidden');
-            void els.statsModal.offsetWidth; // 触发回流
-            els.statsModal.classList.remove('opacity-0');
-            els.statsModalContent.classList.remove('scale-95');
-
+            els.statsModal.classList.remove('hidden'); void els.statsModal.offsetWidth;
+            els.statsModal.classList.remove('opacity-0'); els.statsModalContent.classList.remove('scale-95');
             els.statsContainer.innerHTML = '<div class="flex justify-center py-10"><i class="fa-solid fa-spinner fa-spin text-2xl text-indigo-500"></i></div>';
 
-            try {
-                const res = await axios.get(API_BASE + '/data');
-                const usages = res.data?.usages || {};
-                renderStats(usages);
-            } catch (error) {
-                els.statsContainer.innerHTML = '<div class="text-rose-400 text-center py-10">获取数据失败</div>';
-            }
+            try { const res = await axios.get(API_BASE + '/data'); renderStats(res.data?.usages || {}); }
+            catch (error) { els.statsContainer.innerHTML = '<div class="text-rose-400 text-center py-10">获取数据失败</div>'; }
         };
 
         function closeStatsModal() {
-            els.statsModal.classList.add('opacity-0');
-            els.statsModalContent.classList.add('scale-95');
+            els.statsModal.classList.add('opacity-0'); els.statsModalContent.classList.add('scale-95');
             setTimeout(() => els.statsModal.classList.add('hidden'), 300);
         }
-
         els.closeStatsModalBtn.onclick = closeStatsModal;
-        els.statsModal.onclick = (e) => {
-            if (e.target === els.statsModal) closeStatsModal();
-        }
+        els.statsModal.onclick = (e) => { if (e.target === els.statsModal) closeStatsModal(); }
 
+        // 彻底修复了对 undefined 或 null 取值的报错逻辑
         function renderStats(usages) {
-            if (Object.keys(usages).length === 0) {
+            if (!usages || Object.keys(usages).length === 0) {
                 els.statsContainer.innerHTML = '<div class="text-zinc-500 text-center py-10">暂无使用数据</div>';
                 return;
             }
@@ -1180,22 +1061,29 @@
             let maxTotal = 0;
             let totalOverall = 0;
             const dataArr = [];
+
             for (const [key, val] of Object.entries(usages)) {
-                if (val.total_cost > maxTotal) maxTotal = val.total_cost;
-                totalOverall += (val.total_cost || 0);
-                dataArr.push({ name: key, ...val });
+                // 安全获取属性，默认值为 0
+                const pCost = val.prompt_cost || 0;
+                const cCost = val.completion_cost || 0;
+                const tCost = val.total_cost || (pCost + cCost);
+
+                if (tCost > maxTotal) maxTotal = tCost;
+                totalOverall += tCost;
+
+                dataArr.push({ name: key, prompt_cost: pCost, completion_cost: cCost, total_cost: tCost });
             }
 
             dataArr.sort((a, b) => b.total_cost - a.total_cost);
 
             let html = `
                 <div class="grid grid-cols-1 mb-6">
-                    <div class="bg-[#09090b] border border-[#27272a] rounded-lg p-4 flex flex-col items-center justify-center">
-                        <span class="text-zinc-500 text-xs mb-1 uppercase tracking-wider">系统总计消耗 Tokens</span>
-                        <span class="text-3xl font-mono text-indigo-400 font-semibold shadow-sm">${totalOverall.toLocaleString()}</span>
+                    <div class="bg-[#18181b] border border-[#27272a] rounded-xl p-5 flex flex-col items-center justify-center shadow-inner">
+                        <span class="text-zinc-500 text-xs mb-2 uppercase tracking-wider font-semibold">系统总计消耗 Tokens</span>
+                        <span class="text-4xl font-mono text-indigo-400 font-bold drop-shadow-[0_2px_10px_rgba(99,102,241,0.2)]">${totalOverall.toLocaleString()}</span>
                     </div>
                 </div>
-                <div class="space-y-3">
+                <div class="space-y-4">
             `;
 
             dataArr.forEach(item => {
@@ -1204,25 +1092,24 @@
                 const compPct = item.total_cost > 0 ? (item.completion_cost / item.total_cost) * 100 : 0;
 
                 html += `
-                    <div class="bg-[#09090b] border border-[#27272a] rounded-lg p-3 hover:border-zinc-700 transition-colors">
-                        <div class="flex justify-between items-center mb-2">
-                            <span class="font-medium text-zinc-200 text-xs flex items-center"><i class="fa-solid fa-hashtag text-zinc-600 mr-2"></i>${escapeHtml(item.name)}</span>
-                            <span class="font-mono text-xs text-zinc-400 font-semibold">${item.total_cost.toLocaleString()}</span>
+                    <div class="bg-[#09090b] border border-[#27272a] rounded-lg p-4 hover:border-zinc-700 transition-colors shadow-sm">
+                        <div class="flex justify-between items-center mb-3">
+                            <span class="font-medium text-zinc-200 text-sm flex items-center"><i class="fa-solid fa-hashtag text-zinc-600 mr-2 text-xs"></i>${escapeHtml(item.name)}</span>
+                            <span class="font-mono text-sm text-zinc-300 font-semibold">${item.total_cost.toLocaleString()}</span>
                         </div>
-                        <div class="w-full bg-zinc-800 rounded-full h-2.5 mb-2 overflow-hidden">
+                        <div class="w-full bg-zinc-800 rounded-full h-2.5 mb-3 overflow-hidden shadow-inner">
                             <div class="flex h-full transition-all duration-500 ease-out" style="width: ${pct}%">
                                 <div class="bg-indigo-500 h-full" style="width: ${promptPct}%" title="Prompt: ${item.prompt_cost}"></div>
                                 <div class="bg-purple-500 h-full" style="width: ${compPct}%" title="Completion: ${item.completion_cost}"></div>
                             </div>
                         </div>
-                        <div class="flex justify-between text-[0.65rem] font-mono text-zinc-500">
-                            <span><span class="inline-block w-2 h-2 rounded-full bg-indigo-500 mr-1"></span>Prompt: ${item.prompt_cost.toLocaleString()}</span>
-                            <span><span class="inline-block w-2 h-2 rounded-full bg-purple-500 mr-1"></span>Completion: ${item.completion_cost.toLocaleString()}</span>
+                        <div class="flex justify-between text-[0.7rem] font-mono text-zinc-400">
+                            <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-full bg-indigo-500 shadow-sm"></span>Prompt: ${item.prompt_cost.toLocaleString()}</span>
+                            <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-full bg-purple-500 shadow-sm"></span>Completion: ${item.completion_cost.toLocaleString()}</span>
                         </div>
                     </div>
                 `;
             });
-
             html += '</div>';
             els.statsContainer.innerHTML = html;
         }
@@ -1236,32 +1123,20 @@
         els.tabBtns.forEach(btn => {
             btn.onclick = () => {
                 els.tabBtns.forEach(b => { b.classList.replace('text-indigo-400', 'text-zinc-500'); b.classList.remove('border-indigo-500'); b.classList.add('border-transparent'); });
-                btn.classList.replace('text-zinc-500', 'text-indigo-400');
-                btn.classList.remove('border-transparent');
-                btn.classList.add('border-indigo-500');
-                els.tabContents.forEach(c => c.classList.add('hidden'));
-                document.getElementById(`tab-${btn.dataset.tab}`).classList.remove('hidden');
+                btn.classList.replace('text-zinc-500', 'text-indigo-400'); btn.classList.remove('border-transparent'); btn.classList.add('border-indigo-500');
+                els.tabContents.forEach(c => c.classList.add('hidden')); document.getElementById(`tab-${btn.dataset.tab}`).classList.remove('hidden');
             };
         });
 
-        els.userInput.onkeydown = (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-        };
+        els.userInput.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } };
         els.sendBtn.onclick = sendMessage;
-
         els.modelDropdownBtn.onclick = (e) => { e.stopPropagation(); els.modelDropdownMenu.classList.toggle('hidden'); };
         document.addEventListener('click', () => els.modelDropdownMenu.classList.add('hidden'));
 
         async function init() {
-            await loadSettings();
-            await getModels();
-            await loadSessions();
-            await loadTools();
-            await loadTodos();
-            await loadChannels();
+            await loadSettings(); await getModels(); await loadSessions(); await loadTools(); await loadTodos(); await loadChannels();
             els.saveSettingsBtn.onclick = saveSettings;
-            state.user = state.settings.user_name || state.user;
-            els.currentUserDisplay.textContent = state.user;
+            state.user = state.settings.user_name || state.user; els.currentUserDisplay.textContent = state.user;
             document.title = state.user + " · Chat WebUI · 深度思考";
         }
         init();
