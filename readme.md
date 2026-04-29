@@ -8,11 +8,11 @@
 
 ## WebUI
 
-![WebUI 截图](./workspace/assets/WebUI_1.png)
+![WebUI 截图](./assets/WebUI_1.png)
 
 文件使用状态预览系统（禁止操作&0注入风险）
 
-![文件系统](./workspace/assets/WebUI_2.png)
+![文件系统](./assets/WebUI_2.png)
 
 依赖需求：
 
