@@ -1,6 +1,9 @@
 # 更新内容
 
-1. 修复todos.json匹配错误的问题。
+1. 修复WebUI的CSS兼容和显示错误，优化页面布局
+2. 频道设置单独抽离作为子页面
+3. 数据统计从usage中抽离
+4. 修复渲染bug
 
 # 从源码构建
 
@@ -22,3 +25,5 @@ brew install cmake ninja curl boost
 ```bash
 rm -rf ./* && git clone --recurse-submodules https://github.com/yauntyour/agent.cpp.git && cd agent.cpp && mkdir build && cd build && cmake .. && cmake --build build && cmake --install build --prefix install
 ```
+
+# 从release下载

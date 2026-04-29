@@ -83,11 +83,12 @@
       position: relative;
     }
 
-    #settings-overlay {
+    /* 通用侧边覆盖层 */
+    .side-overlay {
       position: fixed;
       right: 0;
       top: 0;
-      width: 360px;
+      width: 380px;
       height: 100vh;
       background: #121214;
       border-left: 1px solid #27272a;
@@ -99,7 +100,7 @@
       flex-direction: column;
     }
 
-    #settings-overlay.open {
+    .side-overlay.open {
       transform: translateX(0);
     }
 
@@ -1067,6 +1068,7 @@
       line-height: 1.4;
       display: -webkit-box;
       -webkit-line-clamp: 2;
+      line-clamp: 2;
       -webkit-box-orient: vertical;
       overflow: hidden;
     }
@@ -1400,6 +1402,199 @@
       flex-shrink: 0;
       display: none;
     }
+
+    /* 统计弹窗专用样式 */
+    .stat-card {
+      background: #18181b;
+      border: 1px solid #27272a;
+      border-radius: 10px;
+      padding: 14px;
+      margin-bottom: 10px;
+      transition: border-color 0.2s;
+    }
+
+    .stat-card:hover {
+      border-color: #3f3f46;
+    }
+
+    .stat-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    .stat-card-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #d4d4d8;
+    }
+
+    .stat-card-total {
+      font-size: 16px;
+      font-weight: 700;
+      color: #818cf8;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .stat-detail-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: #a1a1aa;
+      margin-bottom: 4px;
+    }
+
+    .stat-detail-row:last-child {
+      margin-bottom: 0;
+    }
+
+    .stat-detail-mono {
+      font-family: 'JetBrains Mono', monospace;
+      color: #d4d4d8;
+    }
+
+    .stat-section-title {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #71717a;
+      margin: 16px 0 8px;
+    }
+
+    /* 频道管理弹窗专用样式 */
+    .channel-item {
+      background: #18181b;
+      border: 1px solid #27272a;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      transition: border-color 0.15s;
+    }
+
+    .channel-item:hover {
+      border-color: #3f3f46;
+    }
+
+    .channel-item-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .channel-item-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: #d4d4d8;
+    }
+
+    .channel-field {
+      margin-bottom: 6px;
+    }
+
+    .channel-field label {
+      display: block;
+      font-size: 11px;
+      color: #71717a;
+      margin-bottom: 3px;
+    }
+
+    .channel-field input,
+    .channel-field select {
+      width: 100%;
+      background: #09090b;
+      border: 1px solid #27272a;
+      border-radius: 5px;
+      padding: 6px 8px;
+      color: #e4e4e7;
+      font-size: 12px;
+      outline: none;
+      transition: border-color 0.15s;
+      font-family: inherit;
+    }
+
+    .channel-field input:focus,
+    .channel-field select:focus {
+      border-color: #6366f1;
+    }
+
+    .channel-actions {
+      display: flex;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .channel-btn {
+      flex: 1;
+      padding: 6px;
+      border-radius: 5px;
+      border: none;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.15s;
+      font-family: inherit;
+    }
+
+    .channel-btn.save {
+      background: #6366f1;
+      color: #fff;
+    }
+
+    .channel-btn.save:hover {
+      background: #4f46e5;
+    }
+
+    .channel-btn.danger {
+      background: rgba(244, 63, 94, 0.15);
+      color: #f87171;
+    }
+
+    .channel-btn.danger:hover {
+      background: rgba(244, 63, 94, 0.25);
+    }
+
+    .channel-btn.secondary {
+      background: #27272a;
+      color: #a1a1aa;
+    }
+
+    .channel-btn.secondary:hover {
+      background: #3f3f46;
+      color: #fff;
+    }
+
+    .add-channel-btn {
+      width: 100%;
+      padding: 10px;
+      background: #18181b;
+      border: 1px dashed #3f3f46;
+      border-radius: 8px;
+      color: #a1a1aa;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+      margin-bottom: 12px;
+      font-family: inherit;
+    }
+
+    .add-channel-btn:hover {
+      border-color: #6366f1;
+      color: #d4d4d8;
+      background: rgba(99, 102, 241, 0.05);
+    }
+
+    .channel-hint {
+      font-size: 11px;
+      color: #71717a;
+      text-align: center;
+      padding: 8px;
+      margin-bottom: 8px;
+      background: rgba(99, 102, 241, 0.04);
+      border-radius: 6px;
+      border: 1px solid rgba(99, 102, 241, 0.1);
+    }
   </style>
 </head>
 
@@ -1502,7 +1697,7 @@
     <div id="overlay-backdrop"></div>
 
     <!-- 右侧设置覆盖层 -->
-    <aside id="settings-overlay">
+    <aside id="settings-overlay" class="side-overlay">
       <div class="overlay-header">
         <h2>系统设置</h2>
         <button class="icon-btn" id="close-settings-btn" style="font-size:16px;"><i
@@ -1552,8 +1747,30 @@
           <div class="log-box" id="system-logs">
             <div class="log-success">[System] 核心初始化成功。</div>
           </div>
-          <div style="margin-top:12px;" id="stats-container-inline"></div>
         </div>
+      </div>
+    </aside>
+
+    <!-- 统计覆盖层（独立弹窗） -->
+    <aside id="stats-overlay" class="side-overlay">
+      <div class="overlay-header">
+        <h2>使用统计</h2>
+        <button class="icon-btn" id="close-stats-btn" style="font-size:16px;"><i class="fa-solid fa-times"></i></button>
+      </div>
+      <div class="overlay-body" id="stats-overlay-body">
+        <div style="padding:40px 20px;text-align:center;color:#52525b;font-size:13px;">加载中...</div>
+      </div>
+    </aside>
+
+    <!-- 频道管理覆盖层（独立小窗口） -->
+    <aside id="channel-overlay" class="side-overlay">
+      <div class="overlay-header">
+        <h2>频道管理</h2>
+        <button class="icon-btn" id="close-channel-btn" style="font-size:16px;"><i
+            class="fa-solid fa-times"></i></button>
+      </div>
+      <div class="overlay-body" id="channel-overlay-body">
+        <div style="padding:40px 20px;text-align:center;color:#52525b;font-size:13px;">加载中...</div>
       </div>
     </aside>
   </div>
@@ -1593,7 +1810,9 @@
       dataStatsBtn: $('#data-stats-btn'), toolsToggleList: $('#tools-toggle-list'),
       settingsGearBtn: $('#settings-gear-btn'), closeSettingsBtn: $('#close-settings-btn'),
       settingsOverlay: $('#settings-overlay'), overlayBackdrop: $('#overlay-backdrop'),
-      statsContainerInline: $('#stats-container-inline'),
+      statsOverlay: $('#stats-overlay'), statsOverlayBody: $('#stats-overlay-body'),
+      channelOverlay: $('#channel-overlay'), channelOverlayBody: $('#channel-overlay-body'),
+      closeStatsBtn: $('#close-stats-btn'), closeChannelBtn: $('#close-channel-btn'),
       fileBrowserBtn: $('#file-browser-btn'),
       fbPanel: $('#file-browser-panel'),
       fbBreadcrumb: $('#fb-breadcrumb'),
@@ -1623,11 +1842,35 @@
       return text.replace(/<system_output>([\s\S]*?)<\/system_output>/g, (_, c) => '\n```\n' + c.trim() + '\n```\n');
     }
 
-    // ============ 设置覆盖层 ============
+    // ============ 覆盖层管理 ============
     function openOverlay() { els.settingsOverlay.classList.add('open'); els.overlayBackdrop.classList.add('show'); }
-    function closeOverlay() { els.settingsOverlay.classList.remove('open'); els.overlayBackdrop.classList.remove('show'); }
+    function closeOverlay() {
+      els.settingsOverlay.classList.remove('open');
+      els.statsOverlay.classList.remove('open');
+      els.channelOverlay.classList.remove('open');
+      els.overlayBackdrop.classList.remove('show');
+    }
     els.settingsGearBtn.onclick = openOverlay;
-    els.closeSettingsBtn.onclick = closeOverlay;
+    els.closeSettingsBtn.onclick = () => {
+      els.settingsOverlay.classList.remove('open');
+      if (!els.statsOverlay.classList.contains('open') && !els.channelOverlay.classList.contains('open')) {
+        els.overlayBackdrop.classList.remove('show');
+      }
+    };
+    els.closeStatsBtn.onclick = () => {
+      els.statsOverlay.classList.remove('open');
+      if (!els.settingsOverlay.classList.contains('open') && !els.channelOverlay.classList.contains('open')) {
+        els.overlayBackdrop.classList.remove('show');
+      }
+    };
+    els.closeChannelBtn.onclick = () => {
+      els.channelOverlay.classList.remove('open');
+      if (!els.settingsOverlay.classList.contains('open') && !els.statsOverlay.classList.contains('open')) {
+        els.overlayBackdrop.classList.remove('show');
+      }
+      renderChannels();
+      renderSessions();
+    };
     els.overlayBackdrop.onclick = closeOverlay;
 
     // 覆盖层标签切换
@@ -1637,9 +1880,163 @@
         btn.classList.add('active');
         $$('.overlay-panel').forEach(p => p.classList.remove('active'));
         $(`#opanel-${btn.dataset.otab}`).classList.add('active');
-        if (btn.dataset.otab === 'logs') loadStatsInline();
       };
     });
+
+    // ============ 统计弹窗 ============
+    function openStatsOverlay() {
+      els.statsOverlay.classList.add('open');
+      els.overlayBackdrop.classList.add('show');
+      loadStatsOverlay();
+    }
+    async function loadStatsOverlay() {
+      const container = els.statsOverlayBody;
+      container.innerHTML = '<div style="padding:40px 20px;text-align:center;color:#52525b;font-size:13px;"><i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>加载中...</div>';
+      try {
+        const r = await axios.get(API + '/data');
+        const usages = r.data?.usages || {};
+        const entries = Object.entries(usages);
+        if (!entries.length) {
+          container.innerHTML = '<div style="padding:40px 20px;text-align:center;color:#71717a;font-size:13px;">暂无使用数据</div>';
+          return;
+        }
+        let totalPrompt = 0, totalCompletion = 0, totalOverall = 0;
+        const cards = entries.map(([k, v]) => {
+          const pc = v.prompt_cost || 0, cc = v.completion_cost || 0, tc = v.total_cost || (pc + cc);
+          totalPrompt += pc; totalCompletion += cc; totalOverall += tc;
+          return { name: k, pc, cc, tc };
+        }).sort((a, b) => b.tc - a.tc);
+
+        let html = `
+          <div class="stat-card" style="background:rgba(99,102,241,0.08);border-color:rgba(99,102,241,0.3);">
+            <div class="stat-card-header">
+              <span class="stat-card-title" style="color:#a5b4fc;">总消耗</span>
+              <span class="stat-card-total" style="color:#c7d2fe;">${totalOverall.toLocaleString()}</span>
+            </div>
+            <div class="stat-detail-row"><span>Prompt</span><span class="stat-detail-mono">${totalPrompt.toLocaleString()}</span></div>
+            <div class="stat-detail-row"><span>Completion</span><span class="stat-detail-mono">${totalCompletion.toLocaleString()}</span></div>
+          </div>
+          <div class="stat-section-title">各会话详情</div>
+        `;
+        const maxVal = cards[0]?.tc || 1;
+        cards.forEach(item => {
+          const pct = (item.tc / maxVal) * 100;
+          html += `
+            <div class="stat-card">
+              <div class="stat-card-header">
+                <span class="stat-card-title">${esc(item.name)}</span>
+                <span class="stat-card-total">${item.tc.toLocaleString()}</span>
+              </div>
+              <div class="stat-bar" style="margin-bottom:8px;"><div class="stat-bar-fill" style="width:${pct}%;background:linear-gradient(90deg,#6366f1,#8b5cf6);"></div></div>
+              <div class="stat-detail-row"><span style="color:#71717a;">Prompt</span><span class="stat-detail-mono">${item.pc.toLocaleString()}</span></div>
+              <div class="stat-detail-row"><span style="color:#71717a;">Completion</span><span class="stat-detail-mono">${item.cc.toLocaleString()}</span></div>
+            </div>
+          `;
+        });
+        container.innerHTML = html;
+      } catch (e) {
+        container.innerHTML = `<div style="padding:40px 20px;text-align:center;color:#f87171;font-size:13px;">加载失败: ${esc(e.message)}</div>`;
+      }
+    }
+    els.dataStatsBtn.onclick = openStatsOverlay;
+
+    // ============ 频道管理弹窗 ============
+    function openChannelOverlay() {
+      els.channelOverlay.classList.add('open');
+      els.overlayBackdrop.classList.add('show');
+      renderChannelManager();
+    }
+    function renderChannelManager() {
+      const container = els.channelOverlayBody;
+      let html = '';
+      if (!state.settings.channels || !state.settings.channels.length) {
+        html += '<div style="color:#71717a;font-size:13px;text-align:center;padding:20px;">暂无频道</div>';
+      } else {
+        html += '<div class="channel-hint"><i class="fa-solid fa-circle-info" style="margin-right:4px;"></i>修改后请点击底部"保存到系统配置"生效</div>';
+        html += state.settings.channels.map((c, idx) => `
+          <div class="channel-item" data-idx="${idx}">
+            <div class="channel-item-header">
+              <span class="channel-item-name"><i class="fa-solid fa-hashtag" style="color:#71717a;margin-right:4px;"></i>${esc(c.name)}</span>
+              <button class="sidebar-btn" onclick="deleteChannel(${idx})" style="color:#f87171;width:24px;height:24px;" title="删除"><i class="fa-solid fa-trash-can"></i></button>
+            </div>
+            <div class="channel-field">
+              <label>名称</label>
+              <input type="text" class="ch-name" value="${esc(c.name)}" placeholder="频道名称">
+            </div>
+            <div class="channel-field">
+              <label>脚本路径</label>
+              <input type="text" class="ch-path" value="${esc(c.path || '')}" placeholder="如: sys/tg_bot.py">
+            </div>
+            <div class="channel-field">
+              <label>状态</label>
+              <select class="ch-status">
+                <option value="active" ${c.status === 'active' ? 'selected' : ''}>active</option>
+                <option value="inactive" ${c.status === 'inactive' ? 'selected' : ''}>inactive</option>
+              </select>
+            </div>
+            <div class="channel-actions">
+              <button class="channel-btn save" onclick="saveChannel(${idx})"><i class="fa-solid fa-check"></i> 更新</button>
+            </div>
+          </div>
+        `).join('');
+      }
+      html += `<button class="add-channel-btn" onclick="addChannelForm()"><i class="fa-solid fa-plus"></i> 添加新频道</button>`;
+      if (state.settings.channels && state.settings.channels.length) {
+        html += `<button class="save-btn" onclick="persistChannelSettings()" style="margin-top:4px;"><i class="fa-solid fa-floppy-disk"></i> 保存到系统配置</button>`;
+      }
+      container.innerHTML = html;
+    }
+    function addChannelForm() {
+      const container = els.channelOverlayBody;
+      const addBtn = container.querySelector('.add-channel-btn');
+      if (addBtn) addBtn.remove();
+      const div = document.createElement('div');
+      div.className = 'channel-item';
+      div.style.borderColor = '#6366f1';
+      div.innerHTML = `
+        <div class="channel-item-header"><span class="channel-item-name" style="color:#a5b4fc;">新频道</span></div>
+        <div class="channel-field"><label>名称</label><input type="text" class="ch-name-new" placeholder="频道名称"></div>
+        <div class="channel-field"><label>脚本路径</label><input type="text" class="ch-path-new" placeholder="如: sys/tg_bot.py"></div>
+        <div class="channel-field"><label>状态</label><select class="ch-status-new"><option value="active">active</option><option value="inactive">inactive</option></select></div>
+        <div class="channel-actions">
+          <button class="channel-btn save" onclick="commitNewChannel()"><i class="fa-solid fa-check"></i> 创建</button>
+          <button class="channel-btn secondary" onclick="renderChannelManager()"><i class="fa-solid fa-times"></i> 取消</button>
+        </div>
+      `;
+      container.appendChild(div);
+    }
+    function commitNewChannel() {
+      const name = $('.ch-name-new')?.value.trim();
+      const path = $('.ch-path-new')?.value.trim() || '';
+      const status = $('.ch-status-new')?.value || 'active';
+      if (!name) { toast('频道名称不能为空', 'error'); return; }
+      if (state.settings.channels.find(c => c.name === name)) { toast('频道名称已存在', 'error'); return; }
+      state.settings.channels.push({ name, path, status, user_count: 1 });
+      toast('频道已添加', 'success');
+      renderChannelManager();
+    }
+    function saveChannel(idx) {
+      const item = els.channelOverlayBody.querySelector(`[data-idx="${idx}"]`);
+      if (!item) return;
+      const name = item.querySelector('.ch-name')?.value.trim();
+      const path = item.querySelector('.ch-path')?.value.trim();
+      const status = item.querySelector('.ch-status')?.value;
+      if (!name) { toast('频道名称不能为空', 'error'); return; }
+      if (state.settings.channels.find((c, i) => c.name === name && i !== idx)) { toast('频道名称已存在', 'error'); return; }
+      state.settings.channels[idx] = { ...state.settings.channels[idx], name, path, status };
+      toast('频道已更新', 'success');
+      renderChannelManager();
+    }
+    function deleteChannel(idx) {
+      if (!confirm('确定删除此频道？')) return;
+      state.settings.channels.splice(idx, 1);
+      toast('频道已删除', 'success');
+      renderChannelManager();
+    }
+    async function persistChannelSettings() {
+      await saveSettings();
+      toast('频道配置已保存到系统', 'success');
+    }
 
     // ============ 设置表单 ============
     function renderSettingsForm(s) {
@@ -1662,16 +2059,18 @@
     </div>
     <div class="setting-group">
       <div class="setting-group-title">频道配置</div>
-      <div class="setting-row"><textarea id="s-channels" rows="4">${esc(JSON.stringify(s.channels || [], null, 2))}</textarea></div>
+      <div class="setting-row">
+        <button class="save-btn" onclick="openChannelOverlay()" style="margin-top:0;background:#3f3f46;font-size:12px;"><i class="fa-solid fa-sliders"></i> 打开频道管理器</button>
+        <div style="font-size:11px;color:#71717a;margin-top:6px;">当前频道数: ${(s.channels || []).length}</div>
+      </div>
     </div>
   `;
     }
     async function loadSettings() {
-      try { const r = await axios.post(API + '/settings', { updata: false }); state.settings = r.data; } catch (e) { toast('加载设置失败', 'error'); }
+      try { const r = await axios.post(API + '/settings', { updata: false }); state.settings = r.data; state.channels = state.settings.channels || []; } catch (e) { toast('加载设置失败', 'error'); }
       renderSettingsForm(state.settings);
     }
     async function saveSettings() {
-      let channels = []; try { channels = JSON.parse($('#s-channels')?.value || '[]'); } catch (e) { }
       const ns = {
         user_name: $('#s-user_name')?.value || '', agent_name: $('#s-agent_name')?.value || '',
         workspace: $('#s-workspace')?.value || '', server_address: $('#s-server_address')?.value || '',
@@ -1680,12 +2079,12 @@
         auto_expand_files: $('#s-auto_expand_files')?.checked !== false,
         max_mpc_rounds: parseInt($('#s-max_mpc_rounds')?.value) || 5,
         max_context: parseInt($('#s-max_context')?.value) || 1048576,
-        channels
+        channels: state.settings.channels || []
       };
       state.settings = ns;
       try {
         const r = await axios.post(API + '/settings', { updata: true, settings: ns });
-        state.settings = r.data; toast('设置已保存', 'success'); log('配置更新成功', 'success');
+        state.settings = r.data; state.channels = state.settings.channels || []; toast('设置已保存', 'success'); log('配置更新成功', 'success');
         await getModels();
       } catch (e) { toast('保存失败', 'error'); }
     }
@@ -2058,15 +2457,24 @@
       document.getElementById('tools-enabled-count').textContent = `${enabledCount}/${state.tools.length}`;
       const filter = (document.getElementById('tools-search-input')?.value || '').toLowerCase();
       const filtered = filter ? state.tools.filter(t => t.name.toLowerCase().includes(filter) || (t.description || '').toLowerCase().includes(filter)) : state.tools;
-      els.toolsToggleList.innerHTML = filtered.map(t =>
-        `<div class="tool-toggle-card" data-tool-name="${esc(t.name)}">
-      <div class="tool-toggle-card-top">
-        <div class="tool-toggle-name">${esc(t.name)}</div>
-        <label class="tool-toggle-switch"><input type="checkbox" ${t.enabled !== false ? 'checked' : ''} onchange="toggleTool('${esc(t.name)}',this.checked)"><span class="toggle-track"></span></label>
+      els.toolsToggleList.innerHTML = filtered.map(t => `
+    <div class="tool-toggle-card p-3 border border-[#27272a] bg-[#18181b] rounded-lg hover:border-[#3f3f46] transition-all">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-xs font-semibold text-gray-200 truncate">${esc(t.name)}</span>
+        <label class="relative inline-flex items-center cursor-pointer">
+          <input type="checkbox" class="sr-only peer" ${t.enabled !== false ? 'checked' : ''} 
+                 onchange="toggleTool('${esc(t.name)}', this.checked)">
+          <div class="w-8 h-4 bg-gray-600 rounded-full peer 
+                      peer-checked:bg-indigo-500 
+                      after:content-[''] after:absolute after:top-[2px] after:left-[2px] 
+                      after:bg-white after:rounded-full after:h-3 after:w-3 
+                      after:transition-all peer-checked:after:translate-x-4">
+          </div>
+        </label>
       </div>
-      <div class="tool-toggle-desc">${esc(t.description || '无描述')}</div>
-    </div>`
-      ).join('');
+      <p class="text-[10px] text-gray-500 line-clamp-2 leading-relaxed">${esc(t.description || '无描述')}</p>
+    </div>
+  `).join('');
       // 如果没有匹配工具
       if (filtered.length === 0) {
         els.toolsToggleList.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:24px 8px;color:#52525b;font-size:12px;">没有匹配的工具</div>';
@@ -2078,9 +2486,13 @@
     async function toggleTool(name, enabled) {
       try {
         await axios.post(API + '/tools/toggle', { name, enabled });
-        const t = state.tools.find(t => t.name === name); if (t) t.enabled = enabled;
+        const t = state.tools.find(t => t.name === name);
+        if (t) t.enabled = enabled;
+        renderToolToggles();
         toast(`工具 ${name} ${enabled ? '已启用' : '已禁用'}`, 'success');
-      } catch (e) { toast('切换失败', 'error'); }
+      } catch (e) {
+        toast('切换失败', 'error');
+      }
     }
     async function loadTodos() {
       try { const r = await axios.get(API + '/todos'); state.todos = r.data || []; renderTodos(); } catch (e) { }
@@ -2115,33 +2527,19 @@
       try { const r = await axios.get(API + '/channels'); state.channels = r.data || []; renderChannels(); renderSessions(); } catch (e) { }
     }
     function renderChannels() {
-      els.channelsList.innerHTML = state.channels.map(c =>
+      if (!state.channels?.length) {
+        els.channelsList.innerHTML = '<div style="color:#71717a;font-size:13px;text-align:center;padding:16px;">暂无频道</div>';
+        return;
+      }
+      els.channelsList.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <span style="font-size:11px;color:#71717a;">共 ${state.channels.length} 个频道</span>
+          <button class="sidebar-btn" onclick="openChannelOverlay()" style="width:auto;padding:0 8px;font-size:12px;color:#a1a1aa;"><i class="fa-solid fa-sliders"></i> 管理</button>
+        </div>
+      ` + state.channels.map(c =>
         `<div style="padding:8px 10px;background:#18181b;border-radius:6px;margin-bottom:4px;font-size:13px;color:#d4d4d8;cursor:pointer;display:flex;align-items:center;gap:8px;border:1px solid #27272a;" onclick="switchSession('${esc(c.name)}')"><i class="fa-solid fa-hashtag" style="color:#71717a;"></i> ${esc(c.name)} <span style="color:${c.status === 'active' ? '#4ade80' : '#71717a'};font-size:10px;margin-left:auto;">${esc(c.status || 'unknown')}</span></div>`
       ).join('');
     }
-
-    // ============ 统计 ============
-    async function loadStatsInline() {
-      try {
-        const r = await axios.get(API + '/data');
-        const usages = r.data?.usages || {};
-        let html = '';
-        if (!Object.keys(usages).length) { html = '<div style="color:#71717a;text-align:center;padding:10px;">暂无数据</div>'; }
-        else {
-          let totalOverall = 0, dataArr = [];
-          for (const [k, v] of Object.entries(usages)) { const pc = v.prompt_cost || 0, cc = v.completion_cost || 0, tc = v.total_cost || pc + cc; totalOverall += tc; dataArr.push({ name: k, prompt_cost: pc, completion_cost: cc, total_cost: tc }); }
-          dataArr.sort((a, b) => b.total_cost - a.total_cost);
-          const maxTotal = dataArr[0]?.total_cost || 1;
-          html += `<div style="text-align:center;margin-bottom:10px;"><span style="font-size:10px;color:#71717a;">总消耗</span><br><span style="font-size:22px;font-weight:700;color:#818cf8;">${totalOverall.toLocaleString()}</span></div>`;
-          dataArr.forEach(item => {
-            const pct = maxTotal > 0 ? (item.total_cost / maxTotal) * 100 : 0;
-            html += `<div class="stat-row"><span>${esc(item.name)}</span><span style="font-family:monospace;font-size:12px;">${item.total_cost.toLocaleString()}</span></div><div class="stat-bar"><div class="stat-bar-fill" style="width:${pct}%;"></div></div>`;
-          });
-        }
-        els.statsContainerInline.innerHTML = html;
-      } catch (e) { }
-    }
-    els.dataStatsBtn.onclick = () => { openOverlay(); setTimeout(() => { $$('.overlay-tab').forEach(b => b.classList.remove('active')); $('[data-otab="logs"]').classList.add('active'); $$('.overlay-panel').forEach(p => p.classList.remove('active')); $('#opanel-logs').classList.add('active'); loadStatsInline(); }, 100); };
 
     // ============ 事件绑定 ============
     els.newSessionBtn.onclick = newSession;
