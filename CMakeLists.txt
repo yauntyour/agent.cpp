@@ -56,14 +56,8 @@ install(FILES
     DESTINATION workspace
 )
 
-# 4. 目录资源放入 workspace/ 下的对应子目录
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/sys/ DESTINATION workspace/sys)
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tools/ DESTINATION workspace/tools)
-
-# 5. 运行时需要的空目录也放在 workspace/ 下
-install(DIRECTORY DESTINATION workspace/sessions)
-install(DIRECTORY DESTINATION workspace/memorys)
-install(DIRECTORY DESTINATION workspace/assets)
+# 4. 打包workspace
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/workspace/ DESTINATION workspace/)
 
 # ---------- CPack ----------
 set(CPACK_PACKAGE_NAME ${PROJECT_NAME})
