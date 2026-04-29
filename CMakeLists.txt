@@ -49,14 +49,7 @@ install(TARGETS app RUNTIME DESTINATION .)
 # 2. settings.json 单独放在根目录
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/settings.json DESTINATION .)
 
-# 3. 其余资源文件放入 workspace/ 子目录
-install(FILES
-    ${CMAKE_CURRENT_SOURCE_DIR}/webui.html
-    ${CMAKE_CURRENT_SOURCE_DIR}/agent.txt
-    DESTINATION workspace
-)
-
-# 4. 打包workspace
+# 3. 打包workspace
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/workspace/ DESTINATION workspace/)
 
 # ---------- CPack ----------
