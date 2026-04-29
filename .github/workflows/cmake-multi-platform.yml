@@ -209,7 +209,7 @@ jobs:
           # 比如：nightly-123
           tag_name: nightly-${{ github.run_number }}
           # 名字可以加上运行编号，方便区分
-          name: agent.cpp Nightly Build (Run #${{ github.run_number }})
+          name: agent.cpp Nightly Build Run #${{ github.run_number }}
           # 关键修改：用 body_path 而不是 body，这样才能读取 release.md 文件内容
           body_path: release.md
           files: artifacts/**/*
