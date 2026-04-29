@@ -434,16 +434,19 @@
     }
 
     .msg-bubble.user-bub {
-      background: #4f46e5;
-      color: #fff;
-      border-bottom-right-radius: 4px;
+      background: rgba(79, 70, 229, 0.06);
+      border: 1px solid rgba(99, 102, 241, 0.4);
+      color: #e4e4e7;
+      border-radius: 10px;
     }
 
     .msg-bubble.ai-bub {
-      background: #18181b;
       color: #d4d4d8;
-      border: 1px solid #27272a;
-      border-bottom-left-radius: 4px;
+      max-width: 85%;
+      padding: 0;
+      background: transparent;
+      border: none;
+      border-radius: 0;
     }
 
     /* 思考过程 */
@@ -700,7 +703,108 @@
       transform: scale(1.02);
     }
 
-    /* 使用量 */
+    /* 系统输出折叠块 */
+    .sys-output-block {
+      margin: 8px 0;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid #27272a;
+      background: #0c0c0e;
+    }
+    .sys-output-block summary {
+      padding: 8px 12px;
+      font-size: 12px;
+      cursor: pointer;
+      user-select: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(245, 158, 11, 0.04);
+      list-style: none;
+    }
+    .sys-output-block summary::-webkit-details-marker {
+      display: none;
+    }
+    .sys-output-block summary i.fa-chevron-right {
+      transition: transform 0.2s;
+    }
+    .sys-output-block[open] summary i.fa-chevron-right {
+      transform: rotate(90deg);
+    }
+    .sys-output-block .sysout-inner {
+      padding: 0;
+      border-top: 1px solid #1f1f22;
+    }
+    .sys-output-block .sysout-inner pre {
+      margin: 0;
+      border: none;
+      border-radius: 0;
+      background: #0c0c0e;
+    }
+    .sysout-status.ok { color: #4ade80; }
+    .sysout-status.err { color: #f87171; }
+
+    /* 加载覆盖层 */
+    #loading-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(9, 9, 11, 0.75);
+      z-index: 200;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      backdrop-filter: blur(4px);
+      cursor: not-allowed;
+    }
+    #loading-overlay.active {
+      display: flex;
+    }
+    .loading-spinner {
+      text-align: center;
+    }
+    .loading-spinner i {
+      font-size: 48px;
+      color: #6366f1;
+    }
+    .loading-spinner .loading-text {
+      margin-top: 16px;
+      color: #a1a1aa;
+      font-size: 14px;
+    }
+    .loading-spinner .loading-sub {
+      margin-top: 6px;
+      color: #52525b;
+      font-size: 12px;
+    }
+
+    /* 滚动到底部按钮 */
+    #scroll-bottom-btn {
+      position: absolute;
+      bottom: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 5;
+      padding: 8px 16px;
+      background: #18181b;
+      border: 1px solid #27272a;
+      border-radius: 20px;
+      color: #a1a1aa;
+      font-size: 12px;
+      cursor: pointer;
+      display: none;
+      align-items: center;
+      gap: 6px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+      transition: all 0.2s;
+    }
+    #scroll-bottom-btn:hover {
+      background: #27272a;
+      color: #e4e4e7;
+    }
+    #scroll-bottom-btn.show {
+      display: flex;
+    }
+
     .usage-footer {
       margin-top: 8px;
       padding-top: 8px;
@@ -714,7 +818,7 @@
 
     /* 输入区 */
     .input-area {
-      padding: 12px 16px 16px;
+      padding: 6px 16px 12px;
       flex-shrink: 0;
     }
 
@@ -1023,7 +1127,7 @@
       resize: vertical;
     }
 
-    .setting-row .check-row {
+    .setting-row.check-row {
       display: flex;
       align-items: center;
       gap: 8px;
@@ -1661,10 +1765,11 @@
       </header>
 
       <div id="messages-container">
+        <button id="scroll-bottom-btn"><i class="fa-solid fa-arrow-down"></i> 滚动到底部</button>
         <div class="empty-state">
-          <i class="fa-solid fa-bolt"></i>
-          <div style="font-size:16px;font-weight:500;color:#71717a;">Yauntyours WebUI</div>
-          <div style="font-size:13px;margin-top:4px;">准备就绪，开始对话。</div>
+          <i class="fa-solid fa-comments"></i>
+          <div style="font-size:16px;font-weight:500;color:#71717a;">未选择会话</div>
+          <div style="font-size:13px;margin-top:4px;">请从左侧选择一个会话，或创建新会话。</div>
         </div>
       </div>
 
@@ -1687,6 +1792,17 @@
               <span class="toggle-track"></span>
               深度思考
             </label>
+            <div id="context-usage" style="display:none;align-items:center;gap:8px;">
+              <div id="memory-indicator" title="记忆摘要" style="font-size:12px;">
+                <i class="fa-solid fa-brain" style="color:#71717a;"></i>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#71717a;">
+                <span id="context-bar-container" style="width:70px;height:4px;background:#3f3f46;border-radius:2px;overflow:hidden;display:inline-block;vertical-align:middle;">
+                  <span id="context-bar-fill" style="display:block;height:100%;width:0%;background:#6366f1;border-radius:2px;transition:width 0.3s;"></span>
+                </span>
+                <span id="context-text" style="font-family:'JetBrains Mono',monospace;">0 / 0</span>
+              </div>
+            </div>
             <span style="font-size:11px;color:#52525b;">Enter 发送 / Shift+Enter 换行</span>
           </div>
         </div>
@@ -1775,6 +1891,15 @@
     </aside>
   </div>
 
+  <!-- 加载覆盖层 -->
+  <div id="loading-overlay">
+    <div class="loading-spinner">
+      <i class="fa-solid fa-circle-notch fa-spin"></i>
+      <div class="loading-text">加载中...</div>
+      <div class="loading-sub">正在切换会话，请稍候</div>
+    </div>
+  </div>
+
   <div id="toast-container"></div>
 
   <script>
@@ -1786,7 +1911,10 @@
       thinkMode: false, tools: [], todos: [], channels: [],
       isTyping: false, pendingImages: [],
       assistantMsgId: null,
-      streamBuffers: { content: '', thinking: '', thinkings: [], toolOutputs: [] }
+      streamBuffers: { content: '', thinking: '', thinkings: [], toolOutputs: [] },
+      contextUsage: { total: 0, max: 1048576 },
+      memoryActive: false,
+      _scrollAtBottom: true
     };
     const API = '/api';
 
@@ -1819,6 +1947,12 @@
       fbListing: $('#fb-listing'),
       fbRefresh: $('#fb-refresh'),
       fbCollapse: $('#fb-collapse'),
+      loadingOverlay: $('#loading-overlay'),
+      scrollBottomBtn: $('#scroll-bottom-btn'),
+      contextUsage: $('#context-usage'),
+      contextBarFill: $('#context-bar-fill'),
+      contextText: $('#context-text'),
+      memoryIndicator: $('#memory-indicator'),
     };
 
     // ============ 工具函数 ============
@@ -1839,7 +1973,20 @@
     function esc(s) { if (!s) return ''; return s.replace(/[&<>]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[m]); }
     function fixToolTags(text) {
       if (!text) return text;
-      return text.replace(/<system_output>([\s\S]*?)<\/system_output>/g, (_, c) => '\n```\n' + c.trim() + '\n```\n');
+      return text.replace(/<system_output>([\s\S]*?)<\/system_output>/g, (_, content) => {
+        const trimmed = content.trim();
+        const hasErr = trimmed.includes('[TOOL_ERR]');
+        const hasDone = trimmed.includes('[TOOL_DONE]') || trimmed.includes('[CS_DONE]');
+        let statusIcon = '', statusClass = '';
+        if (hasErr) { statusIcon = '✗'; statusClass = 'err'; }
+        else if (hasDone) { statusIcon = '✓'; statusClass = 'ok'; }
+        const cleanContent = trimmed
+          .replace(/\[TOOL_DONE\]\n?/g, '')
+          .replace(/\[TOOL_ERR\]\n?/g, '')
+          .replace(/\[CS_DONE\]\n?/g, '')
+          .trim();
+        return `\n<details class="sys-output-block">\n<summary>\n<i class="fa-solid fa-chevron-right"></i>\n<i class="fa-solid fa-terminal" style="font-size:11px;"></i>\n<span style="margin-left:4px;font-weight:500;font-size:12px;">系统输出</span>\n<span style="margin-left:auto;font-size:12px;" class="sysout-status ${statusClass}">${statusIcon}</span>\n</summary>\n<div class="sysout-inner">\n<pre><code>${esc(cleanContent)}</code></pre>\n</div>\n</details>\n`;
+      });
     }
 
     // ============ 覆盖层管理 ============
@@ -2123,12 +2270,70 @@
     }
     window.removePending = (i) => { state.pendingImages.splice(i, 1); renderImagePreviews(); };
 
+    // ============ 加载动画 ============
+    function showLoading(text) {
+      const overlay = els.loadingOverlay;
+      if (text) overlay.querySelector('.loading-text').textContent = text;
+      overlay.classList.add('active');
+    }
+    function hideLoading() {
+      els.loadingOverlay.classList.remove('active');
+      els.loadingOverlay.querySelector('.loading-text').textContent = '加载中...';
+    }
+
+    // ============ 滚动冻结控制 ============
+    function isScrolledToBottom() {
+      const c = els.messagesContainer;
+      return c.scrollHeight - c.scrollTop - c.clientHeight < 80;
+    }
+    function scrollToBottom() {
+      els.messagesContainer.scrollTop = els.messagesContainer.scrollHeight;
+    }
+    function updateScrollState() {
+      const atBottom = isScrolledToBottom();
+      state._scrollAtBottom = atBottom;
+      els.scrollBottomBtn.classList.toggle('show', !atBottom);
+    }
+    els.messagesContainer.addEventListener('scroll', updateScrollState);
+    els.scrollBottomBtn.onclick = () => { scrollToBottom(); els.scrollBottomBtn.classList.remove('show'); };
+
+    // ============ 上下文使用显示 ============
+    function updateContextUsage(usage) {
+      if (!usage || !state.settings.max_context) {
+        els.contextUsage.style.display = 'none';
+        return;
+      }
+      els.contextUsage.style.display = 'flex';
+      const total = usage.total_cost || usage.prompt_cost + usage.completion_cost || 0;
+      const max = state.settings.max_context || 1048576;
+      const pct = Math.min(100, (total / max) * 100);
+      els.contextBarFill.style.width = pct + '%';
+      els.contextText.textContent = `${total.toLocaleString()} / ${max.toLocaleString()}`;
+    }
+    function updateMemoryIndicator(active) {
+      state.memoryActive = active;
+      const icon = els.memoryIndicator.querySelector('i');
+      if (active) {
+        icon.style.color = '#818cf8';
+        els.memoryIndicator.title = '记忆摘要已启用';
+      } else {
+        icon.style.color = '#71717a';
+        els.memoryIndicator.title = '记忆摘要未启用';
+      }
+    }
+
     // ============ 会话管理 ============
     async function loadSessions() {
       try {
         const r = await axios.get(API + '/session'); state.sessions = r.data.session_list || []; renderSessions();
-        if (state.sessions.length > 0 && !state.currentSessionId) await switchSession(state.sessions[0]);
-        else if (state.sessions.length === 0) await newSession();
+        if (state.sessions.length > 0 && !state.currentSessionId) {
+          await switchSession(state.sessions[0]);
+        } else if (state.sessions.length === 0) {
+          await newSession();
+        } else {
+          state.currentSessionId = null;
+          els.currentSessionIdDisplay.textContent = 'ID: -';
+        }
       } catch (e) { log('加载会话列表失败', 'error'); }
     }
     function renderSessions() {
@@ -2147,13 +2352,21 @@
     }
     async function switchSession(sid) {
       if (state.isTyping) { toast('请等待当前生成完成', 'error'); return; }
+      showLoading('切换会话中...');
       try {
         const r = await axios.post(API + '/session/msg', { session_id: sid });
         state.currentSessionId = sid;
         els.currentSessionIdDisplay.textContent = `ID: ${sid}`;
         state.messages = parseMessages(r.data.messages || []);
         renderMessages(); renderSessions(); log(`已切换到: ${sid}`, 'success');
+        // 检查是否有记忆摘要
+        const hasMemory = state.messages.some(m => m.role === 'memory');
+        updateMemoryIndicator(hasMemory);
+        // 估算上下文用量
+        const totalChars = JSON.stringify(r.data.messages || []).length;
+        updateContextUsage({ total_cost: totalChars });
       } catch (e) { toast('无法加载会话', 'error'); }
+      finally { hideLoading(); }
     }
     async function newSession() {
       if (state.isTyping) { toast('请等待当前生成完成', 'error'); return; }
@@ -2172,11 +2385,13 @@
     async function clearSession() {
       if (!state.currentSessionId || !confirm('清空当前会话的全部上下文？')) return;
       try { await axios.post(API + '/session/clear'); await switchSession(state.currentSessionId); toast('上下文已清空', 'success'); } catch (e) { toast('清空失败', 'error'); }
+      updateContextUsage(null);
+      updateMemoryIndicator(false);
     }
     async function genMemory() {
       if (!state.currentSessionId || !confirm('为当前会话生成记忆摘要？')) return;
       const btn = els.summarySessionBtn, orig = btn.innerHTML; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; btn.disabled = true;
-      try { const r = await axios.post(API + '/session/memory'); if (r.data.status === 'done') toast('记忆已更新', 'success'); } catch (e) { toast('记忆生成失败', 'error'); }
+      try { const r = await axios.post(API + '/session/memory'); if (r.data.status === 'done') { toast('记忆已更新', 'success'); updateMemoryIndicator(true); } } catch (e) { toast('记忆生成失败', 'error'); }
       finally { btn.innerHTML = orig; btn.disabled = false; }
     }
 
@@ -2209,20 +2424,37 @@
       if (!Array.isArray(raw)) return [];
       const uname = state.settings.user_name || 'Yauntyours';
       const aname = state.settings.agent_name || 'assistant';
-      return raw.map(m => {
+      let hasMemory = false;
+      const parsed = raw.filter(m => m.role !== 'system').map(m => {
         let role = 'ai', content = '', images = [];
         if (m.role === uname || m.role === 'user') role = 'user';
-        else if (m.role === aname || m.role === 'assistant' || m.role === 'tool') role = 'ai';
+        else if (m.role === aname || m.role === 'assistant' || m.role === 'tool') {
+          role = 'ai';
+        } else if (m.role === 'memory') {
+          hasMemory = true;
+          return null;
+        }
         if (typeof m.content === 'string') content = m.content;
         else if (Array.isArray(m.content)) { m.content.forEach(p => { if (p.type === 'text') content += p.text + '\n'; else if (p.type === 'image_url') { const u = typeof p.image_url === 'string' ? p.image_url : p.image_url.url; images.push(u); } }); }
         return { role, content: content.trim(), images };
-      });
+      }).filter(m => m !== null);
+      updateMemoryIndicator(hasMemory);
+      return parsed;
     }
     function renderMessages() {
       els.messagesContainer.innerHTML = '';
-      if (!state.messages.length) { els.messagesContainer.innerHTML = `<div class="empty-state"><i class="fa-solid fa-comments"></i><div style="font-size:16px;font-weight:500;color:#71717a;">上下文为空</div><div style="font-size:13px;margin-top:4px;">开始一段新对话吧。</div></div>`; return; }
+      if (!state.messages.length) {
+        if (!state.currentSessionId) {
+          els.messagesContainer.innerHTML = `<div class="empty-state"><i class="fa-solid fa-comments"></i><div style="font-size:16px;font-weight:500;color:#71717a;">未选择会话</div><div style="font-size:13px;margin-top:4px;">请从左侧选择一个会话，或创建新会话。</div></div>`;
+        } else {
+          els.messagesContainer.innerHTML = `<div class="empty-state"><i class="fa-solid fa-comments"></i><div style="font-size:16px;font-weight:500;color:#71717a;">上下文为空</div><div style="font-size:13px;margin-top:4px;">开始一段新对话吧。</div></div>`;
+        }
+        return;
+      }
       state.messages.forEach(m => appendMessage(m));
-      els.messagesContainer.scrollTop = els.messagesContainer.scrollHeight;
+      if (isScrolledToBottom()) {
+        els.messagesContainer.scrollTop = els.messagesContainer.scrollHeight;
+      }
     }
 
     function appendMessage(msg) {
@@ -2316,7 +2548,9 @@
         bubble.appendChild(imgs);
       }
 
-      els.messagesContainer.scrollTop = els.messagesContainer.scrollHeight;
+      if (isScrolledToBottom()) {
+        els.messagesContainer.scrollTop = els.messagesContainer.scrollHeight;
+      }
     }
 
     function addCopyButtons(container) {
@@ -2332,7 +2566,12 @@
     async function sendMessageStream() {
       const content = els.userInput.value.trim();
       const imgs = [...state.pendingImages];
-      if ((!content && !imgs.length) || state.isTyping || !state.currentSessionId) return;
+      if ((!content && !imgs.length) || state.isTyping) return;
+      if (!state.currentSessionId) {
+        toast('请先选择一个会话', 'error');
+        log('请先在左侧选择一个会话', 'error');
+        return;
+      }
 
       // 1. 添加用户消息
       const userMsg = { role: 'user', content, images: imgs };
@@ -2421,6 +2660,12 @@
           break;
         case 'done':
           updateAssistantMsg(msgId, { content: sb.content, _typing: false, _thinkings: sb.thinkings, _toolCalls: sb.toolOutputs, _usage: ev.usage });
+          // 更新上下文使用显示
+          if (ev.usage) {
+            state.contextUsage.total = ev.usage.total_cost || (ev.usage.prompt_cost + ev.usage.completion_cost) || 0;
+            state.contextUsage.max = state.settings.max_context || 1048576;
+            updateContextUsage({ total_cost: state.contextUsage.total });
+          }
           // 更新本地消息状态
           state.messages = state.messages.filter(m => m._id !== msgId);
           const finalMsg = { role: 'ai', content: sb.content, images: [], _thinkings: sb.thinkings, _toolCalls: sb.toolOutputs, _usage: ev.usage };
@@ -2750,9 +2995,8 @@
       state.user = state.settings.user_name || 'User'; els.currentUserDisplay.textContent = state.user;
       state.agentName = state.settings.agent_name || 'assistant';
       document.title = state.user + ' · Chat WebUI';
+      state.contextUsage.max = state.settings.max_context || 1048576;
       await getModels(); await loadTools(); await loadTodos(); await loadChannels(); await loadSessions();
-      // 如果有 settings.stream, 预设思考模式
-      if (state.settings.stream) els.thinkToggle.checked = false;
       // 初始化文件浏览器设置
       fb.autoExpand = state.settings.auto_expand_files !== false;
       fb.updateAutoToggleUI();

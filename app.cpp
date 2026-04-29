@@ -210,9 +210,19 @@ namespace app
     {
         std::string build_http_response(int status_code, const std::string &content_type, const std::string &body, bool cors = true)
         {
+            std::string final_content_type = "";
+            // 自动为常见文本类型添加 charset，避免中文乱码
+            if (final_content_type.find("application/json") != std::string::npos ||
+                final_content_type.find("text/") != std::string::npos)
+            {
+                if (final_content_type.find("charset=") == std::string::npos)
+                {
+                    final_content_type += "; charset=utf-8";
+                }
+            }
             std::ostringstream oss;
             oss << "HTTP/1.1 " << status_code << " " << (status_code == 200 ? "OK" : "Not Found") << "\r\n";
-            oss << "Content-Type: " << content_type << "\r\n";
+            oss << "Content-Type: " << content_type + final_content_type << "\r\n";
             oss << "Content-Length: " << body.length() << "\r\n";
             if (cors)
             {
@@ -352,7 +362,7 @@ namespace app
                 if (is_channel)
                 {
                     output = build_http_response(403, "application/json",
-                        R"({"error":"Cannot delete a channel session"})");
+                                                 R"({"error":"Cannot delete a channel session"})");
                     return rt::FLAG_ERROR;
                 }
 
@@ -512,7 +522,7 @@ namespace app
                 tools_list_str = enabled_tools.dump();
 
                 output = build_http_response(200, "application/json",
-                    json{{"status", "OK"}, {"name", tool_name}, {"enabled", enabled}}.dump());
+                                             json{{"status", "OK"}, {"name", tool_name}, {"enabled", enabled}}.dump());
                 return rt::FLAG_DONE;
             }
             catch (const std::exception &e)
@@ -530,7 +540,7 @@ namespace app
                 std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
                 json request = json::parse(body);
                 std::string req_path = request.value("path", "");
-    
+
                 std::string ws = run_unit::settings["workspace"].get<std::string>();
                 std::string ws_abs = std::filesystem::absolute(ws).string();
                 std::string full_path = ws_abs;
@@ -539,20 +549,20 @@ namespace app
                     full_path = (std::filesystem::path(ws_abs) / req_path).string();
                 }
                 full_path = std::filesystem::absolute(full_path).string();
-    
+
                 // 安全检查：不超出工作目录
                 if (full_path.find(ws_abs) != 0)
                 {
                     output = build_http_response(403, "application/json", R"({"error":"Path outside workspace"})");
                     return rt::FLAG_ERROR;
                 }
-    
+
                 if (!std::filesystem::exists(full_path))
                 {
                     output = build_http_response(404, "application/json", R"({"error":"Path not found"})");
                     return rt::FLAG_ERROR;
                 }
-    
+
                 json entries = json::array();
                 if (std::filesystem::is_directory(full_path))
                 {
@@ -565,24 +575,23 @@ namespace app
                         std::string time_str = std::asctime(std::localtime(&t));
                         if (!time_str.empty() && time_str.back() == '\n')
                             time_str.pop_back();
-    
+
                         std::string rel_path = std::filesystem::relative(entry.path(), std::filesystem::path(ws_abs)).string();
                         std::string ext = entry.path().extension().string();
-    
+
                         json entry_json = {
                             {"name", entry.path().filename().string()},
                             {"path", rel_path},
                             {"ext", ext},
                             {"is_dir", entry.is_directory()},
                             {"size", entry.is_regular_file() ? std::to_string(std::filesystem::file_size(entry.path())) : "0"},
-                            {"modified", time_str}
-                        };
+                            {"modified", time_str}};
                         entries.push_back(entry_json);
                     }
                 }
-    
+
                 output = build_http_response(200, "application/json",
-                    json{{"entries", entries}, {"cwd", req_path.empty() ? "/" : req_path}}.dump());
+                                             json{{"entries", entries}, {"cwd", req_path.empty() ? "/" : req_path}}.dump());
                 return rt::FLAG_DONE;
             }
             catch (const std::exception &e)
@@ -591,7 +600,7 @@ namespace app
                 return rt::FLAG_ERROR;
             }
         }
-    
+
         int handle_fs_used(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
             try
@@ -609,45 +618,45 @@ namespace app
                 return rt::FLAG_DONE;
             }
         }
-            int handle_todos_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+        int handle_todos_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+        {
+            try
             {
-                try
-                {
-                    json::array_t todos = json::parse(tool_unit::readFile(
-                        run_unit::settings["workspace"].get_ref<const std::string &>() + "/sys/todos.json"));
-                    output = build_http_response(200, "application/json", json(todos).dump());
-                    return rt::FLAG_DONE;
-                }
-                catch (...)
-                {
-                    output = build_http_response(500, "application/json", "[]");
-                    return rt::FLAG_ERROR;
-                }
+                json::array_t todos = json::parse(tool_unit::readFile(
+                    run_unit::settings["workspace"].get_ref<const std::string &>() + "/sys/todos.json"));
+                output = build_http_response(200, "application/json", json(todos).dump());
+                return rt::FLAG_DONE;
             }
-            int handle_todos_setting(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+            catch (...)
             {
-                try
+                output = build_http_response(500, "application/json", "[]");
+                return rt::FLAG_ERROR;
+            }
+        }
+        int handle_todos_setting(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+        {
+            try
+            {
+                size_t header_end = input.find("\r\n\r\n");
+                std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
+                json request = json::parse(body);
+                std::string id = params.count("id") ? params.at("id") : "unknown";
+                json::array_t todos = json::parse(tool_unit::readFile(
+                    run_unit::settings["workspace"].get_ref<const std::string &>() + "/sys/todos.json"));
+                for (size_t i = 0; i < todos.size(); ++i)
                 {
-                    size_t header_end = input.find("\r\n\r\n");
-                    std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
-                    json request = json::parse(body);
-                    std::string id = params.count("id") ? params.at("id") : "unknown";
-                    json::array_t todos = json::parse(tool_unit::readFile(
-                        run_unit::settings["workspace"].get_ref<const std::string &>() + "/sys/todos.json"));
-                    for (size_t i = 0; i < todos.size(); ++i)
+                    if (todos[i]["id"].get<std::string>() == id)
                     {
-                        if (todos[i]["id"].get<std::string>() == id)
-                        {
-                            todos[i] = request;
-                            tool_unit::writeFile(run_unit::settings["workspace"].get_ref<const std::string &>() +
-                                                     "/sys/todos.json",
-                                                 json(todos).dump());
-                            output = build_http_response(200, "application/json", "{}");
-                            return rt::FLAG_DONE;
-                        }
+                        todos[i] = request;
+                        tool_unit::writeFile(run_unit::settings["workspace"].get_ref<const std::string &>() +
+                                                 "/sys/todos.json",
+                                             json(todos).dump());
+                        output = build_http_response(200, "application/json", "{}");
+                        return rt::FLAG_DONE;
                     }
-                    output = build_http_response(404, "application/json", "{}");
                 }
+                output = build_http_response(404, "application/json", "{}");
+            }
             catch (...)
             {
                 output = build_http_response(500, "application/json", "{}");
@@ -891,9 +900,13 @@ namespace app
                     assistant_reply += "\r\n[Max CS MPC CALL]\r\n";
                 }
 
-                size_t old_msg_count = session_ptr->messages.size();
                 json new_messages = json::array();
-                bool after_history = false;
+                // 保存系统指令
+                new_messages.push_back({{"role", "system"}, {"content", system_prompt}});
+                new_messages.push_back({{"role", "system"}, {"content", tools_list_str}});
+                if (!session_ptr->is_memory_empty())
+                    new_messages.push_back({{"role", "memory"}, {"content", session_ptr->memory["abstracts"]}});
+                // 保存所有会话消息
                 size_t history_start = 2 + (session_ptr->is_memory_empty() ? 0 : 1); // system_prompt, tools_list, memory(opt)
                 for (size_t i = history_start; i < context.size(); ++i)
                 {
@@ -903,6 +916,17 @@ namespace app
                     new_messages.push_back(context[i]);
                 }
                 session_ptr->messages = new_messages;
+
+                // 保存到磁盘
+                {
+                    nlohmann::json save_msgs = nlohmann::json::array();
+                    for (auto &msg : session_ptr->messages)
+                        save_msgs.push_back(run_unit::extract_images_from_message(msg, session_ptr->session_id, run_unit::settings["workspace"].get<std::string>()));
+                    tool_unit::writeFile(run_unit::settings["workspace"].get<std::string>() + "/sessions/" + session_ptr->session_id + ".json",
+                                         save_msgs.dump(4));
+                    tool_unit::writeFile(run_unit::settings["workspace"].get<std::string>() + "/memorys/" + session_ptr->session_id + ".json",
+                                         session_ptr->memory.dump(4));
+                }
 
                 assistant_reply += "\r\n" + std::format("\r\n[Context size: {} chars]", context.dump().length());
                 json data = {
@@ -997,7 +1021,7 @@ namespace app
                 // 发送 SSE HTTP 头
                 std::string http_headers =
                     "HTTP/1.1 200 OK\r\n"
-                    "Content-Type: text/event-stream\r\n"
+                    "Content-Type: text/event-stream; charset=utf-8\r\n"
                     "Cache-Control: no-cache\r\n"
                     "Connection: keep-alive\r\n"
                     "Access-Control-Allow-Origin: *\r\n"
@@ -1083,20 +1107,20 @@ namespace app
                         break;
                     }
 
-                    // 发送工具调用事件
+                    // 发送工具调用事件（每个工具独立发送 start/output/end）
                     auto tool_tags = extractAllTags(response_text, "tool");
-                    for (auto &tag : tool_tags)
+                    auto sys_out_blocks = extractAllTags(sys_out, "system_output");
+
+                    for (size_t ti = 0; ti < tool_tags.size(); ti++)
                     {
-                        auto [name, args] = parseArgs(tag);
+                        auto [name, args] = parseArgs(tool_tags[ti]);
                         sse({{"type", "tool_start"}, {"name", std::string(name)}, {"args", std::string(args)}, {"round", mpc_count}});
-                    }
 
-                    // 发送工具输出
-                    sse({{"type", "tool_output"}, {"content", sys_out}, {"round", mpc_count}});
+                        if (ti < sys_out_blocks.size())
+                        {
+                            sse({{"type", "tool_output"}, {"content", std::string(sys_out_blocks[ti])}, {"round", mpc_count}});
+                        }
 
-                    for (auto &tag : tool_tags)
-                    {
-                        auto [name, args] = parseArgs(tag);
                         sse({{"type", "tool_end"}, {"name", std::string(name)}, {"round", mpc_count}});
                     }
 
@@ -1113,8 +1137,14 @@ namespace app
                     context.push_back(sys_msg);
                 }
 
-                // 提取新消息并保存
+                // 提取新消息并保存（包含系统指令和记忆在内）
                 json new_messages = json::array();
+                // 保存系统指令
+                new_messages.push_back({{"role", "system"}, {"content", system_prompt}});
+                new_messages.push_back({{"role", "system"}, {"content", tools_list_str}});
+                if (!session_ptr->is_memory_empty())
+                    new_messages.push_back({{"role", "memory"}, {"content", session_ptr->memory["abstracts"]}});
+                // 保存所有会话消息
                 size_t history_start = 2 + (session_ptr->is_memory_empty() ? 0 : 1);
                 for (size_t i = history_start; i < context.size(); ++i)
                 {
@@ -1124,6 +1154,17 @@ namespace app
                     new_messages.push_back(context[i]);
                 }
                 session_ptr->messages = new_messages;
+
+                // 保存到磁盘
+                {
+                    nlohmann::json save_msgs = nlohmann::json::array();
+                    for (auto &msg : session_ptr->messages)
+                        save_msgs.push_back(run_unit::extract_images_from_message(msg, session_ptr->session_id, run_unit::settings["workspace"].get<std::string>()));
+                    tool_unit::writeFile(run_unit::settings["workspace"].get<std::string>() + "/sessions/" + session_ptr->session_id + ".json",
+                                         save_msgs.dump(4));
+                    tool_unit::writeFile(run_unit::settings["workspace"].get<std::string>() + "/memorys/" + session_ptr->session_id + ".json",
+                                         session_ptr->memory.dump(4));
+                }
 
                 // 更新使用统计
                 if (run_unit::agent_data_manager.data["usages"].contains(sid))
@@ -1154,7 +1195,9 @@ namespace app
                 {
                     sse({{"type", "error"}, {"message", e.what()}});
                 }
-                catch (...) {}
+                catch (...)
+                {
+                }
             }
         }
     } // namespace server
@@ -1164,6 +1207,7 @@ int main(int argc, char *argv[])
 {
     try
     {
+        std::cout << get_system_status() << std::endl;
         int port = 8080;
         std::string settings_path = "settings.json";
         std::string __pw = "";

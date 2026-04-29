@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 image-drawer.py - 调用 sd-cli 服务的 /generate API 生成图像并保存到本地
 

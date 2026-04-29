@@ -1,9 +1,12 @@
 {
     "usages": {
         "Telegram": {
-            "completion_cost": 3016,
-            "prompt_cost": 12539,
-            "total_cost": 15555
+            "completion_cost": 5635,
+            "prompt_cost": 61294,
+            "total_cost": 66929
+        },
+        "memory": {
+            "prompt_cost": null
         }
     }
 }

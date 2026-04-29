@@ -8,3 +8,4 @@ memorys/*
 build
 _CPack_Packages
 .claude
+.playwright-cli

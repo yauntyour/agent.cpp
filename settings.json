@@ -1,10 +1,11 @@
 {
     "agent_name": "assistant",
+    "auto_expand_files": true,
     "channels": [
         {
             "name": "Telegram",
             "path": "sys/tg_bot.py",
-            "status": "active",
+            "status": "inactive",
             "user_count": 1
         }
     ],

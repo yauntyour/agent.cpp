@@ -15,3 +15,4 @@ cmd = [
     "-std=c++26",
 ]
 subprocess.run(cmd, check=True, capture_output=True, text=True)
+print("编译完成✅")
