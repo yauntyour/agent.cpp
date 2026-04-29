@@ -15,5 +15,5 @@
     "server_address": "http://localhost:11434",
     "stream": true,
     "user_name": "Yauntyours",
-    "workspace": "./"
+    "workspace": "./workspace/"
 }
