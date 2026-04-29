@@ -7,3 +7,4 @@ memorys/*
 *.zip
 build
 _CPack_Packages
+.claude

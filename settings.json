@@ -13,7 +13,7 @@
     "model": "uGemma4",
     "prompt": "agent.txt",
     "server_address": "http://localhost:11434",
-    "stream": false,
+    "stream": true,
     "user_name": "Yauntyours",
-    "workspace": "./workspace/"
+    "workspace": "./"
 }

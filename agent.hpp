@@ -15,6 +15,7 @@
 #include <mutex>
 #include <ctime>
 #include <unordered_map>
+#include <unordered_set>
 #include <cstdio>
 #include <unistd.h>
 #include <curl/curl.h>
@@ -290,6 +291,12 @@ namespace net_unit
     }
 } // namespace net_unit
 
+// Forward declaration for run_unit functions used by tool_unit
+namespace run_unit {
+    void mark_file_used(const std::string &path);
+    std::vector<std::string> get_used_files();
+}
+
 namespace tool_unit
 {
     std::string exec(const std::string &cmd)
@@ -310,6 +317,7 @@ namespace tool_unit
     std::string readFile(const std::string &path)
     {
         std::cout << "INFO - readFile('" << path << "')" << std::endl;
+        run_unit::mark_file_used(path);
         std::ifstream file(path, std::ios::binary | std::ios::in);
         if (!file)
             throw std::runtime_error("Error - No such file or directory in path:" + path + " Please check the true path");
@@ -322,6 +330,7 @@ namespace tool_unit
     void writeFile(const std::string &path, const std::string &content)
     {
         std::cout << "INFO - writeFile('" << path << "')" << std::endl;
+        run_unit::mark_file_used(path);
         std::ofstream file(path, std::ios::binary | std::ios::out);
         if (!file.is_open())
             throw std::runtime_error("Error - Could not create the file:" + path + " Please check the true path");
@@ -342,6 +351,7 @@ namespace tool_unit
     std::string Image(const std::string &path)
     {
         std::cout << "INFO - Image('" << path << "')" << std::endl;
+        run_unit::mark_file_used(path);
         std::ifstream file(path, std::ios::binary | std::ios::in);
         if (!file)
             throw std::runtime_error("Error - No such file or directory in path:" + path + " Please check the true path");
@@ -448,6 +458,24 @@ namespace run_unit
     std::mutex ctx_lock;
     std::string setting_file_path;
 
+    // 文件使用跟踪
+    std::unordered_set<std::string> used_files;
+    std::mutex used_files_mutex;
+
+    void mark_file_used(const std::string &path)
+    {
+        std::lock_guard<std::mutex> lock(used_files_mutex);
+        used_files.insert(path);
+        if (used_files.size() > 100)
+            used_files.erase(used_files.begin());
+    }
+
+    std::vector<std::string> get_used_files()
+    {
+        std::lock_guard<std::mutex> lock(used_files_mutex);
+        return {used_files.begin(), used_files.end()};
+    }
+
     class DataManager
     {
     private:
@@ -482,6 +510,119 @@ namespace run_unit
     };
 
     DataManager agent_data_manager;
+
+    // 从消息中提取 base64 图片到 assets/messages/{session_id}.json，返回替换后的消息
+    nlohmann::json extract_images_from_message(const nlohmann::json &msg, const std::string &session_id, const std::string &workspace)
+    {
+        if (!msg.contains("content") || !msg["content"].is_array())
+            return msg;
+
+        nlohmann::json new_msg = msg;
+        nlohmann::json new_content = nlohmann::json::array();
+        std::string assets_dir = workspace + "/assets/messages/";
+        std::filesystem::create_directories(assets_dir);
+        std::string asset_file = assets_dir + session_id + ".json";
+
+        nlohmann::json assets;
+        if (std::filesystem::exists(asset_file))
+        {
+            try { assets = nlohmann::json::parse(tool_unit::readFile(asset_file)); }
+            catch (...) { assets = nlohmann::json::object(); }
+        }
+
+        static size_t img_counter = 0;
+        bool modified = false;
+
+        for (auto &part : msg["content"])
+        {
+            if (part.is_object() && part.value("type", "") == "image_url")
+            {
+                std::string url;
+                if (part["image_url"].is_string())
+                    url = part["image_url"].get<std::string>();
+                else if (part["image_url"].is_object() && part["image_url"].contains("url"))
+                    url = part["image_url"]["url"].get<std::string>();
+
+                if (url.find("data:") == 0)
+                {
+                    std::string img_id = "img_" + std::to_string(img_counter++);
+                    assets[img_id] = url;
+                    modified = true;
+
+                    nlohmann::json ref_part = part;
+                    if (ref_part["image_url"].is_object())
+                        ref_part["image_url"]["url"] = "asset://" + img_id;
+                    else
+                        ref_part["image_url"] = "asset://" + img_id;
+                    new_content.push_back(ref_part);
+                }
+                else
+                    new_content.push_back(part);
+            }
+            else
+                new_content.push_back(part);
+        }
+
+        if (modified)
+        {
+            new_msg["content"] = new_content;
+            tool_unit::writeFile(asset_file, assets.dump(4));
+        }
+        return new_msg;
+    }
+
+    // 从 assets/messages/{session_id}.json 恢复 base64 图片到消息中
+    nlohmann::json restore_images_in_message(const nlohmann::json &msg, const std::string &session_id, const std::string &workspace)
+    {
+        if (!msg.contains("content") || !msg["content"].is_array())
+            return msg;
+
+        std::string asset_file = workspace + "/assets/messages/" + session_id + ".json";
+        if (!std::filesystem::exists(asset_file))
+            return msg;
+
+        nlohmann::json assets;
+        try { assets = nlohmann::json::parse(tool_unit::readFile(asset_file)); }
+        catch (...) { return msg; }
+
+        nlohmann::json new_msg = msg;
+        nlohmann::json new_content = nlohmann::json::array();
+
+        for (auto &part : msg["content"])
+        {
+            if (part.is_object() && part.value("type", "") == "image_url")
+            {
+                std::string url;
+                if (part["image_url"].is_string())
+                    url = part["image_url"].get<std::string>();
+                else if (part["image_url"].is_object() && part["image_url"].contains("url"))
+                    url = part["image_url"]["url"].get<std::string>();
+
+                if (url.find("asset://") == 0)
+                {
+                    std::string img_id = url.substr(8);
+                    if (assets.contains(img_id))
+                    {
+                        nlohmann::json restored = part;
+                        if (restored["image_url"].is_object())
+                            restored["image_url"]["url"] = assets[img_id];
+                        else
+                            restored["image_url"] = assets[img_id];
+                        new_content.push_back(restored);
+                    }
+                    else
+                        new_content.push_back(part);
+                }
+                else
+                    new_content.push_back(part);
+            }
+            else
+                new_content.push_back(part);
+        }
+
+        new_msg["content"] = new_content;
+        return new_msg;
+    }
 
     struct SessionContext
     {
@@ -564,6 +705,11 @@ namespace run_unit
                                 it->second->messages = nlohmann::json::array();
                                 std::cout << "WARN - Session " << it->second->session_id << " file is not an array, reset." << std::endl;
                             }
+                            // 恢复图片数据
+                            nlohmann::json restored = nlohmann::json::array();
+                            for (auto &msg : it->second->messages)
+                                restored.push_back(restore_images_in_message(msg, it->second->session_id, workspace));
+                            it->second->messages = std::move(restored);
                         }
                     }
                     catch (const std::exception &e)
@@ -639,8 +785,11 @@ namespace run_unit
                 auto it = sessions.find(current_session_id);
                 if (it != sessions.end() && it->second->loaded)
                 {
+                    nlohmann::json save_msgs = nlohmann::json::array();
+                    for (auto &msg : it->second->messages)
+                        save_msgs.push_back(extract_images_from_message(msg, current_session_id, workspace));
                     tool_unit::writeFile(workspace + "/sessions/" + current_session_id + ".json",
-                                         it->second->messages.dump(4));
+                                         save_msgs.dump(4));
                     tool_unit::writeFile(workspace + "/memorys/" + current_session_id + ".json",
                                          it->second->memory.dump(4));
                     it->second->loaded = false;
@@ -682,8 +831,11 @@ namespace run_unit
                 {
                     if (ses.second->loaded)
                     {
+                        nlohmann::json save_msgs = nlohmann::json::array();
+                        for (auto &msg : ses.second->messages)
+                            save_msgs.push_back(extract_images_from_message(msg, ses.first, workspace));
                         tool_unit::writeFile(workspace + "/sessions/" + ses.first + ".json",
-                                             ses.second->messages.dump(4));
+                                             save_msgs.dump(4));
                         tool_unit::writeFile(workspace + "/memorys/" + ses.first + ".json",
                                              ses.second->memory.dump(4));
                     }
@@ -718,7 +870,7 @@ namespace run_unit
 
         std::filesystem::create_directories(workspace / "sessions");
         std::filesystem::create_directories(workspace / "memorys");
-        std::filesystem::create_directories(workspace / "assets");
+        std::filesystem::create_directories(workspace / "assets" / "messages");
         std::filesystem::create_directories(workspace / "tools");
 
         std::filesystem::path sysPath = workspace / "sys";
@@ -1296,6 +1448,90 @@ namespace LLMProviders
             {
                 return false;
             }
+        }
+
+        // 流式生成：on_token 接收内容增量，on_thinking 接收推理内容增量，返回完整累积文本
+        std::string stream_generate(
+            nlohmann::json &request,
+            std::function<void(const std::string &)> on_token,
+            std::function<void(const std::string &)> on_thinking = nullptr)
+        {
+            request["stream"] = true;
+            std::string url = base_url_ + "/v1/chat/completions";
+            auto user_name = run_unit::settings["user_name"].get_ref<const std::string &>();
+            auto agent_name = run_unit::settings["agent_name"].get_ref<const std::string &>();
+
+            for (auto &msg : request["messages"])
+            {
+                auto name = msg["role"].get_ref<std::string &>();
+                if (name == user_name)
+                    msg["role"] = "user";
+                else if (name == agent_name)
+                    msg["role"] = "assistant";
+            }
+
+            std::string header = "Content-Type: application/json";
+            if (!api_key_.empty())
+                header = "Authorization: Bearer " + api_key_ + "\r\nContent-Type: application/json";
+
+            std::string accumulated;
+            std::string buffer;
+
+            auto parse_sse = [&](const char *data, size_t len)
+            {
+                buffer.append(data, len);
+                size_t pos = 0;
+                while (true)
+                {
+                    size_t nl = buffer.find('\n', pos);
+                    if (nl == std::string::npos)
+                        break;
+                    std::string line = buffer.substr(pos, nl - pos);
+                    pos = nl + 1;
+
+                    if (!line.empty() && line.back() == '\r')
+                        line.pop_back();
+
+                    if (line.empty())
+                        continue;
+
+                    if (line.find("data: ") == 0)
+                    {
+                        std::string payload = line.substr(6);
+                        if (payload == "[DONE]")
+                            continue;
+                        try
+                        {
+                            auto j = nlohmann::json::parse(payload);
+                            if (!j.contains("choices") || j["choices"].empty())
+                                continue;
+                            auto &delta = j["choices"][0]["delta"];
+
+                            if (delta.contains("reasoning_content") && on_thinking)
+                            {
+                                std::string rc = delta["reasoning_content"].get<std::string>();
+                                if (!rc.empty())
+                                    on_thinking(rc);
+                            }
+                            if (delta.contains("content"))
+                            {
+                                std::string c = delta["content"].get<std::string>();
+                                accumulated += c;
+                                if (on_token)
+                                    on_token(c);
+                            }
+                        }
+                        catch (...) {}
+                    }
+                }
+                buffer = buffer.substr(pos);
+            };
+
+            CURL *stream_curl = curl_easy_init();
+            std::string post_data = request.dump();
+            net_unit::CURL_stream_post(stream_curl, url.c_str(), post_data, header, parse_sse);
+            curl_easy_cleanup(stream_curl);
+            return accumulated;
         }
 
         std::string models()
