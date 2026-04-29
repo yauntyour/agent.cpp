@@ -711,6 +711,7 @@
       border: 1px solid #27272a;
       background: #0c0c0e;
     }
+
     .sys-output-block summary {
       padding: 8px 12px;
       font-size: 12px;
@@ -722,27 +723,38 @@
       background: rgba(245, 158, 11, 0.04);
       list-style: none;
     }
+
     .sys-output-block summary::-webkit-details-marker {
       display: none;
     }
+
     .sys-output-block summary i.fa-chevron-right {
       transition: transform 0.2s;
     }
+
     .sys-output-block[open] summary i.fa-chevron-right {
       transform: rotate(90deg);
     }
+
     .sys-output-block .sysout-inner {
       padding: 0;
       border-top: 1px solid #1f1f22;
     }
+
     .sys-output-block .sysout-inner pre {
       margin: 0;
       border: none;
       border-radius: 0;
       background: #0c0c0e;
     }
-    .sysout-status.ok { color: #4ade80; }
-    .sysout-status.err { color: #f87171; }
+
+    .sysout-status.ok {
+      color: #4ade80;
+    }
+
+    .sysout-status.err {
+      color: #f87171;
+    }
 
     /* 加载覆盖层 */
     #loading-overlay {
@@ -756,21 +768,26 @@
       backdrop-filter: blur(4px);
       cursor: not-allowed;
     }
+
     #loading-overlay.active {
       display: flex;
     }
+
     .loading-spinner {
       text-align: center;
     }
+
     .loading-spinner i {
       font-size: 48px;
       color: #6366f1;
     }
+
     .loading-spinner .loading-text {
       margin-top: 16px;
       color: #a1a1aa;
       font-size: 14px;
     }
+
     .loading-spinner .loading-sub {
       margin-top: 6px;
       color: #52525b;
@@ -794,13 +811,15 @@
       display: none;
       align-items: center;
       gap: 6px;
-      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
       transition: all 0.2s;
     }
+
     #scroll-bottom-btn:hover {
       background: #27272a;
       color: #e4e4e7;
     }
+
     #scroll-bottom-btn.show {
       display: flex;
     }
@@ -1797,8 +1816,10 @@
                 <i class="fa-solid fa-brain" style="color:#71717a;"></i>
               </div>
               <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#71717a;">
-                <span id="context-bar-container" style="width:70px;height:4px;background:#3f3f46;border-radius:2px;overflow:hidden;display:inline-block;vertical-align:middle;">
-                  <span id="context-bar-fill" style="display:block;height:100%;width:0%;background:#6366f1;border-radius:2px;transition:width 0.3s;"></span>
+                <span id="context-bar-container"
+                  style="width:70px;height:4px;background:#3f3f46;border-radius:2px;overflow:hidden;display:inline-block;vertical-align:middle;">
+                  <span id="context-bar-fill"
+                    style="display:block;height:100%;width:0%;background:#6366f1;border-radius:2px;transition:width 0.3s;"></span>
                 </span>
                 <span id="context-text" style="font-family:'JetBrains Mono',monospace;">0 / 0</span>
               </div>
@@ -1912,7 +1933,7 @@
       isTyping: false, pendingImages: [],
       assistantMsgId: null,
       streamBuffers: { content: '', thinking: '', thinkings: [], toolOutputs: [] },
-      contextUsage: { total: 0, max: 1048576 },
+      contextUsage: { total: 0, max: 128000 },
       memoryActive: false,
       _scrollAtBottom: true
     };
@@ -2201,7 +2222,7 @@
       <div class="setting-group-title">运行参数</div>
       <div class="setting-row check-row"><input type="checkbox" id="s-stream" ${s.stream ? 'checked' : ''}><label for="s-stream">启用流式传输</label></div>
       <div class="setting-row"><label>最大工具/系统调用轮数</label><input type="number" id="s-max_mpc_rounds" value="${s.max_mpc_rounds || 5}" min="1" max="50"></div>
-      <div class="setting-row"><label>上下文窗口大小</label><input type="number" id="s-max_context" value="${s.max_context || 1048576}" min="1000"></div>
+      <div class="setting-row"><label>上下文窗口大小</label><input type="number" id="s-max_context" value="${s.max_context || 128000}" min="1000"></div>
       <div class="setting-row check-row"><input type="checkbox" id="s-auto_expand_files" ${s.auto_expand_files !== false ? 'checked' : ''}><label for="s-auto_expand_files">文件浏览器自动展开（工具调用时）</label></div>
     </div>
     <div class="setting-group">
@@ -2214,7 +2235,7 @@
   `;
     }
     async function loadSettings() {
-      try { const r = await axios.post(API + '/settings', { updata: false }); state.settings = r.data; state.channels = state.settings.channels || []; } catch (e) { toast('加载设置失败', 'error'); }
+      try { const r = await axios.post(API + '/settings', { updata: false }); state.settings = r.data; state.channels = state.settings.channels || []; } catch (e) { toast('加载设置失败', 'error'); log('加载设置失败: ' + (e.message || e), 'error'); }
       renderSettingsForm(state.settings);
     }
     async function saveSettings() {
@@ -2225,7 +2246,7 @@
         stream: $('#s-stream')?.checked || false,
         auto_expand_files: $('#s-auto_expand_files')?.checked !== false,
         max_mpc_rounds: parseInt($('#s-max_mpc_rounds')?.value) || 5,
-        max_context: parseInt($('#s-max_context')?.value) || 1048576,
+        max_context: parseInt($('#s-max_context')?.value) || 128000,
         channels: state.settings.channels || []
       };
       state.settings = ns;
@@ -2233,7 +2254,7 @@
         const r = await axios.post(API + '/settings', { updata: true, settings: ns });
         state.settings = r.data; state.channels = state.settings.channels || []; toast('设置已保存', 'success'); log('配置更新成功', 'success');
         await getModels();
-      } catch (e) { toast('保存失败', 'error'); }
+      } catch (e) { toast('保存失败', 'error'); log('保存设置失败: ' + (e.message || e), 'error'); }
     }
     els.saveSettingsBtn.onclick = saveSettings;
 
@@ -2258,7 +2279,7 @@
     }
     els.fileUpload.onchange = async (e) => {
       for (const f of e.target.files || []) {
-        if (f.type.startsWith('image/')) { try { state.pendingImages.push(await compressImage(f)); renderImagePreviews(); } catch { } }
+        if (f.type.startsWith('image/')) { try { state.pendingImages.push(await compressImage(f)); renderImagePreviews(); } catch (e) { log('图片压缩失败: ' + (e.message || e), 'error'); } }
         else { const fr = new FileReader(); fr.onload = () => { els.userInput.value += (els.userInput.value.trim() ? '\n\n' : '') + `[${f.name}]\n${fr.result}`; els.userInput.dispatchEvent(new Event('input')); }; fr.readAsText(f); }
       }
       els.fileUpload.value = '';
@@ -2299,20 +2320,23 @@
 
     // ============ 上下文使用显示 ============
     function updateContextUsage(usage) {
+      if (!els.contextUsage || !els.contextBarFill) return;
       if (!usage || !state.settings.max_context) {
         els.contextUsage.style.display = 'none';
         return;
       }
       els.contextUsage.style.display = 'flex';
       const total = usage.total_cost || usage.prompt_cost + usage.completion_cost || 0;
-      const max = state.settings.max_context || 1048576;
+      const max = state.settings.max_context || 128000;
       const pct = Math.min(100, (total / max) * 100);
       els.contextBarFill.style.width = pct + '%';
       els.contextText.textContent = `${total.toLocaleString()} / ${max.toLocaleString()}`;
     }
     function updateMemoryIndicator(active) {
       state.memoryActive = active;
+      if (!els.memoryIndicator) return;
       const icon = els.memoryIndicator.querySelector('i');
+      if (!icon) return;
       if (active) {
         icon.style.color = '#818cf8';
         els.memoryIndicator.title = '记忆摘要已启用';
@@ -2326,14 +2350,8 @@
     async function loadSessions() {
       try {
         const r = await axios.get(API + '/session'); state.sessions = r.data.session_list || []; renderSessions();
-        if (state.sessions.length > 0 && !state.currentSessionId) {
-          await switchSession(state.sessions[0]);
-        } else if (state.sessions.length === 0) {
-          await newSession();
-        } else {
-          state.currentSessionId = null;
-          els.currentSessionIdDisplay.textContent = 'ID: -';
-        }
+        state.currentSessionId = null;
+        els.currentSessionIdDisplay.textContent = 'ID: -';
       } catch (e) { log('加载会话列表失败', 'error'); }
     }
     function renderSessions() {
@@ -2365,7 +2383,7 @@
         // 估算上下文用量
         const totalChars = JSON.stringify(r.data.messages || []).length;
         updateContextUsage({ total_cost: totalChars });
-      } catch (e) { toast('无法加载会话', 'error'); }
+      } catch (e) { toast('无法加载会话', 'error'); log('切换会话失败: ' + (e.message || e), 'error'); }
       finally { hideLoading(); }
     }
     async function newSession() {
@@ -2373,25 +2391,25 @@
       try {
         const r = await axios.post(API + '/session/new');
         if (r.data.status === 'OK') { const nid = r.data.session_id; if (!state.sessions.includes(nid)) state.sessions.push(nid); await switchSession(nid); renderSessions(); toast('新会话已创建', 'success'); }
-      } catch (e) { toast('创建失败', 'error'); }
+      } catch (e) { toast('创建失败', 'error'); log('创建会话失败: ' + (e.message || e), 'error'); }
     }
     async function deleteSession(sid) {
       if (!confirm(`确认删除会话 ${sid}？此操作不可撤销。`)) return;
       try {
         const r = await axios.post(API + '/session/delete', { session_id: sid });
         if (r.data.status === 'deleted') { state.sessions = state.sessions.filter(s => s !== sid); renderSessions(); if (state.currentSessionId === sid && state.sessions.length > 0) await switchSession(state.sessions[0]); else if (state.sessions.length === 0) await newSession(); toast('会话已删除', 'success'); }
-      } catch (e) { toast('删除失败: ' + (e.response?.data?.error || e.message), 'error'); }
+      } catch (e) { toast('删除失败: ' + (e.response?.data?.error || e.message), 'error'); log('删除会话失败: ' + (e.response?.data?.error || e.message), 'error'); }
     }
     async function clearSession() {
       if (!state.currentSessionId || !confirm('清空当前会话的全部上下文？')) return;
-      try { await axios.post(API + '/session/clear'); await switchSession(state.currentSessionId); toast('上下文已清空', 'success'); } catch (e) { toast('清空失败', 'error'); }
+      try { await axios.post(API + '/session/clear'); await switchSession(state.currentSessionId); toast('上下文已清空', 'success'); } catch (e) { toast('清空失败', 'error'); log('清空会话失败: ' + (e.message || e), 'error'); }
       updateContextUsage(null);
       updateMemoryIndicator(false);
     }
     async function genMemory() {
       if (!state.currentSessionId || !confirm('为当前会话生成记忆摘要？')) return;
       const btn = els.summarySessionBtn, orig = btn.innerHTML; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; btn.disabled = true;
-      try { const r = await axios.post(API + '/session/memory'); if (r.data.status === 'done') { toast('记忆已更新', 'success'); updateMemoryIndicator(true); } } catch (e) { toast('记忆生成失败', 'error'); }
+      try { const r = await axios.post(API + '/session/memory'); if (r.data.status === 'done') { toast('记忆已更新', 'success'); updateMemoryIndicator(true); } } catch (e) { toast('记忆生成失败', 'error'); log('记忆生成失败: ' + (e.message || e), 'error'); }
       finally { btn.innerHTML = orig; btn.disabled = false; }
     }
 
@@ -2414,7 +2432,7 @@
     }
     function selectModel(name, ok) {
       state.currentModel = name; els.modelNameDisplay.textContent = name;
-      els.connectionStatusDot.style.background = ok ? '#4ade80' : '#f87171';
+      if (els.connectionStatusDot) els.connectionStatusDot.style.background = ok ? '#4ade80' : '#f87171';
     }
     els.modelDropdownBtn.onclick = (e) => { e.stopPropagation(); els.modelDropdownMenu.classList.toggle('show'); };
     document.addEventListener('click', () => els.modelDropdownMenu.classList.remove('show'));
@@ -2615,7 +2633,7 @@
             try {
               const ev = JSON.parse(raw.slice(6));
               handleSSE(ev, msgId);
-            } catch (e) { }
+            } catch (e) { log('SSE事件解析失败: ' + (e.message || e), 'error'); }
           }
         }
       } catch (e) {
@@ -2663,7 +2681,7 @@
           // 更新上下文使用显示
           if (ev.usage) {
             state.contextUsage.total = ev.usage.total_cost || (ev.usage.prompt_cost + ev.usage.completion_cost) || 0;
-            state.contextUsage.max = state.settings.max_context || 1048576;
+            state.contextUsage.max = state.settings.max_context || 128000;
             updateContextUsage({ total_cost: state.contextUsage.total });
           }
           // 更新本地消息状态
@@ -2695,7 +2713,7 @@
 
     // ============ 工具/任务/频道 ============
     async function loadTools() {
-      try { const r = await axios.get(API + '/tools'); state.tools = r.data || []; renderToolToggles(); } catch (e) { }
+      try { const r = await axios.get(API + '/tools'); state.tools = r.data || []; renderToolToggles(); } catch (e) { log('加载工具列表失败: ' + (e.message || e), 'error'); }
     }
     function renderToolToggles() {
       const enabledCount = state.tools.filter(t => t.enabled !== false).length;
@@ -2737,24 +2755,25 @@
         toast(`工具 ${name} ${enabled ? '已启用' : '已禁用'}`, 'success');
       } catch (e) {
         toast('切换失败', 'error');
+        log('工具切换失败: ' + (e.message || e), 'error');
       }
     }
     async function loadTodos() {
-      try { const r = await axios.get(API + '/todos'); state.todos = r.data || []; renderTodos(); } catch (e) { }
+      try { const r = await axios.get(API + '/todos'); state.todos = r.data || []; renderTodos(); } catch (e) { log('加载任务列表失败: ' + (e.message || e), 'error'); }
     }
     async function addTodo() {
       const v = els.newTodoInput.value.trim(); if (!v) return;
       const item = { id: String(Date.now()), done: false, content: v };
-      try { const r = await axios.post(API + '/todos/new', item); state.todos.push(r.data); renderTodos(); els.newTodoInput.value = ''; } catch (e) { }
+      try { const r = await axios.post(API + '/todos/new', item); state.todos.push(r.data); renderTodos(); els.newTodoInput.value = ''; } catch (e) { log('添加任务失败: ' + (e.message || e), 'error'); }
     }
     async function toggleTodo(id) {
       const t = state.todos.find(t => t.id == id); if (!t) return;
       t.done = !t.done;
-      try { await axios.post(API + '/todos/' + id, t); renderTodos(); } catch (e) { }
+      try { await axios.post(API + '/todos/' + id, t); renderTodos(); } catch (e) { log('更新任务失败: ' + (e.message || e), 'error'); }
     }
     async function deleteTodo(id) {
       if (!confirm('删除该任务？')) return;
-      try { await axios.get(API + '/todos/delete/' + id); state.todos = state.todos.filter(t => t.id != id); renderTodos(); } catch (e) { }
+      try { await axios.get(API + '/todos/delete/' + id); state.todos = state.todos.filter(t => t.id != id); renderTodos(); } catch (e) { log('删除任务失败: ' + (e.message || e), 'error'); }
     }
     function renderTodos() {
       if (!state.todos?.length) { els.todosList.innerHTML = '<div style="color:#71717a;font-size:13px;text-align:center;padding:16px;">暂无任务</div>'; return; }
@@ -2769,7 +2788,7 @@
       ).join('');
     }
     async function loadChannels() {
-      try { const r = await axios.get(API + '/channels'); state.channels = r.data || []; renderChannels(); renderSessions(); } catch (e) { }
+      try { const r = await axios.get(API + '/channels'); state.channels = r.data || []; renderChannels(); renderSessions(); } catch (e) { log('加载频道列表失败: ' + (e.message || e), 'error'); }
     }
     function renderChannels() {
       if (!state.channels?.length) {
@@ -2811,6 +2830,7 @@
           this.renderBreadcrumb(this.cwd);
           this.renderFiles(data.entries);
         } catch (e) {
+          log('文件浏览器加载失败: ' + (e.message || e), 'error');
           els.fbListing.innerHTML = '<div style="padding:24px 12px;color:#f87171;font-size:12px;text-align:center;">加载失败</div>';
         }
       },
@@ -2819,7 +2839,7 @@
         try {
           const r = await axios.get(API + '/fs/used');
           this.usedFiles = new Set((r.data.files || []).map(f => f.replace(/\\/g, '/')));
-        } catch (e) { }
+        } catch (e) { log('刷新已用文件列表失败: ' + (e.message || e), 'error'); }
       },
 
       async refresh() {
@@ -2889,7 +2909,7 @@
           try {
             const iconCls = window.fileIcons.getIcon(filename);
             if (iconCls) cls = iconCls;
-          } catch (e) { }
+          } catch (e) { log('文件图标加载失败: ' + (e.message || e), 'error'); }
         }
         // 扩展名 → 颜色映射
         const colors = {
@@ -2936,8 +2956,8 @@
         if (!bytes || bytes === '0') return '';
         const n = parseInt(bytes);
         if (n < 1024) return n + ' B';
-        if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
-        if (n < 1073741824) return (n / 1048576).toFixed(1) + ' MB';
+        if (n < 128000) return (n / 1024).toFixed(1) + ' KB';
+        if (n < 1073741824) return (n / 128000).toFixed(1) + ' MB';
         return (n / 1073741824).toFixed(1) + ' GB';
       },
 
@@ -2995,7 +3015,7 @@
       state.user = state.settings.user_name || 'User'; els.currentUserDisplay.textContent = state.user;
       state.agentName = state.settings.agent_name || 'assistant';
       document.title = state.user + ' · Chat WebUI';
-      state.contextUsage.max = state.settings.max_context || 1048576;
+      state.contextUsage.max = state.settings.max_context || 128000;
       await getModels(); await loadTools(); await loadTodos(); await loadChannels(); await loadSessions();
       // 初始化文件浏览器设置
       fb.autoExpand = state.settings.auto_expand_files !== false;

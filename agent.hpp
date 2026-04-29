@@ -701,129 +701,68 @@ namespace run_unit
 
     DataManager agent_data_manager;
 
-    // 从消息中提取 base64 图片到 assets/messages/{session_id}.json，返回替换后的消息
-    nlohmann::json extract_images_from_message(const nlohmann::json &msg, const std::string &session_id, const std::string &workspace)
+    // 从消息中提取 base64 图片到 asset_array，替换为 "#n"，返回替换后的消息（使用 std::swap 零拷贝）
+    nlohmann::json extract_images_from_message(const nlohmann::json &msg, nlohmann::json &asset_array)
     {
         if (!msg.contains("content") || !msg["content"].is_array())
             return msg;
 
         nlohmann::json new_msg = msg;
-        nlohmann::json new_content = nlohmann::json::array();
-        std::string assets_dir = workspace + "/assets/messages/";
-        std::filesystem::create_directories(assets_dir);
-        std::string asset_file = assets_dir + session_id + ".json";
 
-        nlohmann::json assets;
-        if (std::filesystem::exists(asset_file))
-        {
-            try
-            {
-                assets = nlohmann::json::parse(tool_unit::readFile(asset_file));
-            }
-            catch (...)
-            {
-                assets = nlohmann::json::object();
-            }
-        }
-
-        static size_t img_counter = 0;
-        bool modified = false;
-
-        for (auto &part : msg["content"])
+        for (auto &part : new_msg["content"])
         {
             if (part.is_object() && part.value("type", "") == "image_url")
             {
-                std::string url;
+                std::string *url_ptr = nullptr;
                 if (part["image_url"].is_string())
-                    url = part["image_url"].get<std::string>();
+                    url_ptr = &part["image_url"].get_ref<std::string&>();
                 else if (part["image_url"].is_object() && part["image_url"].contains("url"))
-                    url = part["image_url"]["url"].get<std::string>();
+                    url_ptr = &part["image_url"]["url"].get_ref<std::string&>();
 
-                if (url.find("data:") == 0)
+                if (url_ptr && url_ptr->find("data:") == 0)
                 {
-                    std::string img_id = "img_" + std::to_string(img_counter++);
-                    assets[img_id] = url;
-                    modified = true;
-
-                    nlohmann::json ref_part = part;
-                    if (ref_part["image_url"].is_object())
-                        ref_part["image_url"]["url"] = "asset://" + img_id;
-                    else
-                        ref_part["image_url"] = "asset://" + img_id;
-                    new_content.push_back(ref_part);
+                    asset_array.push_back("");
+                    std::swap(asset_array.back().get_ref<std::string&>(), *url_ptr);
+                    part = "#" + std::to_string(asset_array.size() - 1);
                 }
-                else
-                    new_content.push_back(part);
             }
-            else
-                new_content.push_back(part);
         }
 
-        if (modified)
-        {
-            new_msg["content"] = new_content;
-            tool_unit::writeFile(asset_file, assets.dump(4));
-        }
         return new_msg;
     }
 
-    // 从 assets/messages/{session_id}.json 恢复 base64 图片到消息中
-    nlohmann::json restore_images_in_message(const nlohmann::json &msg, const std::string &session_id, const std::string &workspace)
+    // 从 asset_array 恢复 base64 图片到消息中替换 "#n"（使用 std::swap 零拷贝）
+    void restore_images_in_message(nlohmann::json &msg, nlohmann::json &asset_array)
     {
-        if (!msg.contains("content") || !msg["content"].is_array())
-            return msg;
-
-        std::string asset_file = workspace + "/assets/messages/" + session_id + ".json";
-        if (!std::filesystem::exists(asset_file))
-            return msg;
-
-        nlohmann::json assets;
-        try
-        {
-            assets = nlohmann::json::parse(tool_unit::readFile(asset_file));
-        }
-        catch (...)
-        {
-            return msg;
-        }
-
-        nlohmann::json new_msg = msg;
-        nlohmann::json new_content = nlohmann::json::array();
+        if (!msg.contains("content") || !msg["content"].is_array() || asset_array.empty())
+            return;
 
         for (auto &part : msg["content"])
         {
-            if (part.is_object() && part.value("type", "") == "image_url")
+            if (part.is_string())
             {
-                std::string url;
-                if (part["image_url"].is_string())
-                    url = part["image_url"].get<std::string>();
-                else if (part["image_url"].is_object() && part["image_url"].contains("url"))
-                    url = part["image_url"]["url"].get<std::string>();
-
-                if (url.find("asset://") == 0)
+                auto &tag = part.get_ref<std::string&>();
+                if (tag.size() > 1 && tag[0] == '#')
                 {
-                    std::string img_id = url.substr(8);
-                    if (assets.contains(img_id))
+                    try
                     {
-                        nlohmann::json restored = part;
-                        if (restored["image_url"].is_object())
-                            restored["image_url"]["url"] = assets[img_id];
-                        else
-                            restored["image_url"] = assets[img_id];
-                        new_content.push_back(restored);
+                        int idx = std::stoi(tag.substr(1));
+                        if (idx >= 0 && idx < (int)asset_array.size())
+                        {
+                            nlohmann::json img;
+                            img["type"] = "image_url";
+                            img["image_url"] = nlohmann::json::object();
+                            img["image_url"]["url"] = "";
+                            std::swap(img["image_url"]["url"].get_ref<std::string&>(), asset_array[idx].get_ref<std::string&>());
+                            part = std::move(img);
+                        }
                     }
-                    else
-                        new_content.push_back(part);
+                    catch (...)
+                    {
+                    }
                 }
-                else
-                    new_content.push_back(part);
             }
-            else
-                new_content.push_back(part);
         }
-
-        new_msg["content"] = new_content;
-        return new_msg;
     }
 
     struct SessionContext
@@ -908,10 +847,15 @@ namespace run_unit
                                 std::cout << "WARN - Session " << it->second->session_id << " file is not an array, reset." << std::endl;
                             }
                             // 恢复图片数据
-                            nlohmann::json restored = nlohmann::json::array();
+                            nlohmann::json asset_array;
+                            std::string asset_path = workspace + "/assets/messages/" + it->second->session_id + ".json";
+                            if (std::filesystem::exists(asset_path))
+                            {
+                                try { asset_array = nlohmann::json::parse(tool_unit::readFile(asset_path)); }
+                                catch (...) { asset_array = nlohmann::json::array(); }
+                            }
                             for (auto &msg : it->second->messages)
-                                restored.push_back(restore_images_in_message(msg, it->second->session_id, workspace));
-                            it->second->messages = std::move(restored);
+                                restore_images_in_message(msg, asset_array);
                         }
                     }
                     catch (const std::exception &e)
@@ -988,8 +932,12 @@ namespace run_unit
                 if (it != sessions.end() && it->second->loaded)
                 {
                     nlohmann::json save_msgs = nlohmann::json::array();
+                    nlohmann::json asset_array = nlohmann::json::array();
                     for (auto &msg : it->second->messages)
-                        save_msgs.push_back(extract_images_from_message(msg, current_session_id, workspace));
+                        save_msgs.push_back(extract_images_from_message(msg, asset_array));
+                    if (!asset_array.empty())
+                        tool_unit::writeFile(workspace + "/assets/messages/" + current_session_id + ".json",
+                                             asset_array.dump(4));
                     tool_unit::writeFile(workspace + "/sessions/" + current_session_id + ".json",
                                          save_msgs.dump(4));
                     tool_unit::writeFile(workspace + "/memorys/" + current_session_id + ".json",
@@ -1034,8 +982,12 @@ namespace run_unit
                     if (ses.second->loaded)
                     {
                         nlohmann::json save_msgs = nlohmann::json::array();
+                        nlohmann::json asset_array = nlohmann::json::array();
                         for (auto &msg : ses.second->messages)
-                            save_msgs.push_back(extract_images_from_message(msg, ses.first, workspace));
+                            save_msgs.push_back(extract_images_from_message(msg, asset_array));
+                        if (!asset_array.empty())
+                            tool_unit::writeFile(workspace + "/assets/messages/" + ses.first + ".json",
+                                                 asset_array.dump(4));
                         tool_unit::writeFile(workspace + "/sessions/" + ses.first + ".json",
                                              save_msgs.dump(4));
                         tool_unit::writeFile(workspace + "/memorys/" + ses.first + ".json",

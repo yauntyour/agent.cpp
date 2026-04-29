@@ -35,6 +35,31 @@ namespace app
 
     static std::string Admin;
     static std::string system_prompt;
+
+    // 日志工具：将所有错误写入 webui.log
+    static void webui_log(const std::string &level, const std::string &context, const std::string &message)
+    {
+        try
+        {
+            auto now = std::chrono::system_clock::now();
+            std::time_t t = std::chrono::system_clock::to_time_t(now);
+            std::string time_str = std::asctime(std::localtime(&t));
+            if (!time_str.empty() && time_str.back() == '\n')
+                time_str.pop_back();
+
+            std::string ws = run_unit::settings.value("workspace", ".");
+            std::string log_path = ws + "/webui.log";
+            std::ofstream log_file(log_path, std::ios::app);
+            if (log_file.is_open())
+            {
+                log_file << "[" << time_str << "] [" << level << "] [" << context << "] " << message << std::endl;
+            }
+        }
+        catch (...)
+        {
+            // 日志本身不抛出异常
+        }
+    }
     static size_t im_token_len = sizeof("<|im_start|>\n<|im_end|>") - 1;
     static std::string tools_list_str; // 工具列表的字符串表示
     static auto client = LLMProviders::OpenAIClient();
@@ -140,6 +165,7 @@ namespace app
         catch (const std::exception &e)
         {
             std::cerr << "ERROR - Memory summarize: " << e.what() << '\n';
+            webui_log("ERROR", "save_memory", e.what());
         }
         return 0;
     }
@@ -202,6 +228,7 @@ namespace app
         catch (const std::exception &e)
         {
             std::cerr << "ERROR - Memory assessment: " << e.what() << '\n';
+            webui_log("ERROR", "evolved_memory", e.what());
         }
         return 0;
     }
@@ -299,8 +326,14 @@ namespace app
             {
                 html = tool_unit::readFile(run_unit::settings["workspace"].get_ref<const std::string &>() + "/webui.html");
             }
+            catch (const std::exception &e)
+            {
+                webui_log("ERROR", "handle_root", e.what());
+                html = "<h1>Welcome</h1><p>Error loading webui.html</p>";
+            }
             catch (...)
             {
+                webui_log("ERROR", "handle_root", "unknown error");
                 html = "<h1>Welcome</h1><p>Error loading webui.html</p>";
             }
             output = build_http_response(200, "text/html", html);
@@ -313,8 +346,15 @@ namespace app
                 output = build_http_response(200, "application/json", client.models());
                 return rt::FLAG_DONE;
             }
+            catch (const std::exception &e)
+            {
+                webui_log("ERROR", "handle_models", e.what());
+                output = build_http_response(500, "application/json", R"({"error":"cannot connect to Ollama"})");
+                return rt::FLAG_ERROR;
+            }
             catch (...)
             {
+                webui_log("ERROR", "handle_models", "unknown error");
                 output = build_http_response(500, "application/json", R"({"error":"cannot connect to Ollama"})");
                 return rt::FLAG_ERROR;
             }
@@ -387,6 +427,7 @@ namespace app
             }
             catch (const std::exception &e)
             {
+                webui_log("ERROR", "handle_session_delete", e.what());
                 output = build_http_response(500, "application/json", json{{"error", e.what()}}.dump());
                 return rt::FLAG_ERROR;
             }
@@ -411,8 +452,15 @@ namespace app
                 output = build_http_response(200, "application/json", resp.dump());
                 return rt::FLAG_DONE;
             }
+            catch (const std::exception &e)
+            {
+                webui_log("ERROR", "handle_session_get_msg", e.what());
+                output = build_http_response(500, "application/json", "{}");
+                return rt::FLAG_ERROR;
+            }
             catch (...)
             {
+                webui_log("ERROR", "handle_session_get_msg", "unknown error");
                 output = build_http_response(500, "application/json", "{}");
                 return rt::FLAG_ERROR;
             }
@@ -432,6 +480,7 @@ namespace app
             }
             catch (const std::exception &e)
             {
+                webui_log("ERROR", "handle_session_memory", e.what());
                 output = build_http_response(500, "application/json", json{{"status", "failed"}}.dump());
                 return rt::FLAG_ERROR;
             }
@@ -460,8 +509,15 @@ namespace app
                 output = build_http_response(200, "application/json", run_unit::settings.dump());
                 return rt::FLAG_DONE;
             }
+            catch (const std::exception &e)
+            {
+                webui_log("ERROR", "handle_settings", e.what());
+                output = build_http_response(500, "text/plain", "Settings saved failed.");
+                return rt::FLAG_ERROR;
+            }
             catch (...)
             {
+                webui_log("ERROR", "handle_settings", "unknown error");
                 output = build_http_response(500, "text/plain", "Settings saved failed.");
                 return rt::FLAG_ERROR;
             }
@@ -473,8 +529,15 @@ namespace app
                 output = build_http_response(200, "application/json", run_unit::agent_data_manager.data.dump());
                 return rt::FLAG_DONE;
             }
+            catch (const std::exception &e)
+            {
+                webui_log("ERROR", "handle_data", e.what());
+                output = build_http_response(500, "application/json", R"({"error":"Fail to get data"})");
+                return rt::FLAG_ERROR;
+            }
             catch (...)
             {
+                webui_log("ERROR", "handle_data", "unknown error");
                 output = build_http_response(500, "application/json", R"({"error":"Fail to get data"})");
                 return rt::FLAG_ERROR;
             }
@@ -527,6 +590,7 @@ namespace app
             }
             catch (const std::exception &e)
             {
+                webui_log("ERROR", "handle_tools_toggle", e.what());
                 output = build_http_response(500, "application/json", json{{"error", e.what()}}.dump());
                 return rt::FLAG_ERROR;
             }
@@ -596,6 +660,7 @@ namespace app
             }
             catch (const std::exception &e)
             {
+                webui_log("ERROR", "handle_fs_list", e.what());
                 output = build_http_response(500, "application/json", json{{"error", e.what()}}.dump());
                 return rt::FLAG_ERROR;
             }
@@ -612,8 +677,15 @@ namespace app
                 output = build_http_response(200, "application/json", json{{"files", arr}}.dump());
                 return rt::FLAG_DONE;
             }
+            catch (const std::exception &e)
+            {
+                webui_log("ERROR", "handle_fs_used", e.what());
+                output = build_http_response(200, "application/json", R"({"files":[]})");
+                return rt::FLAG_DONE;
+            }
             catch (...)
             {
+                webui_log("ERROR", "handle_fs_used", "unknown error");
                 output = build_http_response(200, "application/json", R"({"files":[]})");
                 return rt::FLAG_DONE;
             }
@@ -627,8 +699,15 @@ namespace app
                 output = build_http_response(200, "application/json", json(todos).dump());
                 return rt::FLAG_DONE;
             }
+            catch (const std::exception &e)
+            {
+                webui_log("ERROR", "handle_todos_list", e.what());
+                output = build_http_response(500, "application/json", "[]");
+                return rt::FLAG_ERROR;
+            }
             catch (...)
             {
+                webui_log("ERROR", "handle_todos_list", "unknown error");
                 output = build_http_response(500, "application/json", "[]");
                 return rt::FLAG_ERROR;
             }
@@ -657,8 +736,15 @@ namespace app
                 }
                 output = build_http_response(404, "application/json", "{}");
             }
+            catch (const std::exception &e)
+            {
+                webui_log("ERROR", "handle_todos_setting", e.what());
+                output = build_http_response(500, "application/json", "{}");
+                return rt::FLAG_ERROR;
+            }
             catch (...)
             {
+                webui_log("ERROR", "handle_todos_setting", "unknown error");
                 output = build_http_response(500, "application/json", "{}");
                 return rt::FLAG_ERROR;
             }
@@ -693,8 +779,14 @@ namespace app
                 output = build_http_response(200, "application/json", request.dump());
                 return rt::FLAG_DONE;
             }
+            catch (const std::exception &e)
+            {
+                webui_log("ERROR", "handle_todos_new", e.what());
+                return rt::FLAG_ERROR;
+            }
             catch (...)
             {
+                webui_log("ERROR", "handle_todos_new", "unknown error");
                 return rt::FLAG_ERROR;
             }
         }
@@ -773,26 +865,18 @@ namespace app
                 }
 
                 // 3. 添加当前用户消息
-                json user_msg;
                 json contents = json::array();
                 if (!channel.empty())
-                {
                     contents.push_back({{"type", "text"}, {"text", "Messages received from " + channel + ":" + user_message}});
-                    user_msg = {{"role", Admin}, {"content", contents}};
-                }
                 else
-                {
                     contents.push_back({{"type", "text"}, {"text", user_message}});
-                    user_msg = {{"role", Admin}, {"content", contents}};
-                }
 
                 if (request.contains("images") && request["images"].is_array())
                 {
                     for (auto &img : request["images"])
-                    {
-                        contents.push_back({{"type", "image_url"}, {"image_url", {{"url", std::move(img.get<std::string>())}}}});
-                    }
+                        contents.push_back({{"type", "image_url"}, {"image_url", {{"url", img.get<std::string>()}}}});
                 }
+                json user_msg = {{"role", Admin}, {"content", contents}};
                 context.push_back(user_msg);
 
                 // 思考模式
@@ -901,13 +985,8 @@ namespace app
                 }
 
                 json new_messages = json::array();
-                // 保存系统指令
-                new_messages.push_back({{"role", "system"}, {"content", system_prompt}});
-                new_messages.push_back({{"role", "system"}, {"content", tools_list_str}});
-                if (!session_ptr->is_memory_empty())
-                    new_messages.push_back({{"role", "memory"}, {"content", session_ptr->memory["abstracts"]}});
-                // 保存所有会话消息
-                size_t history_start = 2 + (session_ptr->is_memory_empty() ? 0 : 1); // system_prompt, tools_list, memory(opt)
+                // 保存所有会话消息（剔除头两条系统提示词）
+                size_t history_start = 2 + (session_ptr->is_memory_empty() ? 0 : 1);
                 for (size_t i = history_start; i < context.size(); ++i)
                 {
                     std::string role = context[i]["role"];
@@ -920,11 +999,16 @@ namespace app
                 // 保存到磁盘
                 {
                     nlohmann::json save_msgs = nlohmann::json::array();
+                    nlohmann::json asset_array = nlohmann::json::array();
                     for (auto &msg : session_ptr->messages)
-                        save_msgs.push_back(run_unit::extract_images_from_message(msg, session_ptr->session_id, run_unit::settings["workspace"].get<std::string>()));
-                    tool_unit::writeFile(run_unit::settings["workspace"].get<std::string>() + "/sessions/" + session_ptr->session_id + ".json",
+                        save_msgs.push_back(run_unit::extract_images_from_message(msg, asset_array));
+                    std::string ws2 = run_unit::settings["workspace"].get<std::string>();
+                    tool_unit::writeFile(ws2 + "/sessions/" + session_ptr->session_id + ".json",
                                          save_msgs.dump(4));
-                    tool_unit::writeFile(run_unit::settings["workspace"].get<std::string>() + "/memorys/" + session_ptr->session_id + ".json",
+                    if (!asset_array.empty())
+                        tool_unit::writeFile(ws2 + "/assets/messages/" + session_ptr->session_id + ".json",
+                                             asset_array.dump(4));
+                    tool_unit::writeFile(ws2 + "/memorys/" + session_ptr->session_id + ".json",
                                          session_ptr->memory.dump(4));
                 }
 
@@ -956,6 +1040,7 @@ namespace app
             catch (const std::exception &e)
             {
                 std::cerr << "Error in handle_input_stream: " << e.what() << std::endl;
+                webui_log("ERROR", "handle_input_stream", e.what());
                 output = build_http_response(500, "application/json", json{{"error", e.what()}}.dump());
                 return rt::FLAG_ERROR;
             }
@@ -1041,24 +1126,18 @@ namespace app
                 for (auto &msg : session_ptr->messages)
                     context.push_back(msg);
 
-                json user_msg;
                 json contents = json::array();
                 if (!channel.empty())
-                {
                     contents.push_back({{"type", "text"}, {"text", "Messages received from " + channel + ":" + user_message}});
-                    user_msg = {{"role", Admin}, {"content", contents}};
-                }
                 else
-                {
                     contents.push_back({{"type", "text"}, {"text", user_message}});
-                    user_msg = {{"role", Admin}, {"content", contents}};
-                }
 
                 if (request.contains("images") && request["images"].is_array())
                 {
                     for (auto &img : request["images"])
-                        contents.push_back({{"type", "image_url"}, {"image_url", {{"url", std::move(img.get<std::string>())}}}});
+                        contents.push_back({{"type", "image_url"}, {"image_url", {{"url", img.get<std::string>()}}}});
                 }
+                json user_msg = {{"role", Admin}, {"content", contents}};
                 context.push_back(user_msg);
 
                 think_mode = request.value("think", false);
@@ -1137,14 +1216,8 @@ namespace app
                     context.push_back(sys_msg);
                 }
 
-                // 提取新消息并保存（包含系统指令和记忆在内）
+                // 提取新消息并保存（剔除头两条系统提示词）
                 json new_messages = json::array();
-                // 保存系统指令
-                new_messages.push_back({{"role", "system"}, {"content", system_prompt}});
-                new_messages.push_back({{"role", "system"}, {"content", tools_list_str}});
-                if (!session_ptr->is_memory_empty())
-                    new_messages.push_back({{"role", "memory"}, {"content", session_ptr->memory["abstracts"]}});
-                // 保存所有会话消息
                 size_t history_start = 2 + (session_ptr->is_memory_empty() ? 0 : 1);
                 for (size_t i = history_start; i < context.size(); ++i)
                 {
@@ -1158,11 +1231,16 @@ namespace app
                 // 保存到磁盘
                 {
                     nlohmann::json save_msgs = nlohmann::json::array();
+                    nlohmann::json asset_array = nlohmann::json::array();
                     for (auto &msg : session_ptr->messages)
-                        save_msgs.push_back(run_unit::extract_images_from_message(msg, session_ptr->session_id, run_unit::settings["workspace"].get<std::string>()));
-                    tool_unit::writeFile(run_unit::settings["workspace"].get<std::string>() + "/sessions/" + session_ptr->session_id + ".json",
+                        save_msgs.push_back(run_unit::extract_images_from_message(msg, asset_array));
+                    std::string ws2 = run_unit::settings["workspace"].get<std::string>();
+                    tool_unit::writeFile(ws2 + "/sessions/" + session_ptr->session_id + ".json",
                                          save_msgs.dump(4));
-                    tool_unit::writeFile(run_unit::settings["workspace"].get<std::string>() + "/memorys/" + session_ptr->session_id + ".json",
+                    if (!asset_array.empty())
+                        tool_unit::writeFile(ws2 + "/assets/messages/" + session_ptr->session_id + ".json",
+                                             asset_array.dump(4));
+                    tool_unit::writeFile(ws2 + "/memorys/" + session_ptr->session_id + ".json",
                                          session_ptr->memory.dump(4));
                 }
 
@@ -1191,6 +1269,7 @@ namespace app
             catch (const std::exception &e)
             {
                 std::cerr << "Error in handle_input_stream_streaming: " << e.what() << std::endl;
+                webui_log("ERROR", "handle_input_stream_streaming", e.what());
                 try
                 {
                     sse({{"type", "error"}, {"message", e.what()}});
