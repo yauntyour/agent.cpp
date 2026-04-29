@@ -235,6 +235,9 @@ body {
 .fb-btn:hover { background: var(--bg-surface); color: var(--text-main); }
 #fb-breadcrumb { display: flex; align-items: center; gap: 3px; padding: 4px 12px; font-size: 11px; color: var(--text-muted); border-bottom: 1px solid var(--border-color); overflow-x: auto; white-space: nowrap; min-height: 28px; scrollbar-width: none; }
 #fb-breadcrumb::-webkit-scrollbar { display: none; }
+.fb-parent-btn { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border: none; border-radius: 4px; background: transparent; color: var(--accent-color); cursor: pointer; font-size: 11px; flex-shrink: 0; transition: all 0.15s; padding: 0; margin-right: 2px; }
+.fb-parent-btn:hover:not(:disabled) { background: rgba(255,255,255,0.08); color: var(--accent-hover); }
+.fb-parent-btn:disabled { opacity: 0.25; cursor: default; }
 .fb-crumb { cursor: pointer; color: var(--accent-color); flex-shrink: 0; transition: color 0.15s; }
 .fb-crumb:hover { color: var(--accent-hover); text-decoration: underline; }
 .fb-crumb-sep { color: var(--border-color); margin: 0 2px; flex-shrink: 0; font-size: 14px; line-height: 1; }
@@ -1014,13 +1017,19 @@ const fb = {
 
   renderBreadcrumb(path) {
     const parts = path.split('/').filter(Boolean);
-    let html = '<span class="fb-crumb" data-path="/"><i class="fa-solid fa-house"></i></span>';
+    const parentPath = parts.length > 0 ? '/' + parts.slice(0, -1).join('/') : '/';
+    const isRoot = parts.length === 0;
+    let html = `<button class="fb-parent-btn" data-path="${esc(parentPath)}" title="返回上一级" ${isRoot ? 'disabled' : ''}><i class="fa-solid fa-arrow-up"></i></button>`;
+    html += '<span class="fb-crumb" data-path="/"><i class="fa-solid fa-house"></i></span>';
     let acc = '';
     for (const p of parts) {
       acc += '/' + p;
       html += `<span class="fb-crumb-sep">›</span><span class="fb-crumb" data-path="${esc(acc)}">${esc(p)}</span>`;
     }
     els.fbBreadcrumb.innerHTML = html;
+    // 点击返回上一级
+    const parentBtn = els.fbBreadcrumb.querySelector('.fb-parent-btn');
+    if (parentBtn) parentBtn.onclick = () => fb.loadDir(parentBtn.dataset.path);
     // 点击面包屑导航
     els.fbBreadcrumb.querySelectorAll('.fb-crumb').forEach(el => {
       el.onclick = () => fb.loadDir(el.dataset.path);
