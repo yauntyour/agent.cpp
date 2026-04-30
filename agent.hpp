@@ -75,10 +75,11 @@ std::string get_system_status()
             long long totalUser = 0, totalSystem = 0, totalIdle = 0, totalNice = 0;
             for (natural_t i = 0; i < cpuCount; ++i)
             {
-                totalUser += infoArray[i].cpu_ticks[CPU_STATE_USER];
-                totalSystem += infoArray[i].cpu_ticks[CPU_STATE_SYSTEM];
-                totalIdle += infoArray[i].cpu_ticks[CPU_STATE_IDLE];
-                totalNice += infoArray[i].cpu_ticks[CPU_STATE_NICE];
+                auto base = i * CPU_STATE_MAX;
+                totalUser += infoArray[base + CPU_STATE_USER];
+                totalSystem += infoArray[base + CPU_STATE_SYSTEM];
+                totalIdle += infoArray[base + CPU_STATE_IDLE];
+                totalNice += infoArray[base + CPU_STATE_NICE];
             }
             vm_deallocate(mach_task_self(), (vm_address_t)infoArray,
                           infoCount * sizeof(*infoArray));
