@@ -1,6 +1,6 @@
 {
     "agent_name": "assistant",
-    "auto_expand_files": true,
+    "auto_expand_files": false,
     "channels": [
         {
             "name": "Telegram",
