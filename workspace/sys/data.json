@@ -1,9 +1,14 @@
 {
     "usages": {
+        "1778147330": {
+            "completion_cost": 604,
+            "prompt_cost": 1540,
+            "total_cost": 2144
+        },
         "Telegram": {
-            "completion_cost": 6313,
-            "prompt_cost": 83087,
-            "total_cost": 89400
+            "completion_cost": 12111,
+            "prompt_cost": 123884,
+            "total_cost": 135995
         },
         "memory": {
             "completion_cost": 1529,

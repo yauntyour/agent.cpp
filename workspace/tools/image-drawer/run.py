@@ -106,7 +106,7 @@ def main():
     parser.add_argument(
         "--output",
         default="output.png",
-        help="输出图像路径（默认 output.png，会保存在 ./assets/ 目录下）",
+        help="输出图像路径（默认 output.png，会保存在 ./workspace/assets/ 目录下）",
     )
     parser.add_argument("--steps", type=int, help="推理步数（可选，9-12 推荐）")
     parser.add_argument("--height", type=int, help="图像高度（可选）")
@@ -133,7 +133,7 @@ def main():
         sys.exit(0)
 
     # 构造本地输出路径（保持原有行为：保存到 ./assets/ 目录）
-    output_dir = os.path.join(os.getcwd(), "assets")
+    output_dir = os.path.join(os.getcwd(), "workspace/assets")
     output_path = os.path.join(output_dir, args.output)
 
     success = generate_image(

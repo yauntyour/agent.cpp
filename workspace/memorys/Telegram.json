@@ -1,4 +1,4 @@
 {
-    "abstracts": "**[Memory Output]**\n\n**Time:** Thu May 07 16:26:01 2026\n\n**Summary:**\n系统状态检查已完成，当前系统运行非常平稳健康（CPU 使用率：4.5%，内存占用率：56.1%）。尝试使用 `playwright-cli.cmd navigate https://www.bilibili.com/` 进行导航时，因参数错误导致命令执行失败。随后，系统已修正命令为 `playwright-cli.cmd open https://www.bilibili.com/`，并成功打开了哔哩哔哩（Bilibili）页面。页面信息确认：URL 为 `https://www.bilibili.com/`，页面标题为 `哔哩哔哩 (゜-゜)つロ 干杯~-bilibili`。系统已生成对应页面的快照文件，当前已进入 Bilibili 页面，等待用户进一步指令（例如：查看截图、执行页面操作或导航至其他页面）。",
-    "keywords": "系统状态, Playwright, 自动化, B站, CPU 使用率, 内存, playwright-cli, 浏览器自动化, 命令, open, navigate, 截图, 快照, 导航, URL, 核心命令, 参数, 资源, click, snapshot, 页面标题, 命令行工具"
+    "abstracts": "",
+    "keywords": ""
 }

@@ -2580,7 +2580,7 @@
       });
     }
 
-    // ============ 流式发送消息 ============
+    // ============ 发送消息（流式/非流式） ============
     async function sendMessageStream() {
       const content = els.userInput.value.trim();
       const imgs = [...state.pendingImages];
@@ -2605,13 +2605,25 @@
       appendMessage(place);
       state.assistantMsgId = msgId;
 
-      // 3. 重置流缓冲区
+      // 3. 重置缓冲区
       state.streamBuffers = { content: '', thinking: '', thinkings: [], toolOutputs: [], currentTool: null };
 
-      // 4. SSE 请求
+      // 4. 构造请求载荷
       const payload = { messages: content, model: state.currentModel || 'default', think: state.thinkMode, session_id: state.currentSessionId };
       if (imgs.length) payload.images = imgs;
 
+      // 5. 根据配置选择流式或非流式请求
+      if (state.settings.stream !== false) {
+        await sendStreaming(payload, msgId);
+      } else {
+        await sendPacked(payload, msgId);
+      }
+
+      state.isTyping = false; els.sendBtn.disabled = false;
+    }
+
+    // 流式 SSE 请求
+    async function sendStreaming(payload, msgId) {
       try {
         const resp = await fetch(API + '/input/stream', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
@@ -2641,7 +2653,61 @@
         state.messages.push({ role: 'ai', content: `❌ 错误: ${e.message}`, images: [], _thinkings: [], _toolCalls: [] });
         renderMessages();
         log('请求错误: ' + e.message, 'error');
-      } finally {
+        state.isTyping = false; els.sendBtn.disabled = false;
+      }
+    }
+
+    // 非流式（Packed）请求
+    async function sendPacked(payload, msgId) {
+      try {
+        const resp = await fetch(API + '/input', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+        });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+
+        const result = await resp.json();
+        const sb = state.streamBuffers;
+
+        // 填充内容
+        sb.content = result.content || '';
+        sb.thinkings = result.thinking || [];
+
+        // 填充工具调用
+        sb.toolOutputs = (result.tools || []).map(t => ({
+          name: t.name, args: t.args || '', output: t.output || '', success: true, _open: false
+        }));
+
+        // 更新 AI 消息 UI
+        updateAssistantMsg(msgId, {
+          content: sb.content,
+          _typing: false,
+          _thinkings: sb.thinkings,
+          _toolCalls: sb.toolOutputs,
+          _usage: result.usage
+        });
+
+        // 更新上下文使用显示
+        if (result.usage) {
+          state.contextUsage.total = result.usage.total_cost || (result.usage.prompt_cost + result.usage.completion_cost) || 0;
+          state.contextUsage.max = state.settings.max_context || 128000;
+          updateContextUsage({ total_cost: state.contextUsage.total });
+        }
+
+        // 替换占位为最终消息
+        state.messages = state.messages.filter(m => m._id !== msgId);
+        const finalMsg = {
+          role: 'ai', content: sb.content, images: [],
+          _thinkings: sb.thinkings, _toolCalls: sb.toolOutputs, _usage: result.usage
+        };
+        state.messages.push(finalMsg);
+        renderMessages();
+        log('响应完成', 'success');
+
+      } catch (e) {
+        state.messages = state.messages.filter(m => m._id !== msgId);
+        state.messages.push({ role: 'ai', content: `❌ 错误: ${e.message}`, images: [], _thinkings: [], _toolCalls: [] });
+        renderMessages();
+        log('请求错误: ' + e.message, 'error');
         state.isTyping = false; els.sendBtn.disabled = false;
       }
     }

@@ -158,9 +158,10 @@ namespace app
             session_ptr->memory["keywords"] = response["choices"][0]["message"]["content"].get<std::string>();
             std::cout << "Keywords generated successfully." << std::endl;
 
-            run_unit::agent_data_manager.data["usages"]["memory"]["prompt_cost"] = run_unit::agent_data_manager.data["usages"]["memory"]["prompt_cost"].get<size_t>() + total_prompt_tokens;
-            run_unit::agent_data_manager.data["usages"]["memory"]["completion_cost"] = run_unit::agent_data_manager.data["usages"]["memory"]["completion_cost"].get<size_t>() + total_completion_tokens;
-            run_unit::agent_data_manager.data["usages"]["memory"]["total_cost"] = run_unit::agent_data_manager.data["usages"]["memory"]["total_cost"].get<size_t>() + total_prompt_tokens + total_completion_tokens;
+            auto &mem_usage = run_unit::agent_data_manager.data["usages"]["memory"];
+            mem_usage["prompt_cost"] = mem_usage.value("prompt_cost", 0) + total_prompt_tokens;
+            mem_usage["completion_cost"] = mem_usage.value("completion_cost", 0) + total_completion_tokens;
+            mem_usage["total_cost"] = mem_usage.value("total_cost", 0) + total_prompt_tokens + total_completion_tokens;
         }
         catch (const std::exception &e)
         {
@@ -183,7 +184,6 @@ namespace app
                                                                                                                                                                                                                                          "If improvements are needed, output only the improved memory output; if no improvements are needed, output only [PASS]."}}}},
                 {"stream", false}};
 
-            // 插入所有会话消息（但跳过 system/memory？实际可以插入全部，这里略作简化）
             for (auto &msg : session_ptr->messages)
             {
                 req["messages"].push_back(msg);
@@ -204,6 +204,7 @@ namespace app
                 session_ptr->memory["abstracts"] = std::move(output);
                 std::cout << "Abstracts updated successfully." << std::endl;
 
+                req["messages"][1]["content"] = session_ptr->memory["abstracts"];
                 req["messages"][2]["content"] = "Please evaluate the relevance of the following content to the memory content, refine the keywords for the memory, and output only the refined keywords for the memory content.";
                 client.generate(req, response);
                 if (response.contains("usage"))
@@ -221,9 +222,10 @@ namespace app
             {
                 std::cout << "Memory not need to update." << std::endl;
             }
-            run_unit::agent_data_manager.data["usages"]["memory"]["prompt_cost"] = run_unit::agent_data_manager.data["usages"]["memory"]["prompt_cost"].get<size_t>() + total_prompt_tokens;
-            run_unit::agent_data_manager.data["usages"]["memory"]["completion_cost"] = run_unit::agent_data_manager.data["usages"]["memory"]["completion_cost"].get<size_t>() + total_completion_tokens;
-            run_unit::agent_data_manager.data["usages"]["memory"]["total_cost"] = run_unit::agent_data_manager.data["usages"]["memory"]["total_cost"].get<size_t>() + total_prompt_tokens + total_completion_tokens;
+            auto &mem_usage = run_unit::agent_data_manager.data["usages"]["memory"];
+            mem_usage["prompt_cost"] = mem_usage.value("prompt_cost", 0) + total_prompt_tokens;
+            mem_usage["completion_cost"] = mem_usage.value("completion_cost", 0) + total_completion_tokens;
+            mem_usage["total_cost"] = mem_usage.value("total_cost", 0) + total_prompt_tokens + total_completion_tokens;
         }
         catch (const std::exception &e)
         {
@@ -263,7 +265,7 @@ namespace app
         }
 
         int handle_root(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
-        int handle_input_stream(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+        int handle_input_packed(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
         int handle_models(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
         int handle_settings(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
         int handle_data(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
@@ -288,7 +290,7 @@ namespace app
         int handle_fs_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
         int handle_fs_used(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
 
-        void handle_input_stream_streaming(std::string &input, rt::WriteCallback write, const std::map<std::string, std::string> &params);
+        void handle_input_streaming(std::string &input, rt::WriteCallback write, const std::map<std::string, std::string> &params);
 
         void register_routes(rt::router &router)
         {
@@ -297,7 +299,7 @@ namespace app
             router.on("/api/settings", handle_settings);
             router.on("/api/data", handle_data);
 
-            router.on("/api/input", handle_input_stream);
+            router.on("/api/input", handle_input_packed);
             router.on("/api/session", handle_session_list);
             router.on("/api/session/new", handle_new_session);
             router.on("/api/session/msg", handle_session_get_msg);
@@ -316,7 +318,7 @@ namespace app
             router.on("/api/todos/:id", handle_todos_setting);
 
             // 流式路由
-            router.on_stream("/api/input/stream", handle_input_stream_streaming);
+            router.on_stream("/api/input/stream", handle_input_streaming);
         }
 
         int handle_root(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
@@ -595,7 +597,6 @@ namespace app
                 return rt::FLAG_ERROR;
             }
         }
-
         int handle_fs_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
             try
@@ -665,7 +666,6 @@ namespace app
                 return rt::FLAG_ERROR;
             }
         }
-
         int handle_fs_used(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
             try
@@ -790,262 +790,7 @@ namespace app
                 return rt::FLAG_ERROR;
             }
         }
-        int handle_input_stream(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
-        {
-            json req_payload;
-            std::string model;
-            std::string channel;
-            bool think_mode = false;
-            size_t total_prompt_tokens = 0;
-            size_t total_completion_tokens = 0;
-            std::string sid = "";
-            std::shared_ptr<run_unit::SessionContext> session_ptr;
-
-            try
-            {
-                // 解析请求体
-                size_t header_end = input.find("\r\n\r\n");
-                if (header_end == std::string::npos)
-                {
-                    output = build_http_response(400, "text/plain", "Bad Request");
-                    return rt::FLAG_ERROR;
-                }
-                std::string body = input.substr(header_end + 4);
-                json request = json::parse(body);
-
-                std::string user_message = request["messages"].get<std::string>();
-                model = request.value("model", "default");
-                if (model == "default")
-                    model = run_unit::settings["model"].get<std::string>();
-
-                // 1. 确定会话：频道消息 vs 普通消息
-                if (request.contains("channel"))
-                {
-                    channel = request["channel"].get<std::string>();
-                    session_ptr = run_unit::agent_session_manager.get(channel);
-                    if (!session_ptr)
-                    {
-                        session_ptr = run_unit::agent_session_manager.create();
-                        run_unit::agent_session_manager.change_session(session_ptr->session_id);
-                    }
-                }
-                else if (request.contains("session_id"))
-                {
-                    sid = request["session_id"].get<std::string>();
-                    session_ptr = run_unit::agent_session_manager.get(sid);
-                    if (!session_ptr)
-                    {
-                        output = build_http_response(400, "application/json", R"({"error":"session not found"})");
-                        return rt::FLAG_ERROR;
-                    }
-                    run_unit::agent_session_manager.change_session(sid);
-                }
-                else
-                {
-                    session_ptr = run_unit::agent_session_manager.get_current();
-                }
-
-                // 2. 构建上下文数组（系统提示 + 工具列表 + 记忆 + 历史消息）
-                json context = json::array();
-
-                // 系统提示
-                context.push_back({{"role", "system"}, {"content", system_prompt}});
-                context.push_back({{"role", "system"}, {"content", tools_list_str}});
-
-                // 记忆（如果有）
-                if (!session_ptr->is_memory_empty())
-                {
-                    context.push_back({{"role", "memory"}, {"content", session_ptr->memory["abstracts"]}});
-                }
-
-                // 添加会话历史（加载自消息文件）
-                for (auto &msg : session_ptr->messages)
-                {
-                    context.push_back(msg);
-                }
-
-                // 3. 添加当前用户消息
-                json contents = json::array();
-                if (!channel.empty())
-                    contents.push_back({{"type", "text"}, {"text", "Messages received from " + channel + ":" + user_message}});
-                else
-                    contents.push_back({{"type", "text"}, {"text", user_message}});
-
-                if (request.contains("images") && request["images"].is_array())
-                {
-                    for (auto &img : request["images"])
-                        contents.push_back({{"type", "image_url"}, {"image_url", {{"url", img.get<std::string>()}}}});
-                }
-                json user_msg = {{"role", Admin}, {"content", contents}};
-                context.push_back(user_msg);
-
-                // 思考模式
-                think_mode = request.value("think", false);
-
-                // 准备请求
-                json llm_req = {
-                    {"model", model},
-                    {"messages", context},
-                    {"stream", false},
-                    {"think", think_mode}};
-
-                // 第一次调用
-                json response;
-                if (!client.generate(llm_req, response))
-                {
-                    output = build_http_response(500, "application/json", R"({"error":"LLM call failed"})");
-                    return rt::FLAG_ERROR;
-                }
-
-                if (response.contains("usage"))
-                {
-                    auto &usage = response["usage"];
-                    if (usage.contains("prompt_tokens"))
-                        total_prompt_tokens += usage["prompt_tokens"].get<size_t>();
-                    if (usage.contains("completion_tokens"))
-                        total_completion_tokens += usage["completion_tokens"].get<size_t>();
-                }
-
-                auto choices = response["choices"][0];
-                std::string assistant_reply = "\r\n" + choices["message"]["content"].get<std::string>();
-                json assistant_msg = {{"role", run_unit::settings["agent_name"]}, {"content", assistant_reply}};
-                context.push_back(assistant_msg);
-
-                // 思考过程
-                json thinkings = json::array();
-                if (think_mode)
-                {
-                    if (choices["message"].contains("reasoning_content"))
-                        thinkings.push_back(choices["message"]["reasoning_content"]);
-                    else if (choices["message"].contains("reasoning"))
-                        thinkings.push_back(choices["message"]["reasoning"]);
-                }
-
-                // 工具/命令循环
-                size_t mpc_count = 0;
-                size_t max_rounds = run_unit::settings["max_mpc_rounds"].get<size_t>();
-                std::string tool_call_content = assistant_reply;
-                for (; mpc_count < max_rounds; ++mpc_count)
-                {
-                    std::string sys_out;
-                    auto [tools_called, tools_ok] = tool_unit::tools_scan(tool_call_content, sys_out);
-                    auto cs_called = cs_unit::cs_scan(tool_call_content, sys_out);
-                    if (tools_called == 0 && cs_called == 0)
-                        break;
-
-                    // 构造工具/CS 输出消息
-                    json sys_msg;
-                    json sys_contents = json::array();
-                    sys_contents.push_back({{"type", "text"}, {"text", sys_out}});
-                    if (!tool_unit::image_queue.empty())
-                    {
-                        for (auto &img : tool_unit::image_queue)
-                        {
-                            sys_contents.push_back({{"type", "image_url"}, {"image_url", {{"url", img}}}});
-                        }
-                        tool_unit::image_queue.clear();
-                    }
-                    sys_msg = {{"role", "tool"}, {"content", sys_contents}};
-                    context.push_back(sys_msg);
-
-                    // 二次响应
-                    llm_req["messages"] = context;
-                    response.clear();
-                    if (!client.generate(llm_req, response))
-                    {
-                        output = build_http_response(500, "application/json", R"({"error":"LLM call failed in tool loop"})");
-                        return rt::FLAG_ERROR;
-                    }
-                    if (response.contains("usage"))
-                    {
-                        auto &usage = response["usage"];
-                        if (usage.contains("prompt_tokens"))
-                            total_prompt_tokens += usage["prompt_tokens"].get<size_t>();
-                        if (usage.contains("completion_tokens"))
-                            total_completion_tokens += usage["completion_tokens"].get<size_t>();
-                    }
-                    choices = response["choices"][0];
-                    std::string new_reply = choices["message"]["content"].get<std::string>();
-                    json new_assistant_msg = {{"role", run_unit::settings["agent_name"]}, {"content", new_reply}};
-                    context.push_back(new_assistant_msg);
-                    assistant_reply += "\r\n" + new_reply;
-                    if (think_mode)
-                    {
-                        if (choices["message"].contains("reasoning_content"))
-                            thinkings.push_back(choices["message"]["reasoning_content"]);
-                        else if (choices["message"].contains("reasoning"))
-                            thinkings.push_back(choices["message"]["reasoning"]);
-                    }
-                    tool_call_content = new_reply;
-                }
-
-                if (mpc_count >= max_rounds)
-                {
-                    assistant_reply += "\r\n[Max CS MPC CALL]\r\n";
-                }
-
-                json new_messages = json::array();
-                // 保存所有会话消息（剔除头两条系统提示词）
-                size_t history_start = 2 + (session_ptr->is_memory_empty() ? 0 : 1);
-                for (size_t i = history_start; i < context.size(); ++i)
-                {
-                    std::string role = context[i]["role"];
-                    if (role == "system" || role == "memory")
-                        continue;
-                    new_messages.push_back(context[i]);
-                }
-                session_ptr->messages = new_messages;
-
-                // 保存到磁盘
-                {
-                    nlohmann::json save_msgs = nlohmann::json::array();
-                    nlohmann::json asset_array = nlohmann::json::array();
-                    for (auto &msg : session_ptr->messages)
-                        save_msgs.push_back(run_unit::extract_images_from_message(msg, asset_array));
-                    std::string ws2 = run_unit::settings["workspace"].get<std::string>();
-                    tool_unit::writeFile(ws2 + "/sessions/" + session_ptr->session_id + ".json",
-                                         save_msgs.dump(4));
-                    if (!asset_array.empty())
-                        tool_unit::writeFile(ws2 + "/assets/messages/" + session_ptr->session_id + ".json",
-                                             asset_array.dump(4));
-                    tool_unit::writeFile(ws2 + "/memorys/" + session_ptr->session_id + ".json",
-                                         session_ptr->memory.dump(4));
-                }
-
-                assistant_reply += "\r\n" + std::format("\r\n[Context size: {} chars]", context.dump().length());
-                json data = {
-                    {"model", model},
-                    {"thinkings", thinkings},
-                    {"messages", new_messages},
-                    {"stream", false},
-                    {"think", think_mode},
-                    {"usage", {{"prompt_cost", total_prompt_tokens}, {"completion_cost", total_completion_tokens}, {"total_cost", total_prompt_tokens + total_completion_tokens}}}};
-                if (run_unit::agent_data_manager.data["usages"].contains(sid))
-                {
-                    run_unit::agent_data_manager.data["usages"][sid]["prompt_cost"] = run_unit::agent_data_manager.data["usages"][sid]["prompt_cost"].get<size_t>() + total_prompt_tokens;
-                    run_unit::agent_data_manager.data["usages"][sid]["completion_cost"] = run_unit::agent_data_manager.data["usages"][sid]["completion_cost"].get<size_t>() + total_completion_tokens;
-                    run_unit::agent_data_manager.data["usages"][sid]["total_cost"] = run_unit::agent_data_manager.data["usages"][sid]["total_cost"].get<size_t>() + total_prompt_tokens + total_completion_tokens;
-                }
-                else
-                {
-                    run_unit::agent_data_manager.data["usages"][sid] = {
-                        {"prompt_cost", total_prompt_tokens},
-                        {"completion_cost", total_completion_tokens},
-                        {"total_cost", total_prompt_tokens + total_completion_tokens}};
-                }
-
-                output = build_http_response(200, "application/json", data.dump());
-                return rt::FLAG_DONE;
-            }
-            catch (const std::exception &e)
-            {
-                std::cerr << "Error in handle_input_stream: " << e.what() << std::endl;
-                webui_log("ERROR", "handle_input_stream", e.what());
-                output = build_http_response(500, "application/json", json{{"error", e.what()}}.dump());
-                return rt::FLAG_ERROR;
-            }
-        }
-        void handle_input_stream_streaming(std::string &input, rt::WriteCallback write, const std::map<std::string, std::string> &params)
+        void handle_input_streaming(std::string &input, rt::WriteCallback write, const std::map<std::string, std::string> &params)
         {
             auto sse = [&](const json &data)
             {
@@ -1139,6 +884,7 @@ namespace app
                 }
                 json user_msg = {{"role", Admin}, {"content", contents}};
                 context.push_back(user_msg);
+                session_ptr->messages.push_back(user_msg);
 
                 think_mode = request.value("think", false);
 
@@ -1183,6 +929,7 @@ namespace app
                     {
                         json assistant_msg = {{"role", run_unit::settings["agent_name"]}, {"content", response_text}};
                         context.push_back(assistant_msg);
+                        session_ptr->messages.push_back(assistant_msg);
                         break;
                     }
 
@@ -1214,34 +961,7 @@ namespace app
                     }
                     json sys_msg = {{"role", "tool"}, {"content", sys_contents}};
                     context.push_back(sys_msg);
-                }
-
-                // 提取新消息并保存（剔除头两条系统提示词）
-                json new_messages = json::array();
-                size_t history_start = 2 + (session_ptr->is_memory_empty() ? 0 : 1);
-                for (size_t i = history_start; i < context.size(); ++i)
-                {
-                    std::string role = context[i]["role"];
-                    if (role == "system" || role == "memory")
-                        continue;
-                    new_messages.push_back(context[i]);
-                }
-                session_ptr->messages = new_messages;
-
-                // 保存到磁盘
-                {
-                    nlohmann::json save_msgs = nlohmann::json::array();
-                    nlohmann::json asset_array = nlohmann::json::array();
-                    for (auto &msg : session_ptr->messages)
-                        save_msgs.push_back(run_unit::extract_images_from_message(msg, asset_array));
-                    std::string ws2 = run_unit::settings["workspace"].get<std::string>();
-                    tool_unit::writeFile(ws2 + "/sessions/" + session_ptr->session_id + ".json",
-                                         save_msgs.dump(4));
-                    if (!asset_array.empty())
-                        tool_unit::writeFile(ws2 + "/assets/messages/" + session_ptr->session_id + ".json",
-                                             asset_array.dump(4));
-                    tool_unit::writeFile(ws2 + "/memorys/" + session_ptr->session_id + ".json",
-                                         session_ptr->memory.dump(4));
+                    session_ptr->messages.push_back(sys_msg);
                 }
 
                 // 更新使用统计
@@ -1264,12 +984,11 @@ namespace app
                     {"prompt_cost", total_prompt_tokens},
                     {"completion_cost", total_completion_tokens},
                     {"total_cost", total_prompt_tokens + total_completion_tokens}};
-                sse({{"type", "done"}, {"usage", usage}, {"messages", new_messages}, {"thinkings", thinkings}});
             }
             catch (const std::exception &e)
             {
-                std::cerr << "Error in handle_input_stream_streaming: " << e.what() << std::endl;
-                webui_log("ERROR", "handle_input_stream_streaming", e.what());
+                std::cerr << "Error in handle_input_streaming: " << e.what() << std::endl;
+                webui_log("ERROR", "handle_input_streaming", e.what());
                 try
                 {
                     sse({{"type", "error"}, {"message", e.what()}});
@@ -1277,6 +996,213 @@ namespace app
                 catch (...)
                 {
                 }
+            }
+        }
+
+        int handle_input_packed(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+        {
+            try
+            {
+                size_t header_end = input.find("\r\n\r\n");
+                if (header_end == std::string::npos)
+                {
+                    output = build_http_response(400, "application/json", R"({"error":"bad request"})");
+                    return rt::FLAG_DONE;
+                }
+                std::string body = input.substr(header_end + 4);
+                json request = json::parse(body);
+
+                std::string user_message = request["messages"].get<std::string>();
+                std::string model = request.value("model", "default");
+                if (model == "default")
+                    model = run_unit::settings["model"].get<std::string>();
+
+                std::string channel;
+                bool think_mode = request.value("think", false);
+                size_t total_prompt_tokens = 0;
+                size_t total_completion_tokens = 0;
+                std::string sid = "";
+                std::shared_ptr<run_unit::SessionContext> session_ptr;
+
+                // 确定会话
+                if (request.contains("channel"))
+                {
+                    channel = request["channel"].get<std::string>();
+                    session_ptr = run_unit::agent_session_manager.get(channel);
+                    if (!session_ptr)
+                    {
+                        session_ptr = run_unit::agent_session_manager.create();
+                        run_unit::agent_session_manager.change_session(session_ptr->session_id);
+                    }
+                }
+                else if (request.contains("session_id"))
+                {
+                    sid = request["session_id"].get<std::string>();
+                    session_ptr = run_unit::agent_session_manager.get(sid);
+                    if (!session_ptr)
+                    {
+                        output = build_http_response(400, "application/json", R"({"error":"session not found"})");
+                        return rt::FLAG_DONE;
+                    }
+                    run_unit::agent_session_manager.change_session(sid);
+                }
+                else
+                {
+                    session_ptr = run_unit::agent_session_manager.get_current();
+                }
+
+                // 构建上下文
+                json context = json::array();
+                context.push_back({{"role", "system"}, {"content", system_prompt}});
+                context.push_back({{"role", "system"}, {"content", tools_list_str}});
+
+                if (!session_ptr->is_memory_empty())
+                    context.push_back({{"role", "memory"}, {"content", session_ptr->memory["abstracts"]}});
+                else
+                    for (auto &msg : session_ptr->messages)
+                        context.push_back(msg);
+
+                json contents = json::array();
+                if (!channel.empty())
+                    contents.push_back({{"type", "text"}, {"text", "Messages received from " + channel + ":" + user_message}});
+                else
+                    contents.push_back({{"type", "text"}, {"text", user_message}});
+
+                if (request.contains("images") && request["images"].is_array())
+                {
+                    for (auto &img : request["images"])
+                        contents.push_back({{"type", "image_url"}, {"image_url", {{"url", img.get<std::string>()}}}});
+                }
+                json user_msg = {{"role", Admin}, {"content", contents}};
+                context.push_back(user_msg);
+                session_ptr->messages.push_back(user_msg);
+
+                // 工具/CS 循环（非流式）
+                json thinkings = json::array();
+                json tools_called_arr = json::array();
+                std::string final_response;
+                size_t max_rounds = run_unit::settings["max_mpc_rounds"].get<size_t>();
+                size_t mpc_count = 0;
+
+                for (; mpc_count < max_rounds; ++mpc_count)
+                {
+                    json llm_req = {
+                        {"model", model},
+                        {"messages", context},
+                        {"think", think_mode}};
+
+                    json response;
+                    if (!client.generate(llm_req, response))
+                    {
+                        output = build_http_response(500, "application/json", R"({"error":"LLM generate failed"})");
+                        return rt::FLAG_ERROR;
+                    }
+
+                    // 提取 thinking 内容
+                    if (think_mode && response["choices"][0]["message"].contains("reasoning_content"))
+                    {
+                        thinkings.push_back(response["choices"][0]["message"]["reasoning_content"].get<std::string>());
+                    }
+
+                    // 提取回复文本
+                    std::string response_text = response["choices"][0]["message"]["content"].get<std::string>();
+
+                    // 记录 token 用量
+                    if (response.contains("usage"))
+                    {
+                        auto &usage = response["usage"];
+                        if (usage.contains("prompt_tokens"))
+                            total_prompt_tokens += usage["prompt_tokens"].get<size_t>();
+                        if (usage.contains("completion_tokens"))
+                            total_completion_tokens += usage["completion_tokens"].get<size_t>();
+                    }
+
+                    // 扫描工具/CS 调用
+                    std::string sys_out;
+                    auto [tools_called, tools_ok] = tool_unit::tools_scan(response_text, sys_out);
+                    auto cs_called = cs_unit::cs_scan(response_text, sys_out);
+
+                    if (tools_called == 0 && cs_called == 0)
+                    {
+                        json assistant_msg = {{"role", run_unit::settings["agent_name"]}, {"content", response_text}};
+                        context.push_back(assistant_msg);
+                        session_ptr->messages.push_back(assistant_msg);
+                        final_response = response_text;
+                        break;
+                    }
+
+                    // 收集工具调用信息
+                    auto tool_tags = extractAllTags(response_text, "tool");
+                    auto sys_out_blocks = extractAllTags(sys_out, "system_output");
+
+                    for (size_t ti = 0; ti < tool_tags.size(); ti++)
+                    {
+                        auto [name, args] = parseArgs(tool_tags[ti]);
+                        json tool_entry = {
+                            {"name", std::string(name)},
+                            {"args", std::string(args)},
+                            {"round", mpc_count}};
+                        if (ti < sys_out_blocks.size())
+                            tool_entry["output"] = std::string(sys_out_blocks[ti]);
+                        tools_called_arr.push_back(tool_entry);
+                    }
+
+                    // 添加工具消息到上下文
+                    json sys_contents = json::array();
+                    sys_contents.push_back({{"type", "text"}, {"text", sys_out}});
+                    if (!tool_unit::image_queue.empty())
+                    {
+                        for (auto &img : tool_unit::image_queue)
+                            sys_contents.push_back({{"type", "image_url"}, {"image_url", {{"url", img}}}});
+                        tool_unit::image_queue.clear();
+                    }
+                    json sys_msg = {{"role", "tool"}, {"content", sys_contents}};
+                    context.push_back(sys_msg);
+                    session_ptr->messages.push_back(sys_msg);
+                }
+
+                // 更新使用统计
+                if (!sid.empty() && run_unit::agent_data_manager.data["usages"].contains(sid))
+                {
+                    run_unit::agent_data_manager.data["usages"][sid]["prompt_cost"] = run_unit::agent_data_manager.data["usages"][sid]["prompt_cost"].get<size_t>() + total_prompt_tokens;
+                    run_unit::agent_data_manager.data["usages"][sid]["completion_cost"] = run_unit::agent_data_manager.data["usages"][sid]["completion_cost"].get<size_t>() + total_completion_tokens;
+                    run_unit::agent_data_manager.data["usages"][sid]["total_cost"] = run_unit::agent_data_manager.data["usages"][sid]["total_cost"].get<size_t>() + total_prompt_tokens + total_completion_tokens;
+                }
+                else if (!sid.empty())
+                {
+                    run_unit::agent_data_manager.data["usages"][sid] = {
+                        {"prompt_cost", total_prompt_tokens},
+                        {"completion_cost", total_completion_tokens},
+                        {"total_cost", total_prompt_tokens + total_completion_tokens}};
+                }
+
+                // 构建统一 JSON 响应
+                json result = {
+                    {"content", final_response},
+                    {"thinking", thinkings},
+                    {"tools", tools_called_arr},
+                    {"rounds", mpc_count},
+                    {"usage", {
+                        {"prompt_cost", total_prompt_tokens},
+                        {"completion_cost", total_completion_tokens},
+                        {"total_cost", total_prompt_tokens + total_completion_tokens}}}};
+
+                output = build_http_response(200, "application/json", result.dump());
+                return rt::FLAG_DONE;
+            }
+            catch (const std::exception &e)
+            {
+                std::cerr << "Error in handle_input_packed: " << e.what() << std::endl;
+                webui_log("ERROR", "handle_input_packed", e.what());
+                json err = {{"error", e.what()}};
+                output = build_http_response(500, "application/json", err.dump());
+                return rt::FLAG_ERROR;
+            }
+            catch (...)
+            {
+                webui_log("ERROR", "handle_input_packed", "unknown error");
+                output = build_http_response(500, "application/json", R"({"error":"unknown"})");
+                return rt::FLAG_ERROR;
             }
         }
     } // namespace server
