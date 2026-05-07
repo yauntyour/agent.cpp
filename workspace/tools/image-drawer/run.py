@@ -87,6 +87,7 @@ def generate_image(
 
 
 def print_tool_help():
+    print("警告⚠️：工具调用异常")
     """打印 tool.md 中的帮助信息"""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     tool_md_path = os.path.join(script_dir, "tool.md")

@@ -920,18 +920,16 @@ namespace app
                     total_prompt_tokens += llm_req["messages"].dump().size() / 4;
                     total_completion_tokens += response_text.size() / 4;
 
+                    json new_message = {
+                        {"role", run_unit::settings["agent_name"]},
+                        {"content", response_text}};
+                    context.push_back(new_message);
+                    session_ptr->messages.push_back(new_message);
+
                     // 扫描工具/CS 调用
                     std::string sys_out;
                     auto [tools_called, tools_ok] = tool_unit::tools_scan(response_text, sys_out);
                     auto cs_called = cs_unit::cs_scan(response_text, sys_out);
-
-                    if (tools_called == 0 && cs_called == 0)
-                    {
-                        json assistant_msg = {{"role", run_unit::settings["agent_name"]}, {"content", response_text}};
-                        context.push_back(assistant_msg);
-                        session_ptr->messages.push_back(assistant_msg);
-                        break;
-                    }
 
                     // 发送工具调用事件（每个工具独立发送 start/output/end）
                     auto tool_tags = extractAllTags(response_text, "tool");
@@ -984,6 +982,7 @@ namespace app
                     {"prompt_cost", total_prompt_tokens},
                     {"completion_cost", total_completion_tokens},
                     {"total_cost", total_prompt_tokens + total_completion_tokens}};
+                sse({{"type", "done"}, {"usage", usage}});
             }
             catch (const std::exception &e)
             {
@@ -1182,10 +1181,7 @@ namespace app
                     {"thinking", thinkings},
                     {"tools", tools_called_arr},
                     {"rounds", mpc_count},
-                    {"usage", {
-                        {"prompt_cost", total_prompt_tokens},
-                        {"completion_cost", total_completion_tokens},
-                        {"total_cost", total_prompt_tokens + total_completion_tokens}}}};
+                    {"usage", {{"prompt_cost", total_prompt_tokens}, {"completion_cost", total_completion_tokens}, {"total_cost", total_prompt_tokens + total_completion_tokens}}}};
 
                 output = build_http_response(200, "application/json", result.dump());
                 return rt::FLAG_DONE;

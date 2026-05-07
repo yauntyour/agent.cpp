@@ -756,6 +756,148 @@
       color: #f87171;
     }
 
+    /* CS 命令块 */
+    .cs-block {
+      margin: 6px 0;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid #27272a;
+    }
+
+    .cs-block summary {
+      padding: 8px 12px;
+      font-size: 12px;
+      cursor: pointer;
+      user-select: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(16, 185, 129, 0.05);
+      list-style: none;
+    }
+
+    .cs-block summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .cs-block summary i.fa-chevron-right {
+      font-size: 10px;
+      transition: transform 0.2s;
+      color: #6ee7b7;
+    }
+
+    .cs-block[open] summary i.fa-chevron-right {
+      transform: rotate(90deg);
+    }
+
+    .cs-block .cs-icon {
+      width: 20px;
+      height: 20px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      background: rgba(16, 185, 129, 0.15);
+      color: #34d399;
+    }
+
+    .cs-block .cs-name {
+      font-weight: 500;
+      color: #34d399;
+    }
+
+    .cs-block .cs-args {
+      color: #a1a1aa;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+    }
+
+    .cs-block .cs-inner {
+      padding: 10px 14px;
+      background: #0c0c0e;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      border-top: 1px solid #1f1f22;
+    }
+
+    /* 工具指令块 */
+    .tool-inline-block {
+      margin: 6px 0;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid #27272a;
+    }
+
+    .tool-inline-block summary {
+      padding: 8px 12px;
+      font-size: 12px;
+      cursor: pointer;
+      user-select: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(99, 102, 241, 0.05);
+      list-style: none;
+    }
+
+    .tool-inline-block summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .tool-inline-block summary i.fa-chevron-right {
+      font-size: 10px;
+      transition: transform 0.2s;
+      color: #a5b4fc;
+    }
+
+    .tool-inline-block[open] summary i.fa-chevron-right {
+      transform: rotate(90deg);
+    }
+
+    .tool-inline-block .tool-inline-icon {
+      width: 20px;
+      height: 20px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      background: rgba(99, 102, 241, 0.15);
+      color: #818cf8;
+    }
+
+    .tool-inline-block .tool-inline-name {
+      font-weight: 500;
+      color: #818cf8;
+    }
+
+    .tool-inline-block .tool-inline-args {
+      color: #a1a1aa;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+    }
+
+    .tool-inline-block .tool-inline-inner {
+      padding: 10px 14px;
+      background: #0c0c0e;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      border-top: 1px solid #1f1f22;
+    }
+
     /* 加载覆盖层 */
     #loading-overlay {
       position: fixed;
@@ -1994,7 +2136,7 @@
     function esc(s) { if (!s) return ''; return s.replace(/[&<>]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[m]); }
     function fixToolTags(text) {
       if (!text) return text;
-      return text.replace(/<system_output>([\s\S]*?)<\/system_output>/g, (_, content) => {
+      let r = text.replace(/<system_output>([\s\S]*?)<\/system_output>/g, (_, content) => {
         const trimmed = content.trim();
         const hasErr = trimmed.includes('[TOOL_ERR]');
         const hasDone = trimmed.includes('[TOOL_DONE]') || trimmed.includes('[CS_DONE]');
@@ -2008,6 +2150,21 @@
           .trim();
         return `\n<details class="sys-output-block">\n<summary>\n<i class="fa-solid fa-chevron-right"></i>\n<i class="fa-solid fa-terminal" style="font-size:11px;"></i>\n<span style="margin-left:4px;font-weight:500;font-size:12px;">系统输出</span>\n<span style="margin-left:auto;font-size:12px;" class="sysout-status ${statusClass}">${statusIcon}</span>\n</summary>\n<div class="sysout-inner">\n<pre><code>${esc(cleanContent)}</code></pre>\n</div>\n</details>\n`;
       });
+      r = r.replace(/<cs>([\s\S]*?)<\/cs>/g, (_, content) => {
+        const trimmed = content.trim();
+        const idx = trimmed.indexOf(':');
+        let name = trimmed, args = '';
+        if (idx !== -1) { name = trimmed.slice(0, idx); args = trimmed.slice(idx + 1); }
+        return `\n<details class="cs-block">\n<summary>\n<i class="fa-solid fa-chevron-right"></i>\n<span class="cs-icon"><i class="fa-solid fa-terminal"></i></span>\n<span class="cs-name">${esc(name)}</span>\n<span class="cs-args">${esc(args)}</span>\n</summary>\n<div class="cs-inner">${esc(trimmed)}</div>\n</details>\n`;
+      });
+      r = r.replace(/<tool>([\s\S]*?)<\/tool>/g, (_, content) => {
+        const trimmed = content.trim();
+        const idx = trimmed.indexOf(':');
+        let name = trimmed, args = '';
+        if (idx !== -1) { name = trimmed.slice(0, idx); args = trimmed.slice(idx + 1); }
+        return `\n<details class="tool-inline-block">\n<summary>\n<i class="fa-solid fa-chevron-right"></i>\n<span class="tool-inline-icon"><i class="fa-solid fa-screwdriver-wrench"></i></span>\n<span class="tool-inline-name">${esc(name)}</span>\n<span class="tool-inline-args">${esc(args)}</span>\n</summary>\n<div class="tool-inline-inner">${esc(trimmed)}</div>\n</details>\n`;
+      });
+      return r;
     }
 
     // ============ 覆盖层管理 ============
