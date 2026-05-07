@@ -17,6 +17,17 @@
    - 新增加载覆盖层（blur 遮罩）
    - CSS 兼容性修复与布局优化
 10. 清理已废弃的 `sys_state.py`、`sys_tools.py`
+11. 修复 macOS CPU 监控 `host_cpu_load_data` 返回一维数组时的索引越界
+12. 会话记忆系统增强：
+    - 记忆新增 `created_at` 时间戳字段，记录记忆创建时间
+    - `memory_created_at` 随 session/memory 接口返回
+    - 使用 `json::value()` 替代 `get<>()` 防止访问空字段崩溃
+13. API 路由拆分与重构：
+    - 原 `/api/input`（流式）更名为非流式打包接口 `handle_input_packed`，返回统一 JSON（含 content/thinking/tools/usage）
+    - 原 `/api/input/stream` 流式路由更名为 `handle_input_streaming`，支持 token-by-token SSE + 每工具独立 tool_start/tool_output/tool_end 事件
+14. image-drawer 工具输出路径修复：`./assets/` → `./workspace/assets/`
+15. CI 构建频率下调：从每天构建改为每周一构建
+16. WebUI 继续完善：布局、样式、交互细节持续优化（~2300 行）
 
 # 从源码构建
 
