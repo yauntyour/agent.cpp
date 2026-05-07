@@ -8,7 +8,7 @@ on:
     types: [ published ]
   workflow_dispatch:
   schedule:
-    - cron: "0 0 * * *" # 每天 UTC 0:00
+    - cron: "0 0 * * 1" # 每周一 UTC 0:00
 
 permissions:
   contents: write
