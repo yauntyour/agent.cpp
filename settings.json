@@ -1,6 +1,7 @@
 {
     "agent_name": "assistant",
     "auto_expand_files": false,
+    "auto_summary_threshold": 90,
     "channels": [
         {
             "name": "Telegram",
