@@ -13,18 +13,29 @@
         rel="stylesheet" />
     <script src="https://image.uc.cn/s/uae/g/3n/mos-production/cdn-staticfile-net/axios/1.6.7/axios.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@exuanbo/file-icons-js/dist/file-icons-js.min.js"></script>
     <style>
         :root {
-            --bg-base: #09090b;
-            --bg-panel: #121214;
-            --bg-surface: #18181b;
-            --border-color: #27272a;
-            --border-hover: #3f3f46;
+            --bg-base: #06060a;
+            --bg-panel: #0c0c12;
+            --bg-surface: #13131a;
+            --bg-elevated: #1a1a24;
+            --border-color: #1e1e2a;
+            --border-hover: #2d2d3d;
             --accent-color: #6366f1;
             --accent-hover: #4f46e5;
-            --text-main: #e4e4e7;
-            --text-muted: #a1a1aa;
+            --accent-glow: rgba(99, 102, 241, 0.15);
+            --text-main: #e8e8ed;
+            --text-muted: #9898a6;
+            --text-dim: #5c5c6e;
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 14px;
+            --radius-xl: 18px;
+            --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+            --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
+            --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
+            --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+            --transition-smooth: 0.25s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
         * {
@@ -37,11 +48,12 @@
             color: var(--text-main);
             margin: 0;
             -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }
 
         ::-webkit-scrollbar {
-            width: 5px;
-            height: 5px;
+            width: 4px;
+            height: 4px;
         }
 
         ::-webkit-scrollbar-track {
@@ -49,12 +61,12 @@
         }
 
         ::-webkit-scrollbar-thumb {
-            background: var(--border-color);
+            background: rgba(255, 255, 255, 0.06);
             border-radius: 8px;
         }
 
         ::-webkit-scrollbar-thumb:hover {
-            background: var(--border-hover);
+            background: rgba(255, 255, 255, 0.12);
         }
 
         /* 布局 */
@@ -65,10 +77,10 @@
         }
 
         #sidebar {
-            width: 192px;
+            width: 220px;
             flex-shrink: 0;
-            background: #09090b;
-            border-right: 1px solid #27272a;
+            background: var(--bg-panel);
+            border-right: 1px solid var(--border-color);
             display: flex;
             flex-direction: column;
             z-index: 20;
@@ -79,7 +91,7 @@
             display: flex;
             flex-direction: column;
             min-width: 0;
-            background: #09090b;
+            background: var(--bg-base);
             position: relative;
         }
 
@@ -88,14 +100,14 @@
             position: fixed;
             right: 0;
             top: 0;
-            width: 380px;
+            width: 400px;
             height: 100vh;
-            background: #121214;
-            border-left: 1px solid #27272a;
+            background: var(--bg-panel);
+            border-left: 1px solid var(--border-color);
             z-index: 50;
             transform: translateX(100%);
-            transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-            box-shadow: -8px 0 30px rgba(0, 0, 0, 0.5);
+            transition: transform var(--transition-smooth);
+            box-shadow: var(--shadow-lg);
             display: flex;
             flex-direction: column;
         }
@@ -121,8 +133,8 @@
 
         /* 侧边栏 */
         .sidebar-header {
-            padding: 12px;
-            border-bottom: 1px solid #27272a;
+            padding: 14px 14px 12px;
+            border-bottom: 1px solid var(--border-color);
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -133,7 +145,7 @@
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.08em;
-            color: #a1a1aa;
+            color: var(--text-muted);
             margin: 0;
         }
 
@@ -143,18 +155,19 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            border-radius: 6px;
+            border-radius: var(--radius-sm);
             background: transparent;
-            border: none;
-            color: #a1a1aa;
+            border: 1px solid var(--border-color);
+            color: var(--text-dim);
             cursor: pointer;
-            font-size: 13px;
-            transition: all 0.15s;
+            font-size: 12px;
+            transition: all var(--transition-fast);
         }
 
         .sidebar-btn:hover {
-            background: #27272a;
-            color: #e4e4e7;
+            background: var(--accent-glow);
+            border-color: var(--accent-color);
+            color: var(--accent-color);
         }
 
         #session-list {
@@ -166,25 +179,25 @@
         .session-item {
             display: flex;
             align-items: center;
-            padding: 8px 10px;
-            border-radius: 8px;
+            padding: 9px 10px;
+            border-radius: var(--radius-sm);
             cursor: pointer;
             margin-bottom: 2px;
             font-size: 13px;
-            color: #a1a1aa;
+            color: var(--text-muted);
             border: 1px solid transparent;
-            transition: all 0.15s;
+            transition: all var(--transition-fast);
             gap: 6px;
         }
 
         .session-item:hover {
-            background: #18181b;
-            color: #d4d4d8;
+            background: var(--bg-surface);
+            color: var(--text-main);
         }
 
         .session-item.active {
-            background: rgba(99, 102, 241, 0.1);
-            border-color: rgba(99, 102, 241, 0.4);
+            background: var(--accent-glow);
+            border-color: rgba(99, 102, 241, 0.3);
             color: #a5b4fc;
         }
 
@@ -198,18 +211,18 @@
 
         .session-item .del-btn {
             opacity: 0;
-            width: 24px;
-            height: 24px;
+            width: 22px;
+            height: 22px;
             display: flex;
             align-items: center;
             justify-content: center;
-            border-radius: 5px;
+            border-radius: 4px;
             border: none;
             background: transparent;
-            color: #71717a;
+            color: var(--text-dim);
             cursor: pointer;
-            font-size: 11px;
-            transition: all 0.15s;
+            font-size: 10px;
+            transition: all var(--transition-fast);
             flex-shrink: 0;
         }
 
@@ -224,7 +237,7 @@
 
         .sidebar-footer {
             padding: 10px 12px;
-            border-top: 1px solid #27272a;
+            border-top: 1px solid var(--border-color);
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -234,14 +247,14 @@
 
         /* 主聊天区 */
         .chat-header {
-            height: 48px;
+            height: 52px;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 0 16px;
-            background: rgba(18, 18, 20, 0.8);
-            backdrop-filter: blur(12px);
-            border-bottom: 1px solid #27272a;
+            padding: 0 20px;
+            background: rgba(12, 12, 18, 0.85);
+            backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--border-color);
             flex-shrink: 0;
             z-index: 10;
         }
@@ -249,7 +262,7 @@
         .chat-header-left {
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 10px;
         }
 
         .model-selector {
@@ -261,18 +274,18 @@
             align-items: center;
             gap: 6px;
             padding: 5px 10px;
-            border-radius: 6px;
+            border-radius: var(--radius-sm);
             background: transparent;
             border: 1px solid transparent;
-            color: #d4d4d8;
+            color: var(--text-main);
             font-size: 13px;
             cursor: pointer;
-            transition: all 0.15s;
+            transition: all var(--transition-fast);
         }
 
         .model-btn:hover {
-            background: #27272a;
-            border-color: #3f3f46;
+            background: var(--bg-surface);
+            border-color: var(--border-color);
         }
 
         .model-dot {
@@ -285,14 +298,14 @@
             position: absolute;
             left: 0;
             top: 100%;
-            margin-top: 4px;
+            margin-top: 6px;
             width: 240px;
             max-height: 260px;
             overflow-y: auto;
-            background: #18181b;
-            border: 1px solid #27272a;
-            border-radius: 10px;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-lg);
             z-index: 60;
             display: none;
         }
@@ -308,7 +321,7 @@
             align-items: center;
             gap: 8px;
             font-size: 13px;
-            color: #d4d4d8;
+            color: var(--text-main);
             background: transparent;
             border: none;
             cursor: pointer;
@@ -317,30 +330,13 @@
         }
 
         .model-opt:hover {
-            background: #27272a;
+            background: var(--bg-surface);
         }
 
         .chat-header-right {
             display: flex;
             align-items: center;
-            gap: 10px;
-        }
-
-        .memory-time-label {
-            font-size: 11px;
-            color: #818cf8;
-            white-space: nowrap;
-            flex-shrink: 0;
-            margin-right: 4px;
-            background: rgba(99, 102, 241, 0.08);
-            padding: 3px 8px;
-            border-radius: 5px;
-            border: 1px solid rgba(99, 102, 241, 0.25);
-            font-family: 'JetBrains Mono', monospace;
-        }
-
-        .memory-time-label.hidden {
-            display: none;
+            gap: 8px;
         }
 
         .icon-btn {
@@ -349,63 +345,105 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            border-radius: 6px;
+            border-radius: var(--radius-sm);
             background: transparent;
-            border: none;
-            color: #71717a;
+            border: 1px solid transparent;
+            color: var(--text-dim);
             cursor: pointer;
             font-size: 14px;
-            transition: all 0.15s;
+            transition: all var(--transition-fast);
         }
 
         .icon-btn:hover {
-            background: #27272a;
-            color: #d4d4d8;
+            background: var(--bg-surface);
+            border-color: var(--border-color);
+            color: var(--text-main);
         }
 
         .icon-btn.purple:hover {
+            background: rgba(139, 92, 246, 0.1);
+            border-color: rgba(139, 92, 246, 0.3);
             color: #c084fc;
         }
 
         .icon-btn.red:hover {
+            background: rgba(244, 63, 94, 0.1);
+            border-color: rgba(244, 63, 94, 0.3);
             color: #f87171;
         }
 
         .session-id-badge {
             font-size: 11px;
             font-family: 'JetBrains Mono', monospace;
-            color: #71717a;
-            background: rgba(39, 39, 42, 0.5);
+            color: var(--text-dim);
+            background: var(--bg-surface);
             padding: 4px 8px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color);
+            white-space: nowrap;
+        }
+
+        .memory-time-indicator {
+            display: none;
+            align-items: center;
+            gap: 5px;
+            font-size: 10px;
+            color: #a78bfa;
+            background: rgba(139, 92, 246, 0.08);
+            border: 1px solid rgba(139, 92, 246, 0.2);
+            padding: 3px 8px;
             border-radius: 5px;
-            border: 1px solid #27272a;
+            white-space: nowrap;
+            font-family: 'JetBrains Mono', monospace;
+            animation: memoryFadeIn 0.3s ease;
+        }
+
+        .memory-time-indicator.visible {
+            display: inline-flex;
+        }
+
+        .memory-time-indicator i {
+            font-size: 10px;
+            color: #8b5cf6;
+        }
+
+        @keyframes memoryFadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(-2px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
 
         /* 消息区域 */
         #messages-container {
             flex: 1;
             overflow-y: auto;
-            padding: 20px 16px;
+            padding: 24px 20px;
             scroll-behavior: smooth;
         }
 
         .empty-state {
             text-align: center;
-            padding: 60px 20px;
-            color: #52525b;
+            padding: 80px 20px;
+            color: var(--text-dim);
         }
 
         .empty-state i {
             font-size: 48px;
             margin-bottom: 16px;
             display: block;
-            opacity: 0.3;
+            opacity: 0.25;
         }
 
         /* 消息气泡 */
         .msg-row {
             display: flex;
-            margin-bottom: 20px;
+            margin-bottom: 24px;
             gap: 10px;
         }
 
@@ -430,35 +468,35 @@
         }
 
         .msg-avatar.user-av {
-            background: #4f46e5;
+            background: linear-gradient(135deg, #6366f1, #4f46e5);
             color: #fff;
         }
 
         .msg-avatar.ai-av {
-            background: #27272a;
-            border: 1px solid #3f3f46;
-            color: #d4d4d8;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
         }
 
         .msg-bubble {
             max-width: 85%;
             padding: 12px 16px;
-            border-radius: 16px;
+            border-radius: var(--radius-lg);
             font-size: 14px;
-            line-height: 1.65;
+            line-height: 1.7;
             word-wrap: break-word;
             position: relative;
         }
 
         .msg-bubble.user-bub {
-            background: rgba(79, 70, 229, 0.06);
-            border: 1px solid rgba(99, 102, 241, 0.4);
-            color: #e4e4e7;
-            border-radius: 10px;
+            background: rgba(99, 102, 241, 0.08);
+            border: 1px solid rgba(99, 102, 241, 0.25);
+            color: var(--text-main);
+            border-radius: var(--radius-md);
         }
 
         .msg-bubble.ai-bub {
-            color: #d4d4d8;
+            color: var(--text-main);
             max-width: 85%;
             padding: 0;
             background: transparent;
@@ -470,9 +508,9 @@
         .think-block {
             margin-top: 8px;
             margin-bottom: 8px;
-            background: rgba(139, 92, 246, 0.06);
+            background: rgba(139, 92, 246, 0.05);
             border-left: 3px solid #8b5cf6;
-            border-radius: 0 8px 8px 0;
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
             overflow: hidden;
         }
 
@@ -509,7 +547,7 @@
         .think-content {
             padding: 8px 16px 12px 16px;
             font-size: 12.5px;
-            color: #a1a1aa;
+            color: var(--text-muted);
             line-height: 1.6;
             white-space: pre-wrap;
         }
@@ -517,9 +555,9 @@
         /* 工具调用 */
         .tool-call {
             margin: 6px 0;
-            border-radius: 8px;
+            border-radius: var(--radius-sm);
             overflow: hidden;
-            border: 1px solid #27272a;
+            border: 1px solid var(--border-color);
         }
 
         .tool-call summary {
@@ -530,7 +568,7 @@
             display: flex;
             align-items: center;
             gap: 6px;
-            background: rgba(245, 158, 11, 0.05);
+            background: rgba(245, 158, 11, 0.04);
             list-style: none;
         }
 
@@ -546,7 +584,7 @@
             align-items: center;
             justify-content: center;
             font-size: 10px;
-            background: rgba(245, 158, 11, 0.15);
+            background: rgba(245, 158, 11, 0.12);
             color: #fbbf24;
         }
 
@@ -556,7 +594,7 @@
         }
 
         .tool-call summary .tool-args {
-            color: #a1a1aa;
+            color: var(--text-muted);
             font-family: 'JetBrains Mono', monospace;
             font-size: 11px;
             overflow: hidden;
@@ -580,15 +618,15 @@
 
         .tool-output {
             padding: 10px 14px;
-            background: #0c0c0e;
+            background: var(--bg-base);
             font-family: 'JetBrains Mono', monospace;
             font-size: 11px;
             white-space: pre-wrap;
-            color: #a1a1aa;
+            color: var(--text-muted);
             max-height: 300px;
             overflow-y: auto;
             line-height: 1.5;
-            border-top: 1px solid #1f1f22;
+            border-top: 1px solid var(--border-color);
         }
 
         /* 打字光标 */
@@ -625,9 +663,9 @@
         }
 
         .msg-bubble.ai-bub pre {
-            background: #0c0c0e;
-            border: 1px solid #27272a;
-            border-radius: 8px;
+            background: var(--bg-base);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
             padding: 14px;
             overflow-x: auto;
             margin: 10px 0;
@@ -639,7 +677,7 @@
             font-family: 'JetBrains Mono', monospace;
             font-size: 0.85em;
             color: #fca5a5;
-            background: rgba(252, 165, 165, 0.08);
+            background: rgba(252, 165, 165, 0.06);
             padding: 2px 5px;
             border-radius: 4px;
         }
@@ -647,16 +685,16 @@
         .msg-bubble.ai-bub pre code {
             background: none;
             padding: 0;
-            color: #d4d4d8;
+            color: var(--text-main);
         }
 
         .msg-bubble.ai-bub blockquote {
-            border-left: 3px solid #6366f1;
+            border-left: 3px solid var(--accent-color);
             padding: 6px 14px;
             margin: 10px 0;
-            color: #a1a1aa;
-            background: rgba(99, 102, 241, 0.05);
-            border-radius: 0 6px 6px 0;
+            color: var(--text-muted);
+            background: rgba(99, 102, 241, 0.04);
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
             font-style: italic;
         }
 
@@ -676,14 +714,14 @@
             top: 8px;
             right: 8px;
             padding: 4px 8px;
-            background: #27272a;
-            border: 1px solid #3f3f46;
-            border-radius: 5px;
-            color: #a1a1aa;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            color: var(--text-muted);
             font-size: 10px;
             cursor: pointer;
             opacity: 0;
-            transition: all 0.2s;
+            transition: all var(--transition-fast);
             font-family: 'Inter', sans-serif;
         }
 
@@ -692,8 +730,8 @@
         }
 
         .copy-btn:hover {
-            background: #3f3f46;
-            color: #fff;
+            background: var(--bg-elevated);
+            color: var(--text-main);
         }
 
         /* 图片 */
@@ -703,17 +741,17 @@
             gap: 8px;
             margin-top: 10px;
             padding-top: 10px;
-            border-top: 1px solid #27272a;
+            border-top: 1px solid var(--border-color);
         }
 
         .msg-images img {
             max-width: 260px;
             max-height: 200px;
             object-fit: cover;
-            border-radius: 8px;
-            border: 1px solid #3f3f46;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color);
             cursor: pointer;
-            transition: transform 0.15s;
+            transition: transform var(--transition-fast);
         }
 
         .msg-images img:hover {
@@ -723,10 +761,10 @@
         /* 系统输出折叠块 */
         .sys-output-block {
             margin: 8px 0;
-            border-radius: 8px;
+            border-radius: var(--radius-sm);
             overflow: hidden;
-            border: 1px solid #27272a;
-            background: #0c0c0e;
+            border: 1px solid var(--border-color);
+            background: var(--bg-base);
         }
 
         .sys-output-block summary {
@@ -755,14 +793,14 @@
 
         .sys-output-block .sysout-inner {
             padding: 0;
-            border-top: 1px solid #1f1f22;
+            border-top: 1px solid var(--border-color);
         }
 
         .sys-output-block .sysout-inner pre {
             margin: 0;
             border: none;
             border-radius: 0;
-            background: #0c0c0e;
+            background: var(--bg-base);
         }
 
         .sysout-status.ok {
@@ -776,9 +814,9 @@
         /* CS 命令块 */
         .cs-block {
             margin: 6px 0;
-            border-radius: 8px;
+            border-radius: var(--radius-sm);
             overflow: hidden;
-            border: 1px solid #27272a;
+            border: 1px solid var(--border-color);
         }
 
         .cs-block summary {
@@ -789,7 +827,7 @@
             display: flex;
             align-items: center;
             gap: 6px;
-            background: rgba(16, 185, 129, 0.05);
+            background: rgba(16, 185, 129, 0.04);
             list-style: none;
         }
 
@@ -815,7 +853,7 @@
             align-items: center;
             justify-content: center;
             font-size: 10px;
-            background: rgba(16, 185, 129, 0.15);
+            background: rgba(16, 185, 129, 0.12);
             color: #34d399;
         }
 
@@ -825,7 +863,7 @@
         }
 
         .cs-block .cs-args {
-            color: #a1a1aa;
+            color: var(--text-muted);
             font-family: 'JetBrains Mono', monospace;
             font-size: 11px;
             overflow: hidden;
@@ -836,20 +874,20 @@
 
         .cs-block .cs-inner {
             padding: 10px 14px;
-            background: #0c0c0e;
+            background: var(--bg-base);
             font-family: 'JetBrains Mono', monospace;
             font-size: 11px;
             white-space: pre-wrap;
             word-break: break-all;
-            border-top: 1px solid #1f1f22;
+            border-top: 1px solid var(--border-color);
         }
 
         /* 工具指令块 */
         .tool-inline-block {
             margin: 6px 0;
-            border-radius: 8px;
+            border-radius: var(--radius-sm);
             overflow: hidden;
-            border: 1px solid #27272a;
+            border: 1px solid var(--border-color);
         }
 
         .tool-inline-block summary {
@@ -860,7 +898,7 @@
             display: flex;
             align-items: center;
             gap: 6px;
-            background: rgba(99, 102, 241, 0.05);
+            background: rgba(99, 102, 241, 0.04);
             list-style: none;
         }
 
@@ -886,7 +924,7 @@
             align-items: center;
             justify-content: center;
             font-size: 10px;
-            background: rgba(99, 102, 241, 0.15);
+            background: rgba(99, 102, 241, 0.12);
             color: #818cf8;
         }
 
@@ -896,7 +934,7 @@
         }
 
         .tool-inline-block .tool-inline-args {
-            color: #a1a1aa;
+            color: var(--text-muted);
             font-family: 'JetBrains Mono', monospace;
             font-size: 11px;
             overflow: hidden;
@@ -907,24 +945,24 @@
 
         .tool-inline-block .tool-inline-inner {
             padding: 10px 14px;
-            background: #0c0c0e;
+            background: var(--bg-base);
             font-family: 'JetBrains Mono', monospace;
             font-size: 11px;
             white-space: pre-wrap;
             word-break: break-all;
-            border-top: 1px solid #1f1f22;
+            border-top: 1px solid var(--border-color);
         }
 
         /* 加载覆盖层 */
         #loading-overlay {
             position: fixed;
             inset: 0;
-            background: rgba(9, 9, 11, 0.75);
+            background: rgba(6, 6, 10, 0.8);
             z-index: 200;
             display: none;
             align-items: center;
             justify-content: center;
-            backdrop-filter: blur(4px);
+            backdrop-filter: blur(6px);
             cursor: not-allowed;
         }
 
@@ -938,18 +976,18 @@
 
         .loading-spinner i {
             font-size: 48px;
-            color: #6366f1;
+            color: var(--accent-color);
         }
 
         .loading-spinner .loading-text {
             margin-top: 16px;
-            color: #a1a1aa;
+            color: var(--text-muted);
             font-size: 14px;
         }
 
         .loading-spinner .loading-sub {
             margin-top: 6px;
-            color: #52525b;
+            color: var(--text-dim);
             font-size: 12px;
         }
 
@@ -961,22 +999,22 @@
             transform: translateX(-50%);
             z-index: 5;
             padding: 8px 16px;
-            background: #18181b;
-            border: 1px solid #27272a;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-color);
             border-radius: 20px;
-            color: #a1a1aa;
+            color: var(--text-muted);
             font-size: 12px;
             cursor: pointer;
             display: none;
             align-items: center;
             gap: 6px;
-            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-            transition: all 0.2s;
+            box-shadow: var(--shadow-md);
+            transition: all var(--transition-fast);
         }
 
         #scroll-bottom-btn:hover {
-            background: #27272a;
-            color: #e4e4e7;
+            background: var(--bg-surface);
+            color: var(--text-main);
         }
 
         #scroll-bottom-btn.show {
@@ -986,17 +1024,17 @@
         .usage-footer {
             margin-top: 8px;
             padding-top: 8px;
-            border-top: 1px solid #27272a;
+            border-top: 1px solid var(--border-color);
             display: flex;
             gap: 14px;
             font-size: 11px;
-            color: #52525b;
+            color: var(--text-dim);
             font-family: 'JetBrains Mono', monospace;
         }
 
         /* 输入区 */
         .input-area {
-            padding: 6px 16px 12px;
+            padding: 8px 20px 14px;
             flex-shrink: 0;
         }
 
@@ -1006,17 +1044,17 @@
         }
 
         .input-box {
-            background: #18181b;
-            border: 1px solid #27272a;
-            border-radius: 14px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
             overflow: hidden;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-            transition: border-color 0.2s;
+            box-shadow: var(--shadow-md);
+            transition: all var(--transition-smooth);
         }
 
         .input-box:focus-within {
-            border-color: #6366f1;
-            box-shadow: 0 4px 24px rgba(99, 102, 241, 0.15);
+            border-color: var(--accent-color);
+            box-shadow: 0 4px 24px rgba(99, 102, 241, 0.12);
         }
 
         #image-preview-container {
@@ -1038,8 +1076,8 @@
             width: 52px;
             height: 52px;
             object-fit: cover;
-            border-radius: 6px;
-            border: 1px solid #3f3f46;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color);
         }
 
         .img-preview .rm-btn {
@@ -1074,7 +1112,7 @@
             flex: 1;
             background: transparent;
             border: none;
-            color: #e4e4e7;
+            color: var(--text-main);
             resize: none;
             font-size: 14px;
             line-height: 1.5;
@@ -1087,22 +1125,22 @@
         #send-btn {
             width: 36px;
             height: 36px;
-            border-radius: 8px;
-            background: #6366f1;
+            border-radius: var(--radius-sm);
+            background: var(--accent-color);
             border: none;
             color: #fff;
             cursor: pointer;
             font-size: 14px;
-            transition: all 0.15s;
+            transition: all var(--transition-fast);
             display: flex;
             align-items: center;
             justify-content: center;
             flex-shrink: 0;
-            box-shadow: 0 2px 10px rgba(99, 102, 241, 0.3);
+            box-shadow: 0 2px 10px rgba(99, 102, 241, 0.25);
         }
 
         #send-btn:hover {
-            background: #4f46e5;
+            background: var(--accent-hover);
             transform: scale(1.05);
         }
 
@@ -1118,18 +1156,18 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            border-radius: 6px;
+            border-radius: var(--radius-sm);
             background: transparent;
             border: none;
-            color: #71717a;
+            color: var(--text-dim);
             cursor: pointer;
             font-size: 15px;
-            transition: all 0.15s;
+            transition: all var(--transition-fast);
         }
 
         .attach-btn:hover {
-            background: #27272a;
-            color: #a1a1aa;
+            background: var(--bg-elevated);
+            color: var(--text-muted);
         }
 
         .input-footer {
@@ -1145,7 +1183,7 @@
             align-items: center;
             gap: 8px;
             font-size: 12px;
-            color: #71717a;
+            color: var(--text-dim);
             cursor: pointer;
         }
 
@@ -1156,10 +1194,11 @@
         .toggle-track {
             width: 32px;
             height: 18px;
-            background: #3f3f46;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-color);
             border-radius: 9px;
             position: relative;
-            transition: background 0.2s;
+            transition: all var(--transition-fast);
         }
 
         .toggle-track::after {
@@ -1169,23 +1208,25 @@
             left: 2px;
             width: 14px;
             height: 14px;
-            background: #fff;
+            background: var(--text-dim);
             border-radius: 50%;
-            transition: transform 0.2s;
+            transition: transform var(--transition-fast);
         }
 
         .think-toggle-row input:checked+.toggle-track {
-            background: #6366f1;
+            background: var(--accent-color);
+            border-color: var(--accent-color);
         }
 
         .think-toggle-row input:checked+.toggle-track::after {
             transform: translateX(14px);
+            background: #fff;
         }
 
         /* 设置覆盖层 */
         .overlay-header {
             padding: 14px 16px;
-            border-bottom: 1px solid #27272a;
+            border-bottom: 1px solid var(--border-color);
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -1196,7 +1237,7 @@
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.05em;
-            color: #d4d4d8;
+            color: var(--text-main);
             margin: 0;
         }
 
@@ -1208,7 +1249,7 @@
 
         .overlay-tabs {
             display: flex;
-            border-bottom: 1px solid #27272a;
+            border-bottom: 1px solid var(--border-color);
             margin-bottom: 14px;
         }
 
@@ -1220,21 +1261,21 @@
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.05em;
-            color: #71717a;
+            color: var(--text-dim);
             background: transparent;
             border: none;
             border-bottom: 2px solid transparent;
             cursor: pointer;
-            transition: all 0.15s;
+            transition: all var(--transition-fast);
         }
 
         .overlay-tab.active {
             color: #a5b4fc;
-            border-bottom-color: #6366f1;
+            border-bottom-color: var(--accent-color);
         }
 
         .overlay-tab:hover {
-            color: #d4d4d8;
+            color: var(--text-main);
         }
 
         .overlay-panel {
@@ -1246,11 +1287,11 @@
         }
 
         .setting-group {
-            background: #18181b;
-            border-radius: 10px;
+            background: var(--bg-surface);
+            border-radius: var(--radius-md);
             padding: 14px;
             margin-bottom: 12px;
-            border: 1px solid #27272a;
+            border: 1px solid var(--border-color);
         }
 
         .setting-group-title {
@@ -1258,7 +1299,7 @@
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.06em;
-            color: #71717a;
+            color: var(--text-dim);
             margin-bottom: 10px;
         }
 
@@ -1274,7 +1315,7 @@
             display: block;
             font-size: 12px;
             font-weight: 500;
-            color: #a1a1aa;
+            color: var(--text-muted);
             margin-bottom: 4px;
         }
 
@@ -1282,20 +1323,20 @@
         .setting-row input[type="number"],
         .setting-row textarea {
             width: 100%;
-            background: #09090b;
-            border: 1px solid #27272a;
-            border-radius: 6px;
+            background: var(--bg-base);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
             padding: 7px 10px;
-            color: #e4e4e7;
+            color: var(--text-main);
             font-size: 13px;
             outline: none;
-            transition: border-color 0.15s;
+            transition: border-color var(--transition-fast);
             font-family: inherit;
         }
 
         .setting-row input:focus,
         .setting-row textarea:focus {
-            border-color: #6366f1;
+            border-color: var(--accent-color);
         }
 
         .setting-row textarea {
@@ -1311,20 +1352,20 @@
             gap: 8px;
             cursor: pointer;
             font-size: 13px;
-            color: #d4d4d8;
+            color: var(--text-main);
         }
 
         .tool-toggle-card {
-            background: #18181b;
-            border: 1px solid #27272a;
-            border-radius: 8px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
             padding: 10px 12px;
-            transition: border-color 0.15s, background 0.15s;
+            transition: all var(--transition-fast);
         }
 
         .tool-toggle-card:hover {
-            border-color: #3f3f46;
-            background: #1c1c1f;
+            border-color: var(--border-hover);
+            background: var(--bg-elevated);
         }
 
         .tool-toggle-card-top {
@@ -1337,7 +1378,7 @@
 
         .tool-toggle-card .tool-toggle-name {
             font-size: 12px;
-            color: #d4d4d8;
+            color: var(--text-main);
             font-weight: 500;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -1346,7 +1387,7 @@
 
         .tool-toggle-card .tool-toggle-desc {
             font-size: 10.5px;
-            color: #71717a;
+            color: var(--text-dim);
             line-height: 1.4;
             display: -webkit-box;
             -webkit-line-clamp: 2;
@@ -1365,42 +1406,44 @@
         }
 
         .tool-toggle-switch input:checked+.toggle-track {
-            background: #6366f1;
+            background: var(--accent-color);
+            border-color: var(--accent-color);
         }
 
         .tool-toggle-switch input:checked+.toggle-track::after {
             transform: translateX(14px);
+            background: #fff;
         }
 
         .save-btn {
             width: 100%;
             padding: 10px;
-            background: #6366f1;
+            background: var(--accent-color);
             color: #fff;
             border: none;
-            border-radius: 8px;
+            border-radius: var(--radius-sm);
             font-size: 13px;
             font-weight: 500;
             cursor: pointer;
             margin-top: 12px;
-            transition: all 0.15s;
+            transition: all var(--transition-fast);
         }
 
         .save-btn:hover {
-            background: #4f46e5;
+            background: var(--accent-hover);
         }
 
         .log-box {
-            background: #09090b;
-            border: 1px solid #27272a;
-            border-radius: 8px;
+            background: var(--bg-base);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
             padding: 10px;
             height: 140px;
             overflow-y: auto;
             font-family: 'JetBrains Mono', monospace;
             font-size: 10.5px;
             line-height: 1.6;
-            color: #71717a;
+            color: var(--text-dim);
             margin-top: 8px;
         }
 
@@ -1418,7 +1461,7 @@
             justify-content: space-between;
             padding: 6px 0;
             font-size: 13px;
-            border-bottom: 1px solid #1f1f22;
+            border-bottom: 1px solid var(--border-color);
         }
 
         .stat-row:last-child {
@@ -1427,7 +1470,7 @@
 
         .stat-bar {
             height: 6px;
-            background: #3f3f46;
+            background: var(--bg-elevated);
             border-radius: 3px;
             margin: 4px 0 10px;
             overflow: hidden;
@@ -1435,7 +1478,7 @@
 
         .stat-bar-fill {
             height: 100%;
-            background: #6366f1;
+            background: var(--accent-color);
             border-radius: 3px;
             transition: width 0.5s ease;
         }
@@ -1453,11 +1496,11 @@
 
         .toast {
             padding: 10px 16px;
-            border-radius: 10px;
+            border-radius: var(--radius-md);
             font-size: 13px;
-            background: #18181b;
-            border: 1px solid #27272a;
-            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-color);
+            box-shadow: var(--shadow-lg);
             animation: slideIn 0.3s ease;
             display: flex;
             align-items: center;
@@ -1678,18 +1721,25 @@
             text-align: right;
         }
 
+        .fb-item-modified {
+            font-size: 10px;
+            color: var(--text-dim);
+            flex-shrink: 0;
+            display: none;
+        }
+
         /* 统计弹窗专用样式 */
         .stat-card {
-            background: #18181b;
-            border: 1px solid #27272a;
-            border-radius: 10px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
             padding: 14px;
             margin-bottom: 10px;
-            transition: border-color 0.2s;
+            transition: border-color var(--transition-fast);
         }
 
         .stat-card:hover {
-            border-color: #3f3f46;
+            border-color: var(--border-hover);
         }
 
         .stat-card-header {
@@ -1702,7 +1752,7 @@
         .stat-card-title {
             font-size: 13px;
             font-weight: 600;
-            color: #d4d4d8;
+            color: var(--text-main);
         }
 
         .stat-card-total {
@@ -1716,7 +1766,7 @@
             display: flex;
             justify-content: space-between;
             font-size: 12px;
-            color: #a1a1aa;
+            color: var(--text-muted);
             margin-bottom: 4px;
         }
 
@@ -1726,7 +1776,7 @@
 
         .stat-detail-mono {
             font-family: 'JetBrains Mono', monospace;
-            color: #d4d4d8;
+            color: var(--text-main);
         }
 
         .stat-section-title {
@@ -1734,22 +1784,22 @@
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.06em;
-            color: #71717a;
+            color: var(--text-dim);
             margin: 16px 0 8px;
         }
 
         /* 频道管理弹窗专用样式 */
         .channel-item {
-            background: #18181b;
-            border: 1px solid #27272a;
-            border-radius: 8px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
             padding: 10px 12px;
             margin-bottom: 8px;
-            transition: border-color 0.15s;
+            transition: border-color var(--transition-fast);
         }
 
         .channel-item:hover {
-            border-color: #3f3f46;
+            border-color: var(--border-hover);
         }
 
         .channel-item-header {
@@ -1762,7 +1812,7 @@
         .channel-item-name {
             font-size: 13px;
             font-weight: 600;
-            color: #d4d4d8;
+            color: var(--text-main);
         }
 
         .channel-field {
@@ -1772,27 +1822,27 @@
         .channel-field label {
             display: block;
             font-size: 11px;
-            color: #71717a;
+            color: var(--text-dim);
             margin-bottom: 3px;
         }
 
         .channel-field input,
         .channel-field select {
             width: 100%;
-            background: #09090b;
-            border: 1px solid #27272a;
-            border-radius: 5px;
+            background: var(--bg-base);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
             padding: 6px 8px;
-            color: #e4e4e7;
+            color: var(--text-main);
             font-size: 12px;
             outline: none;
-            transition: border-color 0.15s;
+            transition: border-color var(--transition-fast);
             font-family: inherit;
         }
 
         .channel-field input:focus,
         .channel-field select:focus {
-            border-color: #6366f1;
+            border-color: var(--accent-color);
         }
 
         .channel-actions {
@@ -1804,21 +1854,21 @@
         .channel-btn {
             flex: 1;
             padding: 6px;
-            border-radius: 5px;
+            border-radius: var(--radius-sm);
             border: none;
             font-size: 11px;
             cursor: pointer;
-            transition: all 0.15s;
+            transition: all var(--transition-fast);
             font-family: inherit;
         }
 
         .channel-btn.save {
-            background: #6366f1;
+            background: var(--accent-color);
             color: #fff;
         }
 
         .channel-btn.save:hover {
-            background: #4f46e5;
+            background: var(--accent-hover);
         }
 
         .channel-btn.danger {
@@ -1831,43 +1881,43 @@
         }
 
         .channel-btn.secondary {
-            background: #27272a;
-            color: #a1a1aa;
+            background: var(--bg-elevated);
+            color: var(--text-muted);
         }
 
         .channel-btn.secondary:hover {
-            background: #3f3f46;
-            color: #fff;
+            background: var(--border-hover);
+            color: var(--text-main);
         }
 
         .add-channel-btn {
             width: 100%;
             padding: 10px;
-            background: #18181b;
-            border: 1px dashed #3f3f46;
-            border-radius: 8px;
-            color: #a1a1aa;
+            background: var(--bg-surface);
+            border: 1px dashed var(--border-hover);
+            border-radius: var(--radius-sm);
+            color: var(--text-muted);
             font-size: 12px;
             cursor: pointer;
-            transition: all 0.15s;
+            transition: all var(--transition-fast);
             margin-bottom: 12px;
             font-family: inherit;
         }
 
         .add-channel-btn:hover {
-            border-color: #6366f1;
-            color: #d4d4d8;
+            border-color: var(--accent-color);
+            color: var(--text-main);
             background: rgba(99, 102, 241, 0.05);
         }
 
         .channel-hint {
             font-size: 11px;
-            color: #71717a;
+            color: var(--text-dim);
             text-align: center;
             padding: 8px;
             margin-bottom: 8px;
             background: rgba(99, 102, 241, 0.04);
-            border-radius: 6px;
+            border-radius: var(--radius-sm);
             border: 1px solid rgba(99, 102, 241, 0.1);
         }
     </style>
@@ -1884,7 +1934,7 @@
             <div id="session-list"></div>
             <div class="sidebar-footer">
                 <span id="current-user-display"
-                    style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#a1a1aa;">User</span>
+                    style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted);">User</span>
                 <button class="sidebar-btn" id="data-stats-btn" title="统计"
                     style="width:26px;height:26px;font-size:12px;"><i class="fa-solid fa-chart-pie"></i></button>
             </div>
@@ -1902,7 +1952,7 @@
             </div>
             <div id="fb-breadcrumb"></div>
             <div id="fb-listing">
-                <div style="padding:24px 12px;color:#52525b;font-size:12px;text-align:center;">
+                <div style="padding:24px 12px;color:var(--text-dim);font-size:12px;text-align:center;">
                     <i class="fa-solid fa-folder-open"
                         style="display:block;font-size:24px;margin-bottom:8px;opacity:0.3;"></i>
                     点击工具栏按钮打开文件浏览器
@@ -1916,9 +1966,10 @@
                 <div class="chat-header-left">
                     <div class="model-selector">
                         <button class="model-btn" id="model-dropdown-btn">
-                            <span class="model-dot" id="connection-status-dot" style="background:#71717a;"></span>
+                            <span class="model-dot" id="connection-status-dot"
+                                style="background:var(--text-dim);"></span>
                             <span id="model-name-display">加载中...</span>
-                            <i class="fa-solid fa-chevron-down" style="font-size:9px;color:#71717a;"></i>
+                            <i class="fa-solid fa-chevron-down" style="font-size:9px;color:var(--text-dim);"></i>
                         </button>
                         <div class="model-dropdown" id="model-dropdown-menu">
                             <div id="model-dropdown-list"></div>
@@ -1931,7 +1982,8 @@
                     <button class="icon-btn red" id="clear-session-btn" title="清空上下文"><i
                             class="fa-solid fa-trash-can"></i></button>
                     <span class="session-id-badge" id="current-session-id-display">ID: -</span>
-                    <span class="memory-time-label hidden" id="memory-time-label"></span>
+                    <span class="memory-time-indicator" id="memory-time-indicator"><i
+                            class="fa-solid fa-brain"></i><span id="memory-time-text"></span></span>
                     <button class="icon-btn" id="file-browser-btn" title="文件浏览器"><i
                             class="fa-solid fa-folder-tree"></i></button>
                     <button class="icon-btn" id="settings-gear-btn" title="设置"><i class="fa-solid fa-gear"></i></button>
@@ -1942,8 +1994,8 @@
                 <button id="scroll-bottom-btn"><i class="fa-solid fa-arrow-down"></i> 滚动到底部</button>
                 <div class="empty-state">
                     <i class="fa-solid fa-comments"></i>
-                    <div style="font-size:16px;font-weight:500;color:#71717a;">未选择会话</div>
-                    <div style="font-size:13px;margin-top:4px;">请从左侧选择一个会话，或创建新会话。</div>
+                    <div style="font-size:16px;font-weight:500;color:var(--text-dim);">未选择会话</div>
+                    <div style="font-size:13px;margin-top:4px;color:var(--text-dim);">请从左侧选择一个会话，或创建新会话。</div>
                 </div>
             </div>
 
@@ -1968,16 +2020,17 @@
                             深度思考
                         </label>
                         <div id="context-usage" style="display:none;align-items:center;gap:8px;">
-                            <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#71717a;">
+                            <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-dim);">
+                                <i class="fa-solid fa-circle-notch"></i>
                                 <span id="context-bar-container"
-                                    style="width:70px;height:4px;background:#3f3f46;border-radius:2px;overflow:hidden;display:inline-block;vertical-align:middle;">
+                                    style="width:70px;height:4px;background:var(--bg-elevated);border-radius:2px;overflow:hidden;display:inline-block;vertical-align:middle;">
                                     <span id="context-bar-fill"
-                                        style="display:block;height:100%;width:0%;background:#6366f1;border-radius:2px;transition:width 0.3s;"></span>
+                                        style="display:block;height:100%;width:0%;background:var(--accent-color);border-radius:2px;transition:width 0.3s;"></span>
                                 </span>
                                 <span id="context-text" style="font-family:'JetBrains Mono',monospace;">0 / 0</span>
                             </div>
                         </div>
-                        <span style="font-size:11px;color:#52525b;">Enter 发送 / Shift+Enter 换行</span>
+                        <span style="font-size:11px;color:var(--text-dim);">Enter 发送 / Shift+Enter 换行</span>
                     </div>
                 </div>
             </div>
@@ -2010,23 +2063,23 @@
                     <div id="tools-header-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
                         <div style="flex:1;position:relative;">
                             <i class="fa-solid fa-search"
-                                style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#52525b;font-size:12px;pointer-events:none;"></i>
+                                style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-dim);font-size:12px;pointer-events:none;"></i>
                             <input type="text" id="tools-search-input" placeholder="搜索工具..."
-                                style="width:100%;background:#18181b;border:1px solid #27272a;border-radius:6px;padding:7px 10px 7px 28px;color:#e4e4e7;font-size:12px;outline:none;transition:border-color 0.15s;"
-                                onfocus="this.style.borderColor='#6366f1'" onblur="this.style.borderColor='#27272a'"
-                                oninput="filterTools()">
+                                style="width:100%;background:var(--bg-base);border:1px solid var(--border-color);border-radius:var(--radius-sm);padding:7px 10px 7px 28px;color:var(--text-main);font-size:12px;outline:none;transition:border-color var(--transition-fast);"
+                                onfocus="this.style.borderColor='var(--accent-color)'"
+                                onblur="this.style.borderColor='var(--border-color)'" oninput="filterTools()">
                         </div>
                         <span id="tools-enabled-count"
-                            style="font-size:11px;color:#71717a;background:#18181b;padding:4px 10px;border-radius:5px;border:1px solid #27272a;white-space:nowrap;">0/0</span>
+                            style="font-size:11px;color:var(--text-dim);background:var(--bg-base);padding:4px 10px;border-radius:var(--radius-sm);border:1px solid var(--border-color);white-space:nowrap;">0/0</span>
                     </div>
                     <div id="tools-toggle-list" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;"></div>
                 </div>
                 <div class="overlay-panel" id="opanel-todos">
                     <div style="display:flex;gap:6px;margin-bottom:10px;">
                         <input id="new-todo-input" placeholder="新任务..." type="text"
-                            style="flex:1;background:#18181b;border:1px solid #27272a;border-radius:6px;padding:8px 10px;color:#e4e4e7;font-size:13px;outline:none;">
+                            style="flex:1;background:var(--bg-base);border:1px solid var(--border-color);border-radius:var(--radius-sm);padding:8px 10px;color:var(--text-main);font-size:13px;outline:none;">
                         <button id="add-todo-btn"
-                            style="padding:8px 14px;background:#6366f1;border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:12px;"><i
+                            style="padding:8px 14px;background:var(--accent-color);border:none;border-radius:var(--radius-sm);color:#fff;cursor:pointer;font-size:12px;"><i
                                 class="fa-solid fa-plus"></i></button>
                     </div>
                     <div id="todos-list"></div>
@@ -2050,7 +2103,7 @@
                         class="fa-solid fa-times"></i></button>
             </div>
             <div class="overlay-body" id="stats-overlay-body">
-                <div style="padding:40px 20px;text-align:center;color:#52525b;font-size:13px;">加载中...</div>
+                <div style="padding:40px 20px;text-align:center;color:var(--text-dim);font-size:13px;">加载中...</div>
             </div>
         </aside>
 
@@ -2062,7 +2115,7 @@
                         class="fa-solid fa-times"></i></button>
             </div>
             <div class="overlay-body" id="channel-overlay-body">
-                <div style="padding:40px 20px;text-align:center;color:#52525b;font-size:13px;">加载中...</div>
+                <div style="padding:40px 20px;text-align:center;color:var(--text-dim);font-size:13px;">加载中...</div>
             </div>
         </aside>
     </div>
@@ -2081,20 +2134,11 @@
     <script>
         // ============ 全局状态 ============
         const state = {
-            user: "User",
-            agentName: "assistant",
-            sessions: [],
-            currentSessionId: null,
-            messages: [],
-            settings: {},
-            models: [],
-            currentModel: null,
-            thinkMode: false,
-            tools: [],
-            todos: [],
-            channels: [],
-            isTyping: false,
-            pendingImages: [],
+            user: "User", agentName: "assistant",
+            sessions: [], currentSessionId: null, messages: [],
+            settings: {}, models: [], currentModel: null,
+            thinkMode: false, tools: [], todos: [], channels: [],
+            isTyping: false, pendingImages: [],
             assistantMsgId: null,
             streamBuffers: { content: '', thinking: '', thinkings: [], toolOutputs: [] },
             contextUsage: { total: 0, max: 128000 },
@@ -2108,44 +2152,25 @@
         const $ = (sel) => document.querySelector(sel);
         const $$ = (sel) => document.querySelectorAll(sel);
         const els = {
-            sessionList: $('#session-list'),
-            newSessionBtn: $('#new-session-btn'),
-            clearSessionBtn: $('#clear-session-btn'),
-            summarySessionBtn: $('#summary-session-btn'),
-            messagesContainer: $('#messages-container'),
-            userInput: $('#user-input'),
-            sendBtn: $('#send-btn'),
-            thinkToggle: $('#think-toggle'),
-            currentUserDisplay: $('#current-user-display'),
-            systemLogs: $('#system-logs'),
-            todosList: $('#todos-list'),
-            newTodoInput: $('#new-todo-input'),
-            addTodoBtn: $('#add-todo-btn'),
-            channelsList: $('#channels-list'),
-            currentSessionIdDisplay: $('#current-session-id-display'),
-            memoryTimeLabel: $('#memory-time-label'),
-            modelDropdownBtn: $('#model-dropdown-btn'),
-            modelDropdownMenu: $('#model-dropdown-menu'),
-            modelDropdownList: $('#model-dropdown-list'),
-            modelNameDisplay: $('#model-name-display'),
+            sessionList: $('#session-list'), newSessionBtn: $('#new-session-btn'),
+            clearSessionBtn: $('#clear-session-btn'), summarySessionBtn: $('#summary-session-btn'),
+            messagesContainer: $('#messages-container'), userInput: $('#user-input'),
+            sendBtn: $('#send-btn'), thinkToggle: $('#think-toggle'),
+            currentUserDisplay: $('#current-user-display'), systemLogs: $('#system-logs'),
+            todosList: $('#todos-list'), newTodoInput: $('#new-todo-input'), addTodoBtn: $('#add-todo-btn'),
+            channelsList: $('#channels-list'), currentSessionIdDisplay: $('#current-session-id-display'),
+            modelDropdownBtn: $('#model-dropdown-btn'), modelDropdownMenu: $('#model-dropdown-menu'),
+            modelDropdownList: $('#model-dropdown-list'), modelNameDisplay: $('#model-name-display'),
             connectionStatusDot: $('#connection-status-dot'),
-            attachBtn: $('#attach-btn'),
-            fileUpload: $('#file-upload'),
+            attachBtn: $('#attach-btn'), fileUpload: $('#file-upload'),
             imagePreviewContainer: $('#image-preview-container'),
-            settingsFormContainer: $('#settings-form-container'),
-            saveSettingsBtn: $('#save-settings-btn'),
-            dataStatsBtn: $('#data-stats-btn'),
-            toolsToggleList: $('#tools-toggle-list'),
-            settingsGearBtn: $('#settings-gear-btn'),
-            closeSettingsBtn: $('#close-settings-btn'),
-            settingsOverlay: $('#settings-overlay'),
-            overlayBackdrop: $('#overlay-backdrop'),
-            statsOverlay: $('#stats-overlay'),
-            statsOverlayBody: $('#stats-overlay-body'),
-            channelOverlay: $('#channel-overlay'),
-            channelOverlayBody: $('#channel-overlay-body'),
-            closeStatsBtn: $('#close-stats-btn'),
-            closeChannelBtn: $('#close-channel-btn'),
+            settingsFormContainer: $('#settings-form-container'), saveSettingsBtn: $('#save-settings-btn'),
+            dataStatsBtn: $('#data-stats-btn'), toolsToggleList: $('#tools-toggle-list'),
+            settingsGearBtn: $('#settings-gear-btn'), closeSettingsBtn: $('#close-settings-btn'),
+            settingsOverlay: $('#settings-overlay'), overlayBackdrop: $('#overlay-backdrop'),
+            statsOverlay: $('#stats-overlay'), statsOverlayBody: $('#stats-overlay-body'),
+            channelOverlay: $('#channel-overlay'), channelOverlayBody: $('#channel-overlay-body'),
+            closeStatsBtn: $('#close-stats-btn'), closeChannelBtn: $('#close-channel-btn'),
             fileBrowserBtn: $('#file-browser-btn'),
             fbPanel: $('#file-browser-panel'),
             fbBreadcrumb: $('#fb-breadcrumb'),
@@ -2161,50 +2186,29 @@
 
         // ============ 工具函数 ============
         function toast(msg, type) {
-            const icons = {
-                success: 'fa-circle-check text-emerald-400', error: 'fa-circle-exclamation text-rose-400',
-                info: 'fa-circle-info text-blue-400'
-            };
+            const icons = { success: 'fa-circle-check text-emerald-400', error: 'fa-circle-exclamation text-rose-400', info: 'fa-circle-info text-blue-400' };
             const t = document.createElement('div');
             t.className = 'toast';
             t.innerHTML = `<i class="fa-solid ${icons[type] || icons.info}"></i> ${msg}`;
             $('#toast-container').appendChild(t);
-            setTimeout(() => {
-                t.style.opacity = '0';
-                t.style.transition = 'opacity 0.3s';
-                setTimeout(() => t.remove(), 300);
-            }, 3000);
+            setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity 0.3s'; setTimeout(() => t.remove(), 300); }, 3000);
         }
-
         function log(msg, type) {
-            const t = new Date().toLocaleTimeString(),
-                d = document.createElement('div');
+            const t = new Date().toLocaleTimeString(), d = document.createElement('div');
             d.textContent = `[${t}] ${msg}`;
             d.className = type === 'error' ? 'log-error' : type === 'success' ? 'log-success' : '';
-            els.systemLogs.appendChild(d);
-            els.systemLogs.scrollTop = els.systemLogs.scrollHeight;
+            els.systemLogs.appendChild(d); els.systemLogs.scrollTop = els.systemLogs.scrollHeight;
         }
-
-        function esc(s) {
-            if (!s) return ''; return s.replace(/[&<>]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[
-                m
-            ]);
-        }
+        function esc(s) { if (!s) return ''; return s.replace(/[&<>]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[m]); }
         function fixToolTags(text) {
             if (!text) return text;
             let r = text.replace(/<system_output>([\s\S]*?)<\/system_output>/g, (_, content) => {
                 const trimmed = content.trim();
                 const hasErr = trimmed.includes('[TOOL_ERR]');
                 const hasDone = trimmed.includes('[TOOL_DONE]') || trimmed.includes('[CS_DONE]');
-                let statusIcon = '',
-                    statusClass = '';
-                if (hasErr) {
-                    statusIcon = '✗';
-                    statusClass = 'err';
-                } else if (hasDone) {
-                    statusIcon = '✓';
-                    statusClass = 'ok';
-                }
+                let statusIcon = '', statusClass = '';
+                if (hasErr) { statusIcon = '✗'; statusClass = 'err'; }
+                else if (hasDone) { statusIcon = '✓'; statusClass = 'ok'; }
                 const cleanContent = trimmed
                     .replace(/\[TOOL_DONE\]\n?/g, '')
                     .replace(/\[TOOL_ERR\]\n?/g, '')
@@ -2215,34 +2219,22 @@
             r = r.replace(/<cs>([\s\S]*?)<\/cs>/g, (_, content) => {
                 const trimmed = content.trim();
                 const idx = trimmed.indexOf(':');
-                let name = trimmed,
-                    args = '';
-                if (idx !== -1) {
-                    name = trimmed.slice(0, idx);
-                    args = trimmed.slice(idx + 1);
-                }
+                let name = trimmed, args = '';
+                if (idx !== -1) { name = trimmed.slice(0, idx); args = trimmed.slice(idx + 1); }
                 return `\n<details class="cs-block">\n<summary>\n<i class="fa-solid fa-chevron-right"></i>\n<span class="cs-icon"><i class="fa-solid fa-terminal"></i></span>\n<span class="cs-name">${esc(name)}</span>\n<span class="cs-args">${esc(args)}</span>\n</summary>\n<div class="cs-inner">${esc(trimmed)}</div>\n</details>\n`;
             });
             r = r.replace(/<tool>([\s\S]*?)<\/tool>/g, (_, content) => {
                 const trimmed = content.trim();
                 const idx = trimmed.indexOf(':');
-                let name = trimmed,
-                    args = '';
-                if (idx !== -1) {
-                    name = trimmed.slice(0, idx);
-                    args = trimmed.slice(idx + 1);
-                }
+                let name = trimmed, args = '';
+                if (idx !== -1) { name = trimmed.slice(0, idx); args = trimmed.slice(idx + 1); }
                 return `\n<details class="tool-inline-block">\n<summary>\n<i class="fa-solid fa-chevron-right"></i>\n<span class="tool-inline-icon"><i class="fa-solid fa-screwdriver-wrench"></i></span>\n<span class="tool-inline-name">${esc(name)}</span>\n<span class="tool-inline-args">${esc(args)}</span>\n</summary>\n<div class="tool-inline-inner">${esc(trimmed)}</div>\n</details>\n`;
             });
             return r;
         }
 
         // ============ 覆盖层管理 ============
-        function openOverlay() {
-            els.settingsOverlay.classList.add('open');
-            els.overlayBackdrop.classList.add('show');
-        }
-
+        function openOverlay() { els.settingsOverlay.classList.add('open'); els.overlayBackdrop.classList.add('show'); }
         function closeOverlay() {
             els.settingsOverlay.classList.remove('open');
             els.statsOverlay.classList.remove('open');
@@ -2290,27 +2282,19 @@
         }
         async function loadStatsOverlay() {
             const container = els.statsOverlayBody;
-            container.innerHTML =
-                '<div style="padding:40px 20px;text-align:center;color:#52525b;font-size:13px;"><i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>加载中...</div>';
+            container.innerHTML = '<div style="padding:40px 20px;text-align:center;color:var(--text-dim);font-size:13px;"><i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>加载中...</div>';
             try {
                 const r = await axios.get(API + '/data');
                 const usages = r.data?.usages || {};
                 const entries = Object.entries(usages);
                 if (!entries.length) {
-                    container.innerHTML =
-                        '<div style="padding:40px 20px;text-align:center;color:#71717a;font-size:13px;">暂无使用数据</div>';
+                    container.innerHTML = '<div style="padding:40px 20px;text-align:center;color:var(--text-dim);font-size:13px;">暂无使用数据</div>';
                     return;
                 }
-                let totalPrompt = 0,
-                    totalCompletion = 0,
-                    totalOverall = 0;
+                let totalPrompt = 0, totalCompletion = 0, totalOverall = 0;
                 const cards = entries.map(([k, v]) => {
-                    const pc = v.prompt_cost || 0,
-                        cc = v.completion_cost || 0,
-                        tc = v.total_cost || (pc + cc);
-                    totalPrompt += pc;
-                    totalCompletion += cc;
-                    totalOverall += tc;
+                    const pc = v.prompt_cost || 0, cc = v.completion_cost || 0, tc = v.total_cost || (pc + cc);
+                    totalPrompt += pc; totalCompletion += cc; totalOverall += tc;
                     return { name: k, pc, cc, tc };
                 }).sort((a, b) => b.tc - a.tc);
 
@@ -2334,16 +2318,15 @@
                 <span class="stat-card-title">${esc(item.name)}</span>
                 <span class="stat-card-total">${item.tc.toLocaleString()}</span>
               </div>
-              <div class="stat-bar" style="margin-bottom:8px;"><div class="stat-bar-fill" style="width:${pct}%;background:linear-gradient(90deg,#6366f1,#8b5cf6);"></div></div>
-              <div class="stat-detail-row"><span style="color:#71717a;">Prompt</span><span class="stat-detail-mono">${item.pc.toLocaleString()}</span></div>
-              <div class="stat-detail-row"><span style="color:#71717a;">Completion</span><span class="stat-detail-mono">${item.cc.toLocaleString()}</span></div>
+              <div class="stat-bar" style="margin-bottom:8px;"><div class="stat-bar-fill" style="width:${pct}%;background:linear-gradient(90deg,var(--accent-color),#8b5cf6);"></div></div>
+              <div class="stat-detail-row"><span style="color:var(--text-dim);">Prompt</span><span class="stat-detail-mono">${item.pc.toLocaleString()}</span></div>
+              <div class="stat-detail-row"><span style="color:var(--text-dim);">Completion</span><span class="stat-detail-mono">${item.cc.toLocaleString()}</span></div>
             </div>
           `;
                 });
                 container.innerHTML = html;
             } catch (e) {
-                container.innerHTML =
-                    `<div style="padding:40px 20px;text-align:center;color:#f87171;font-size:13px;">加载失败: ${esc(e.message)}</div>`;
+                container.innerHTML = `<div style="padding:40px 20px;text-align:center;color:#f87171;font-size:13px;">加载失败: ${esc(e.message)}</div>`;
             }
         }
         els.dataStatsBtn.onclick = openStatsOverlay;
@@ -2354,20 +2337,17 @@
             els.overlayBackdrop.classList.add('show');
             renderChannelManager();
         }
-
         function renderChannelManager() {
             const container = els.channelOverlayBody;
             let html = '';
             if (!state.settings.channels || !state.settings.channels.length) {
-                html +=
-                    '<div style="color:#71717a;font-size:13px;text-align:center;padding:20px;">暂无频道</div>';
+                html += '<div style="color:var(--text-dim);font-size:13px;text-align:center;padding:20px;">暂无频道</div>';
             } else {
-                html +=
-                    '<div class="channel-hint"><i class="fa-solid fa-circle-info" style="margin-right:4px;"></i>修改后请点击底部"保存到系统配置"生效</div>';
+                html += '<div class="channel-hint"><i class="fa-solid fa-circle-info" style="margin-right:4px;"></i>修改后请点击底部"保存到系统配置"生效</div>';
                 html += state.settings.channels.map((c, idx) => `
           <div class="channel-item" data-idx="${idx}">
             <div class="channel-item-header">
-              <span class="channel-item-name"><i class="fa-solid fa-hashtag" style="color:#71717a;margin-right:4px;"></i>${esc(c.name)}</span>
+              <span class="channel-item-name"><i class="fa-solid fa-hashtag" style="color:var(--text-dim);margin-right:4px;"></i>${esc(c.name)}</span>
               <button class="sidebar-btn" onclick="deleteChannel(${idx})" style="color:#f87171;width:24px;height:24px;" title="删除"><i class="fa-solid fa-trash-can"></i></button>
             </div>
             <div class="channel-field">
@@ -2391,15 +2371,12 @@
           </div>
         `).join('');
             }
-            html +=
-                `<button class="add-channel-btn" onclick="addChannelForm()"><i class="fa-solid fa-plus"></i> 添加新频道</button>`;
+            html += `<button class="add-channel-btn" onclick="addChannelForm()"><i class="fa-solid fa-plus"></i> 添加新频道</button>`;
             if (state.settings.channels && state.settings.channels.length) {
-                html +=
-                    `<button class="save-btn" onclick="persistChannelSettings()" style="margin-top:4px;"><i class="fa-solid fa-floppy-disk"></i> 保存到系统配置</button>`;
+                html += `<button class="save-btn" onclick="persistChannelSettings()" style="margin-top:4px;"><i class="fa-solid fa-floppy-disk"></i> 保存到系统配置</button>`;
             }
             container.innerHTML = html;
         }
-
         function addChannelForm() {
             const container = els.channelOverlayBody;
             const addBtn = container.querySelector('.add-channel-btn');
@@ -2419,7 +2396,6 @@
       `;
             container.appendChild(div);
         }
-
         function commitNewChannel() {
             const name = $('.ch-name-new')?.value.trim();
             const path = $('.ch-path-new')?.value.trim() || '';
@@ -2430,7 +2406,6 @@
             toast('频道已添加', 'success');
             renderChannelManager();
         }
-
         function saveChannel(idx) {
             const item = els.channelOverlayBody.querySelector(`[data-idx="${idx}"]`);
             if (!item) return;
@@ -2438,15 +2413,11 @@
             const path = item.querySelector('.ch-path')?.value.trim();
             const status = item.querySelector('.ch-status')?.value;
             if (!name) { toast('频道名称不能为空', 'error'); return; }
-            if (state.settings.channels.find((c, i) => c.name === name && i !== idx)) {
-                toast('频道名称已存在',
-                    'error'); return;
-            }
+            if (state.settings.channels.find((c, i) => c.name === name && i !== idx)) { toast('频道名称已存在', 'error'); return; }
             state.settings.channels[idx] = { ...state.settings.channels[idx], name, path, status };
             toast('频道已更新', 'success');
             renderChannelManager();
         }
-
         function deleteChannel(idx) {
             if (!confirm('确定删除此频道？')) return;
             state.settings.channels.splice(idx, 1);
@@ -2480,31 +2451,21 @@
     <div class="setting-group">
       <div class="setting-group-title">频道配置</div>
       <div class="setting-row">
-        <button class="save-btn" onclick="openChannelOverlay()" style="margin-top:0;background:#3f3f46;font-size:12px;"><i class="fa-solid fa-sliders"></i> 打开频道管理器</button>
-        <div style="font-size:11px;color:#71717a;margin-top:6px;">当前频道数: ${(s.channels || []).length}</div>
+        <button class="save-btn" onclick="openChannelOverlay()" style="margin-top:0;background:var(--bg-elevated);font-size:12px;"><i class="fa-solid fa-sliders"></i> 打开频道管理器</button>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:6px;">当前频道数: ${(s.channels || []).length}</div>
       </div>
     </div>
   `;
         }
         async function loadSettings() {
-            try {
-                const r = await axios.post(API + '/settings', { updata: false });
-                state.settings = r.data;
-                state.channels = state.settings.channels || [];
-            } catch (e) {
-                toast('加载设置失败', 'error');
-                log('加载设置失败: ' + (e.message || e), 'error');
-            }
+            try { const r = await axios.post(API + '/settings', { updata: false }); state.settings = r.data; state.channels = state.settings.channels || []; } catch (e) { toast('加载设置失败', 'error'); log('加载设置失败: ' + (e.message || e), 'error'); }
             renderSettingsForm(state.settings);
         }
         async function saveSettings() {
             const ns = {
-                user_name: $('#s-user_name')?.value || '',
-                agent_name: $('#s-agent_name')?.value || '',
-                workspace: $('#s-workspace')?.value || '',
-                server_address: $('#s-server_address')?.value || '',
-                model: $('#s-model')?.value || '',
-                prompt: $('#s-prompt')?.value || '',
+                user_name: $('#s-user_name')?.value || '', agent_name: $('#s-agent_name')?.value || '',
+                workspace: $('#s-workspace')?.value || '', server_address: $('#s-server_address')?.value || '',
+                model: $('#s-model')?.value || '', prompt: $('#s-prompt')?.value || '',
                 stream: $('#s-stream')?.checked || false,
                 auto_expand_files: $('#s-auto_expand_files')?.checked !== false,
                 max_mpc_rounds: parseInt($('#s-max_mpc_rounds')?.value) || 5,
@@ -2514,80 +2475,44 @@
             state.settings = ns;
             try {
                 const r = await axios.post(API + '/settings', { updata: true, settings: ns });
-                state.settings = r.data;
-                state.channels = state.settings.channels || [];
-                toast('设置已保存', 'success');
-                log('配置更新成功', 'success');
+                state.settings = r.data; state.channels = state.settings.channels || []; toast('设置已保存', 'success'); log('配置更新成功', 'success');
                 await getModels();
-            } catch (e) {
-                toast('保存失败', 'error');
-                log('保存设置失败: ' + (e.message || e), 'error');
-            }
+            } catch (e) { toast('保存失败', 'error'); log('保存设置失败: ' + (e.message || e), 'error'); }
         }
         els.saveSettingsBtn.onclick = saveSettings;
 
         // ============ 文件上传 ============
         els.attachBtn.onclick = () => els.fileUpload.click();
-
         function compressImage(file, maxRes = 1024, quality = 0.8) {
             return new Promise((resolve, reject) => {
                 const r = new FileReader();
                 r.onload = (e) => {
                     const img = new Image();
                     img.onload = () => {
-                        let w = img.width,
-                            h = img.height;
-                        if (w > maxRes || h > maxRes) {
-                            if (w > h) {
-                                h = Math.round(h * maxRes / w);
-                                w = maxRes;
-                            } else {
-                                w = Math.round(w * maxRes / h);
-                                h = maxRes;
-                            }
-                        }
-                        const c = document.createElement('canvas');
-                        c.width = w;
-                        c.height = h;
+                        let w = img.width, h = img.height;
+                        if (w > maxRes || h > maxRes) { if (w > h) { h = Math.round(h * maxRes / w); w = maxRes; } else { w = Math.round(w * maxRes / h); h = maxRes; } }
+                        const c = document.createElement('canvas'); c.width = w; c.height = h;
                         c.getContext('2d').drawImage(img, 0, 0, w, h);
                         resolve(c.toDataURL('image/jpeg', quality));
                     };
-                    img.onerror = reject;
-                    img.src = e.target.result;
+                    img.onerror = reject; img.src = e.target.result;
                 };
                 r.readAsDataURL(file);
             });
         }
         els.fileUpload.onchange = async (e) => {
             for (const f of e.target.files || []) {
-                if (f.type.startsWith('image/')) {
-                    try {
-                        state.pendingImages.push(await compressImage(f));
-                        renderImagePreviews();
-                    } catch (e) { log('图片压缩失败: ' + (e.message || e), 'error'); }
-                } else {
-                    const
-                        fr = new FileReader();
-                    fr.onload = () => {
-                        els.userInput.value += (els.userInput.value.trim() ? '\n\n' : '') +
-                            `[${f.name}]\n${fr.result}`;
-                        els.userInput.dispatchEvent(new Event('input'));
-                    };
-                    fr.readAsText(f);
-                }
+                if (f.type.startsWith('image/')) { try { state.pendingImages.push(await compressImage(f)); renderImagePreviews(); } catch (e) { log('图片压缩失败: ' + (e.message || e), 'error'); } }
+                else { const fr = new FileReader(); fr.onload = () => { els.userInput.value += (els.userInput.value.trim() ? '\n\n' : '') + `[${f.name}]\n${fr.result}`; els.userInput.dispatchEvent(new Event('input')); }; fr.readAsText(f); }
             }
             els.fileUpload.value = '';
         };
-
         function renderImagePreviews() {
             els.imagePreviewContainer.innerHTML = state.pendingImages.map((img, i) =>
                 `<div class="img-preview"><img src="${img}"><button class="rm-btn" onclick="removePending(${i})"><i class="fa-solid fa-times"></i></button></div>`
             ).join('');
         }
-        window.removePending = (i) => {
-            state.pendingImages.splice(i, 1);
-            renderImagePreviews();
-        };
+        window.removePending = (i) => { state.pendingImages.splice(i, 1); renderImagePreviews(); };
 
         // ============ 加载动画 ============
         function showLoading(text) {
@@ -2595,7 +2520,6 @@
             if (text) overlay.querySelector('.loading-text').textContent = text;
             overlay.classList.add('active');
         }
-
         function hideLoading() {
             els.loadingOverlay.classList.remove('active');
             els.loadingOverlay.querySelector('.loading-text').textContent = '加载中...';
@@ -2606,21 +2530,16 @@
             const c = els.messagesContainer;
             return c.scrollHeight - c.scrollTop - c.clientHeight < 80;
         }
-
         function scrollToBottom() {
             els.messagesContainer.scrollTop = els.messagesContainer.scrollHeight;
         }
-
         function updateScrollState() {
             const atBottom = isScrolledToBottom();
             state._scrollAtBottom = atBottom;
             els.scrollBottomBtn.classList.toggle('show', !atBottom);
         }
         els.messagesContainer.addEventListener('scroll', updateScrollState);
-        els.scrollBottomBtn.onclick = () => {
-            scrollToBottom();
-            els.scrollBottomBtn.classList.remove('show');
-        };
+        els.scrollBottomBtn.onclick = () => { scrollToBottom(); els.scrollBottomBtn.classList.remove('show'); };
 
         // ============ 上下文使用显示 ============
         function updateContextUsage(usage) {
@@ -2636,35 +2555,30 @@
             els.contextBarFill.style.width = pct + '%';
             els.contextText.textContent = `${total.toLocaleString()} / ${max.toLocaleString()}`;
         }
-
         function updateMemoryIndicator(active, createdAt) {
             state.memoryActive = active;
             if (createdAt !== undefined) state.memoryCreatedAt = createdAt;
-            // 更新记忆时间标签
-            if (els.memoryTimeLabel) {
-                if (active && state.memoryCreatedAt) {
-                    const date = new Date(state.memoryCreatedAt * 1000);
-                    els.memoryTimeLabel.textContent = 'Latest:' + date.toLocaleString();
-                    els.memoryTimeLabel.classList.remove('hidden');
-                } else {
-                    els.memoryTimeLabel.textContent = '';
-                    els.memoryTimeLabel.classList.add('hidden');
-                }
+            const indicator = document.getElementById('memory-time-indicator');
+            const timeText = document.getElementById('memory-time-text');
+            if (!indicator || !timeText) return;
+            if (active && state.memoryCreatedAt) {
+                const date = new Date(state.memoryCreatedAt * 1000);
+                timeText.textContent = 'Latest:' + date.toLocaleString();
+                indicator.classList.add('visible');
+            } else {
+                indicator.classList.remove('visible');
+                timeText.textContent = '';
             }
         }
 
         // ============ 会话管理 ============
         async function loadSessions() {
             try {
-                const r = await axios.get(API + '/session');
-                state.sessions = r.data.session_list || [];
-                renderSessions();
+                const r = await axios.get(API + '/session'); state.sessions = r.data.session_list || []; renderSessions();
                 state.currentSessionId = null;
                 els.currentSessionIdDisplay.textContent = 'ID: -';
-                updateMemoryIndicator(false);
             } catch (e) { log('加载会话列表失败', 'error'); }
         }
-
         function renderSessions() {
             els.sessionList.innerHTML = '';
             state.sessions.forEach(id => {
@@ -2672,14 +2586,10 @@
                 const isChannel = state.channels.some(c => c.name === id);
                 const div = document.createElement('div');
                 div.className = `session-item${isActive ? ' active' : ''}`;
-                div.innerHTML = `<span class="sess-name" title="${esc(id)}">${esc(id)}</span>` + (isChannel ?
-                    '' : `<button class="del-btn" title="删除"><i class="fa-solid fa-trash-can"></i></button>`);
+                div.innerHTML = `<span class="sess-name" title="${esc(id)}">${esc(id)}</span>` + (isChannel ? '' : `<button class="del-btn" title="删除"><i class="fa-solid fa-trash-can"></i></button>`);
                 div.querySelector('.sess-name')?.addEventListener('click', () => switchSession(id));
                 const delBtn = div.querySelector('.del-btn');
-                if (delBtn) delBtn.addEventListener('click', (ev) => {
-                    ev.stopPropagation();
-                    deleteSession(id);
-                });
+                if (delBtn) delBtn.addEventListener('click', (ev) => { ev.stopPropagation(); deleteSession(id); });
                 els.sessionList.appendChild(div);
             });
         }
@@ -2690,106 +2600,55 @@
                 const r = await axios.post(API + '/session/msg', { session_id: sid });
                 state.currentSessionId = sid;
                 state.messages = parseMessages(r.data.messages || []);
-                renderMessages();
-                renderSessions();
-                log(`已切换到: ${sid}`, 'success');
+                renderMessages(); renderSessions(); log(`已切换到: ${sid}`, 'success');
                 // 检查是否有记忆摘要
                 const hasMemory = r.data.memory;
                 const memCreatedAt = r.data.memory_created_at;
                 updateMemoryIndicator(hasMemory, memCreatedAt);
-                els.currentSessionIdDisplay.textContent =
-                    `ID: ${sid}${hasMemory ? '[🧠]' : '[📃]'}`;
+                els.currentSessionIdDisplay.textContent = `ID: ${sid}${hasMemory ? '[🧠]' : '[📃]'}`;
                 // 估算上下文用量
                 const totalChars = JSON.stringify(r.data.messages || []).length;
                 updateContextUsage({ total_cost: totalChars });
-            } catch (e) {
-                toast('无法加载会话', 'error');
-                log('切换会话失败: ' + (e.message || e), 'error');
-            } finally { hideLoading(); }
+            } catch (e) { toast('无法加载会话', 'error'); log('切换会话失败: ' + (e.message || e), 'error'); }
+            finally { hideLoading(); }
         }
         async function newSession() {
             if (state.isTyping) { toast('请等待当前生成完成', 'error'); return; }
             try {
                 const r = await axios.post(API + '/session/new');
-                if (r.data.status === 'OK') {
-                    const nid = r.data.session_id; if (!state.sessions.includes(nid))
-                        state.sessions.push(nid);
-                    await switchSession(nid);
-                    renderSessions();
-                    toast('新会话已创建', 'success');
-                }
-            } catch (e) {
-                toast('创建失败', 'error');
-                log('创建会话失败: ' + (e.message || e), 'error');
-            }
+                if (r.data.status === 'OK') { const nid = r.data.session_id; if (!state.sessions.includes(nid)) state.sessions.push(nid); await switchSession(nid); renderSessions(); toast('新会话已创建', 'success'); }
+            } catch (e) { toast('创建失败', 'error'); log('创建会话失败: ' + (e.message || e), 'error'); }
         }
         async function deleteSession(sid) {
             if (!confirm(`确认删除会话 ${sid}？此操作不可撤销。`)) return;
             try {
                 const r = await axios.post(API + '/session/delete', { session_id: sid });
-                if (r.data.status === 'deleted') {
-                    state.sessions = state.sessions.filter(s => s !== sid);
-                    renderSessions();
-                    if (state.currentSessionId === sid && state.sessions.length > 0) await switchSession(state
-                        .sessions[0]);
-                    else if (state.sessions.length === 0) await newSession();
-                    toast('会话已删除', 'success');
-                }
-            } catch (e) {
-                toast('删除失败: ' + (e.response?.data?.error || e.message), 'error');
-                log('删除会话失败: ' + (e.response?.data?.error || e.message), 'error');
-            }
+                if (r.data.status === 'deleted') { state.sessions = state.sessions.filter(s => s !== sid); renderSessions(); if (state.currentSessionId === sid && state.sessions.length > 0) await switchSession(state.sessions[0]); else if (state.sessions.length === 0) await newSession(); toast('会话已删除', 'success'); }
+            } catch (e) { toast('删除失败: ' + (e.response?.data?.error || e.message), 'error'); log('删除会话失败: ' + (e.response?.data?.error || e.message), 'error'); }
         }
         async function clearSession() {
             if (!state.currentSessionId || !confirm('清空当前会话的全部上下文？')) return;
-            try {
-                await axios.post(API + '/session/clear');
-                await switchSession(state.currentSessionId);
-                toast('上下文已清空', 'success');
-            } catch (e) {
-                toast('清空失败', 'error');
-                log('清空会话失败: ' + (e.message || e), 'error');
-            }
+            try { await axios.post(API + '/session/clear'); await switchSession(state.currentSessionId); toast('上下文已清空', 'success'); } catch (e) { toast('清空失败', 'error'); log('清空会话失败: ' + (e.message || e), 'error'); }
             updateContextUsage(null);
             updateMemoryIndicator(false);
         }
         async function genMemory() {
             if (!state.currentSessionId || !confirm('为当前会话生成记忆摘要？')) return;
-            const btn = els.summarySessionBtn,
-                orig = btn.innerHTML;
-            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
-            btn.disabled = true;
-            try {
-                const r = await axios.post(API + '/session/memory'); if (r.data.status === 'done') {
-                    toast('记忆已更新',
-                        'success');
-                    updateMemoryIndicator(true, r.data.memory_created_at);
-                    els.currentSessionIdDisplay.textContent = `ID: ${state.currentSessionId} [🧠]`;
-                }
-            } catch (e) {
-                toast(
-                    '记忆生成失败', 'error');
-                log('记忆生成失败: ' + (e.message || e), 'error');
-            } finally {
-                btn.innerHTML = orig;
-                btn.disabled = false;
-            }
+            const btn = els.summarySessionBtn, orig = btn.innerHTML; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; btn.disabled = true;
+            try { const r = await axios.post(API + '/session/memory'); if (r.data.status === 'done') { toast('记忆已更新', 'success'); updateMemoryIndicator(true, r.data.memory_created_at); els.currentSessionIdDisplay.textContent = `ID: ${state.currentSessionId} [🧠]`; } } catch (e) { toast('记忆生成失败', 'error'); log('记忆生成失败: ' + (e.message || e), 'error'); }
+            finally { btn.innerHTML = orig; btn.disabled = false; }
         }
 
         // ============ 模型列表 ============
         async function getModels() {
             try {
                 const r = await axios.get(API + '/models');
-                state.models = (r.data.data || []).map(m => ({
-                    name: m.aliases?.[0] || m.id, available: m.status
-                        ?.value === 'loaded'
-                }));
+                state.models = (r.data.data || []).map(m => ({ name: m.aliases?.[0] || m.id, available: m.status?.value === 'loaded' }));
                 if (!state.models.length) state.models.push({ name: 'default', available: true });
                 if (!state.currentModel) selectModel(state.models[0].name, state.models[0].available !== false);
                 renderModels();
             } catch (e) { log('加载模型列表失败', 'error'); }
         }
-
         function renderModels() {
             els.modelDropdownList.innerHTML = state.models.map(m =>
                 `<button class="model-opt" onclick="selectModel('${esc(m.name)}',${!!m.available});$('#model-dropdown-menu').classList.remove('show');">
@@ -2797,16 +2656,11 @@
     </button>`
             ).join('');
         }
-
         function selectModel(name, ok) {
-            state.currentModel = name;
-            els.modelNameDisplay.textContent = name;
+            state.currentModel = name; els.modelNameDisplay.textContent = name;
             if (els.connectionStatusDot) els.connectionStatusDot.style.background = ok ? '#4ade80' : '#f87171';
         }
-        els.modelDropdownBtn.onclick = (e) => {
-            e.stopPropagation();
-            els.modelDropdownMenu.classList.toggle('show');
-        };
+        els.modelDropdownBtn.onclick = (e) => { e.stopPropagation(); els.modelDropdownMenu.classList.toggle('show'); };
         document.addEventListener('click', () => els.modelDropdownMenu.classList.remove('show'));
 
         // ============ 消息解析与渲染 ============
@@ -2816,9 +2670,7 @@
             const aname = state.settings.agent_name || 'assistant';
             let hasMemory = false;
             const parsed = raw.filter(m => m.role !== 'system').map(m => {
-                let role = 'ai',
-                    content = '',
-                    images = [];
+                let role = 'ai', content = '', images = [];
                 if (m.role === uname || m.role === 'user') role = 'user';
                 else if (m.role === aname || m.role === 'assistant' || m.role === 'tool') {
                     role = 'ai';
@@ -2827,31 +2679,19 @@
                     return null;
                 }
                 if (typeof m.content === 'string') content = m.content;
-                else if (Array.isArray(m.content)) {
-                    m.content.forEach(p => {
-                        if (p.type === 'text')
-                            content += p.text + '\n'; else if (p.type === 'image_url') {
-                                const u =
-                                    typeof p.image_url === 'string' ? p.image_url : p.image_url.url;
-                                images.push(u);
-                            }
-                    });
-                }
+                else if (Array.isArray(m.content)) { m.content.forEach(p => { if (p.type === 'text') content += p.text + '\n'; else if (p.type === 'image_url') { const u = typeof p.image_url === 'string' ? p.image_url : p.image_url.url; images.push(u); } }); }
                 return { role, content: content.trim(), images };
             }).filter(m => m !== null);
             updateMemoryIndicator(hasMemory);
             return parsed;
         }
-
         function renderMessages() {
             els.messagesContainer.innerHTML = '';
             if (!state.messages.length) {
                 if (!state.currentSessionId) {
-                    els.messagesContainer.innerHTML =
-                        `<div class="empty-state"><i class="fa-solid fa-comments"></i><div style="font-size:16px;font-weight:500;color:#71717a;">未选择会话</div><div style="font-size:13px;margin-top:4px;">请从左侧选择一个会话，或创建新会话。</div></div>`;
+                    els.messagesContainer.innerHTML = `<div class="empty-state"><i class="fa-solid fa-comments"></i><div style="font-size:16px;font-weight:500;color:var(--text-dim);">未选择会话</div><div style="font-size:13px;margin-top:4px;">请从左侧选择一个会话，或创建新会话。</div></div>`;
                 } else {
-                    els.messagesContainer.innerHTML =
-                        `<div class="empty-state"><i class="fa-solid fa-comments"></i><div style="font-size:16px;font-weight:500;color:#71717a;">上下文为空</div><div style="font-size:13px;margin-top:4px;">开始一段新对话吧。</div></div>`;
+                    els.messagesContainer.innerHTML = `<div class="empty-state"><i class="fa-solid fa-comments"></i><div style="font-size:16px;font-weight:500;color:var(--text-dim);">上下文为空</div><div style="font-size:13px;margin-top:4px;">开始一段新对话吧。</div></div>`;
                 }
                 return;
             }
@@ -2863,8 +2703,7 @@
 
         function appendMessage(msg) {
             const isUser = msg.role === 'user';
-            const row = document.createElement('div');
-            row.className = `msg-row ${isUser ? 'user' : 'ai'}`;
+            const row = document.createElement('div'); row.className = `msg-row ${isUser ? 'user' : 'ai'}`;
             row.id = msg._id || '';
 
             const avatar = document.createElement('div');
@@ -2879,54 +2718,33 @@
                 bubble.innerHTML = '<span class="typing-cursor">思考中...</span>';
             } else {
                 if (!isUser && msg._thinkings && msg._thinkings.length) {
-                    const det = document.createElement('details');
-                    det.className = 'think-block';
-                    det.innerHTML =
-                        `<summary><i class="fa-solid fa-chevron-right"></i> 内心独白 (${msg._thinkings.length} 步)</summary>`;
-                    const content = document.createElement('div');
-                    content.className = 'think-content';
-                    msg._thinkings.forEach((s, i) => {
-                        content.innerHTML +=
-                            `<span style="color:#8b5cf6;font-weight:600;">#${i + 1}</span> ${esc(String(s)).replace(/\n/g, '<br>')}<br><br>`;
-                    });
-                    det.appendChild(content);
-                    bubble.appendChild(det);
+                    const det = document.createElement('details'); det.className = 'think-block';
+                    det.innerHTML = `<summary><i class="fa-solid fa-chevron-right"></i> 内心独白 (${msg._thinkings.length} 步)</summary>`;
+                    const content = document.createElement('div'); content.className = 'think-content';
+                    msg._thinkings.forEach((s, i) => { content.innerHTML += `<span style="color:#8b5cf6;font-weight:600;">#${i + 1}</span> ${esc(String(s)).replace(/\n/g, '<br>')}<br><br>`; });
+                    det.appendChild(content); bubble.appendChild(det);
                 }
                 if (!isUser && msg._toolCalls && msg._toolCalls.length) {
                     msg._toolCalls.forEach(tc => {
-                        const det = document.createElement('details');
-                        det.className = 'tool-call';
-                        det.innerHTML =
-                            `<summary><span class="tool-icon"><i class="fa-solid fa-terminal"></i></span><span class="tool-name">${esc(tc.name)}</span><span class="tool-args">${esc(tc.args || '')}</span><span class="tool-status ${tc.success ? 'ok' : 'err'}">${tc.success ? '✓' : '✗'}</span></summary>`;
-                        const out = document.createElement('div');
-                        out.className = 'tool-output';
-                        out.textContent = tc.output || '';
-                        det.appendChild(out);
-                        bubble.appendChild(det);
+                        const det = document.createElement('details'); det.className = 'tool-call';
+                        det.innerHTML = `<summary><span class="tool-icon"><i class="fa-solid fa-terminal"></i></span><span class="tool-name">${esc(tc.name)}</span><span class="tool-args">${esc(tc.args || '')}</span><span class="tool-status ${tc.success ? 'ok' : 'err'}">${tc.success ? '✓' : '✗'}</span></summary>`;
+                        const out = document.createElement('div'); out.className = 'tool-output'; out.textContent = tc.output || '';
+                        det.appendChild(out); bubble.appendChild(det);
                     });
                 }
                 const prose = document.createElement('div');
                 prose.className = 'prose';
-                prose.innerHTML = isUser ? esc(msg.content).replace(/\n/g, '<br>') : marked.parse(fixToolTags(msg
-                    .content));
+                prose.innerHTML = isUser ? esc(msg.content).replace(/\n/g, '<br>') : marked.parse(fixToolTags(msg.content));
                 bubble.appendChild(prose);
                 addCopyButtons(prose);
                 if (msg.images && msg.images.length) {
-                    const imgs = document.createElement('div');
-                    imgs.className = 'msg-images';
-                    msg.images.forEach(img => {
-                        const el = document.createElement('img');
-                        el.src = img.startsWith('data:') ? img : img;
-                        el.onclick = () => window.open(el.src);
-                        imgs.appendChild(el);
-                    });
+                    const imgs = document.createElement('div'); imgs.className = 'msg-images';
+                    msg.images.forEach(img => { const el = document.createElement('img'); el.src = img.startsWith('data:') ? img : img; el.onclick = () => window.open(el.src); imgs.appendChild(el); });
                     bubble.appendChild(imgs);
                 }
                 if (!isUser && msg._usage) {
-                    const uf = document.createElement('div');
-                    uf.className = 'usage-footer';
-                    uf.innerHTML =
-                        `<span>↑${(msg._usage.prompt_cost || 0).toLocaleString()}</span><span>↓${(msg._usage.completion_cost || 0).toLocaleString()}</span><span style="color:#818cf8;">Σ${(msg._usage.total_cost || 0).toLocaleString()}</span>`;
+                    const uf = document.createElement('div'); uf.className = 'usage-footer';
+                    uf.innerHTML = `<span>↑${(msg._usage.prompt_cost || 0).toLocaleString()}</span><span>↓${(msg._usage.completion_cost || 0).toLocaleString()}</span><span style="color:#818cf8;">Σ${(msg._usage.total_cost || 0).toLocaleString()}</span>`;
                     bubble.appendChild(uf);
                 }
             }
@@ -2943,57 +2761,34 @@
             bubble.innerHTML = '';
 
             if (data._thinkings && data._thinkings.length) {
-                const det = document.createElement('details');
-                det.className = 'think-block';
-                det.open = data._thinkingOpen || false;
-                det.innerHTML =
-                    `<summary><i class="fa-solid fa-chevron-right"></i> 内心独白 (${data._thinkings.length} 步)</summary>`;
-                const content = document.createElement('div');
-                content.className = 'think-content';
-                data._thinkings.forEach((s, i) => {
-                    content.innerHTML +=
-                        `<span style="color:#8b5cf6;font-weight:600;">#${i + 1}</span> ${esc(String(s)).replace(/\n/g, '<br>')}<br><br>`;
-                });
-                det.appendChild(content);
-                bubble.appendChild(det);
+                const det = document.createElement('details'); det.className = 'think-block'; det.open = data._thinkingOpen || false;
+                det.innerHTML = `<summary><i class="fa-solid fa-chevron-right"></i> 内心独白 (${data._thinkings.length} 步)</summary>`;
+                const content = document.createElement('div'); content.className = 'think-content';
+                data._thinkings.forEach((s, i) => { content.innerHTML += `<span style="color:#8b5cf6;font-weight:600;">#${i + 1}</span> ${esc(String(s)).replace(/\n/g, '<br>')}<br><br>`; });
+                det.appendChild(content); bubble.appendChild(det);
             }
             if (data._toolCalls && data._toolCalls.length) {
                 data._toolCalls.forEach(tc => {
-                    const det = document.createElement('details');
-                    det.className = 'tool-call';
-                    det.open = tc._open !== false;
-                    det.innerHTML =
-                        `<summary><span class="tool-icon"><i class="fa-solid fa-terminal"></i></span><span class="tool-name">${esc(tc.name)}</span><span class="tool-args">${esc(tc.args || '')}</span><span class="tool-status ${tc.success ? 'ok' : 'err'}">${tc.success ? '✓' : '✗'}</span></summary>`;
-                    const out = document.createElement('div');
-                    out.className = 'tool-output';
-                    out.textContent = tc.output || '';
-                    det.appendChild(out);
-                    bubble.appendChild(det);
+                    const det = document.createElement('details'); det.className = 'tool-call'; det.open = tc._open !== false;
+                    det.innerHTML = `<summary><span class="tool-icon"><i class="fa-solid fa-terminal"></i></span><span class="tool-name">${esc(tc.name)}</span><span class="tool-args">${esc(tc.args || '')}</span><span class="tool-status ${tc.success ? 'ok' : 'err'}">${tc.success ? '✓' : '✗'}</span></summary>`;
+                    const out = document.createElement('div'); out.className = 'tool-output'; out.textContent = tc.output || '';
+                    det.appendChild(out); bubble.appendChild(det);
                 });
             }
             const prose = document.createElement('div');
             prose.innerHTML = marked.parse(fixToolTags(data.content || ''));
             addCopyButtons(prose);
             bubble.appendChild(prose);
-            if (data._typing) bubble.classList.add('typing-cursor');
-            else bubble.classList.remove('typing-cursor');
+            if (data._typing) bubble.classList.add('typing-cursor'); else bubble.classList.remove('typing-cursor');
             if (data._usage) {
-                const uf = document.createElement('div');
-                uf.className = 'usage-footer';
-                uf.innerHTML =
-                    `<span>↑${(data._usage.prompt_cost || 0).toLocaleString()}</span><span>↓${(data._usage.completion_cost || 0).toLocaleString()}</span><span style="color:#818cf8;">Σ${(data._usage.total_cost || 0).toLocaleString()}</span>`;
+                const uf = document.createElement('div'); uf.className = 'usage-footer';
+                uf.innerHTML = `<span>↑${(data._usage.prompt_cost || 0).toLocaleString()}</span><span>↓${(data._usage.completion_cost || 0).toLocaleString()}</span><span style="color:#818cf8;">Σ${(data._usage.total_cost || 0).toLocaleString()}</span>`;
                 bubble.appendChild(uf);
             }
 
             if (data.images && data.images.length) {
-                const imgs = document.createElement('div');
-                imgs.className = 'msg-images';
-                data.images.forEach(img => {
-                    const el = document.createElement('img');
-                    el.src = img.startsWith('data:') ? img : img;
-                    el.onclick = () => window.open(el.src);
-                    imgs.appendChild(el);
-                });
+                const imgs = document.createElement('div'); imgs.className = 'msg-images';
+                data.images.forEach(img => { const el = document.createElement('img'); el.src = img.startsWith('data:') ? img : img; el.onclick = () => window.open(el.src); imgs.appendChild(el); });
                 bubble.appendChild(imgs);
             }
 
@@ -3005,16 +2800,8 @@
         function addCopyButtons(container) {
             container.querySelectorAll('pre').forEach(pre => {
                 if (pre.querySelector('.copy-btn')) return;
-                const btn = document.createElement('button');
-                btn.className = 'copy-btn';
-                btn.textContent = '复制';
-                btn.onclick = () => {
-                    const c = pre.querySelector('code')?.textContent || '';
-                    navigator.clipboard.writeText(c).then(() => {
-                        btn.textContent = '已复制';
-                        setTimeout(() => btn.textContent = '复制', 2000);
-                    });
-                };
+                const btn = document.createElement('button'); btn.className = 'copy-btn'; btn.textContent = '复制';
+                btn.onclick = () => { const c = pre.querySelector('code')?.textContent || ''; navigator.clipboard.writeText(c).then(() => { btn.textContent = '已复制'; setTimeout(() => btn.textContent = '复制', 2000); }); };
                 pre.appendChild(btn);
             });
         }
@@ -3033,20 +2820,13 @@
             // 1. 添加用户消息
             const userMsg = { role: 'user', content, images: imgs };
             state.messages.push(userMsg);
-            els.userInput.value = '';
-            els.userInput.style.height = 'auto';
-            state.pendingImages = [];
-            renderImagePreviews();
+            els.userInput.value = ''; els.userInput.style.height = 'auto'; state.pendingImages = []; renderImagePreviews();
             renderMessages();
-            state.isTyping = true;
-            els.sendBtn.disabled = true;
+            state.isTyping = true; els.sendBtn.disabled = true;
 
             // 2. 创建占位 AI 消息
             const msgId = 'msg-' + Date.now();
-            const place = {
-                role: 'ai', content: '', images: [], _id: msgId, _loading: true, _thinkings: [],
-                _toolCalls: [], _usage: null
-            };
+            const place = { role: 'ai', content: '', images: [], _id: msgId, _loading: true, _thinkings: [], _toolCalls: [], _usage: null };
             state.messages.push(place);
             appendMessage(place);
             state.assistantMsgId = msgId;
@@ -3055,10 +2835,7 @@
             state.streamBuffers = { content: '', thinking: '', thinkings: [], toolOutputs: [], currentTool: null };
 
             // 4. 构造请求载荷
-            const payload = {
-                messages: content, model: state.currentModel || 'default', think: state.thinkMode,
-                session_id: state.currentSessionId
-            };
+            const payload = { messages: content, model: state.currentModel || 'default', think: state.thinkMode, session_id: state.currentSessionId };
             if (imgs.length) payload.images = imgs;
 
             // 5. 根据配置选择流式或非流式请求
@@ -3068,17 +2845,14 @@
                 await sendPacked(payload, msgId);
             }
 
-            state.isTyping = false;
-            els.sendBtn.disabled = false;
+            state.isTyping = false; els.sendBtn.disabled = false;
         }
 
         // 流式 SSE 请求
         async function sendStreaming(payload, msgId) {
             try {
                 const resp = await fetch(API + '/input/stream', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
                 });
                 if (!resp.ok) throw new Error('HTTP ' + resp.status);
 
@@ -3102,14 +2876,10 @@
                 }
             } catch (e) {
                 state.messages = state.messages.filter(m => m._id !== msgId);
-                state.messages.push({
-                    role: 'ai', content: `❌ 错误: ${e.message}`, images: [], _thinkings: [],
-                    _toolCalls: []
-                });
+                state.messages.push({ role: 'ai', content: `❌ 错误: ${e.message}`, images: [], _thinkings: [], _toolCalls: [] });
                 renderMessages();
                 log('请求错误: ' + e.message, 'error');
-                state.isTyping = false;
-                els.sendBtn.disabled = false;
+                state.isTyping = false; els.sendBtn.disabled = false;
             }
         }
 
@@ -3117,9 +2887,7 @@
         async function sendPacked(payload, msgId) {
             try {
                 const resp = await fetch(API + '/input', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
                 });
                 if (!resp.ok) throw new Error('HTTP ' + resp.status);
 
@@ -3132,11 +2900,7 @@
 
                 // 填充工具调用
                 sb.toolOutputs = (result.tools || []).map(t => ({
-                    name: t.name,
-                    args: t.args || '',
-                    output: t.output || '',
-                    success: true,
-                    _open: false
+                    name: t.name, args: t.args || '', output: t.output || '', success: true, _open: false
                 }));
 
                 // 更新 AI 消息 UI
@@ -3150,8 +2914,7 @@
 
                 // 更新上下文使用显示
                 if (result.usage) {
-                    state.contextUsage.total = result.usage.total_cost || (result.usage.prompt_cost + result.usage
-                        .completion_cost) || 0;
+                    state.contextUsage.total = result.usage.total_cost || (result.usage.prompt_cost + result.usage.completion_cost) || 0;
                     state.contextUsage.max = state.settings.max_context || 128000;
                     updateContextUsage({ total_cost: state.contextUsage.total });
                 }
@@ -3159,12 +2922,8 @@
                 // 替换占位为最终消息
                 state.messages = state.messages.filter(m => m._id !== msgId);
                 const finalMsg = {
-                    role: 'ai',
-                    content: sb.content,
-                    images: [],
-                    _thinkings: sb.thinkings,
-                    _toolCalls: sb.toolOutputs,
-                    _usage: result.usage
+                    role: 'ai', content: sb.content, images: [],
+                    _thinkings: sb.thinkings, _toolCalls: sb.toolOutputs, _usage: result.usage
                 };
                 state.messages.push(finalMsg);
                 renderMessages();
@@ -3172,14 +2931,10 @@
 
             } catch (e) {
                 state.messages = state.messages.filter(m => m._id !== msgId);
-                state.messages.push({
-                    role: 'ai', content: `❌ 错误: ${e.message}`, images: [], _thinkings: [],
-                    _toolCalls: []
-                });
+                state.messages.push({ role: 'ai', content: `❌ 错误: ${e.message}`, images: [], _thinkings: [], _toolCalls: [] });
                 renderMessages();
                 log('请求错误: ' + e.message, 'error');
-                state.isTyping = false;
-                els.sendBtn.disabled = false;
+                state.isTyping = false; els.sendBtn.disabled = false;
             }
         }
 
@@ -3188,19 +2943,13 @@
             switch (ev.type) {
                 case 'token':
                     sb.content += ev.content;
-                    updateAssistantMsg(msgId, {
-                        content: sb.content, _typing: true, _thinkings: sb.thinkings,
-                        _toolCalls: sb.toolOutputs
-                    });
+                    updateAssistantMsg(msgId, { content: sb.content, _typing: true, _thinkings: sb.thinkings, _toolCalls: sb.toolOutputs });
                     break;
                 case 'thinking':
                     sb.thinking += ev.content;
                     if (!sb.thinkings.length) sb.thinkings.push('');
                     sb.thinkings[sb.thinkings.length - 1] += ev.content;
-                    updateAssistantMsg(msgId, {
-                        content: sb.content, _typing: true, _thinkings: sb.thinkings,
-                        _toolCalls: sb.toolOutputs, _thinkingOpen: true
-                    });
+                    updateAssistantMsg(msgId, { content: sb.content, _typing: true, _thinkings: sb.thinkings, _toolCalls: sb.toolOutputs, _thinkingOpen: true });
                     break;
                 case 'tool_start':
                     sb.currentTool = { name: ev.name, args: ev.args || '', output: '', success: true, _open: true };
@@ -3215,44 +2964,30 @@
                         sb.toolOutputs.push(sb.currentTool);
                         sb.currentTool = null;
                     }
-                    updateAssistantMsg(msgId, {
-                        content: sb.content, _typing: true, _thinkings: sb.thinkings,
-                        _toolCalls: sb.toolOutputs
-                    });
+                    updateAssistantMsg(msgId, { content: sb.content, _typing: true, _thinkings: sb.thinkings, _toolCalls: sb.toolOutputs });
                     fb.refresh();
                     if (fb.autoExpand && !fb.visible) fb.show();
                     break;
                 case 'done':
-                    updateAssistantMsg(msgId, {
-                        content: sb.content, _typing: false, _thinkings: sb.thinkings,
-                        _toolCalls: sb.toolOutputs, _usage: ev.usage
-                    });
+                    updateAssistantMsg(msgId, { content: sb.content, _typing: false, _thinkings: sb.thinkings, _toolCalls: sb.toolOutputs, _usage: ev.usage });
                     // 更新上下文使用显示
                     if (ev.usage) {
-                        state.contextUsage.total = ev.usage.total_cost || (ev.usage.prompt_cost + ev.usage
-                            .completion_cost) || 0;
+                        state.contextUsage.total = ev.usage.total_cost || (ev.usage.prompt_cost + ev.usage.completion_cost) || 0;
                         state.contextUsage.max = state.settings.max_context || 128000;
                         updateContextUsage({ total_cost: state.contextUsage.total });
                     }
                     // 更新本地消息状态
                     state.messages = state.messages.filter(m => m._id !== msgId);
-                    const finalMsg = {
-                        role: 'ai', content: sb.content, images: [], _thinkings: sb.thinkings,
-                        _toolCalls: sb.toolOutputs, _usage: ev.usage
-                    };
+                    const finalMsg = { role: 'ai', content: sb.content, images: [], _thinkings: sb.thinkings, _toolCalls: sb.toolOutputs, _usage: ev.usage };
                     state.messages.push(finalMsg);
                     // 如果服务器返回了新的消息列表，同步
                     if (ev.messages && Array.isArray(ev.messages)) {
                         const parsed = parseMessages(ev.messages);
                         // 更新session显示中的记忆状态
-                        els.currentSessionIdDisplay.textContent =
-                            `ID: ${state.currentSessionId}${state.memoryActive ? '[🧠]' : '[📃]'}`;
+                        els.currentSessionIdDisplay.textContent = `ID: ${state.currentSessionId}${state.memoryActive ? '[🧠]' : '[📃]'}`;
                         // 将 thinkings 和 usage 附加到最后一条 ai 消息
                         for (let i = parsed.length - 1; i >= 0; i--) {
-                            if (parsed[i].role === 'ai') {
-                                parsed[i]._thinkings = sb.thinkings;
-                                parsed[i]._usage = ev.usage; break;
-                            }
+                            if (parsed[i].role === 'ai') { parsed[i]._thinkings = sb.thinkings; parsed[i]._usage = ev.usage; break; }
                         }
                         state.messages = state.messages.slice(0, state.messages.length - 1).concat(parsed);
                     }
@@ -3260,37 +2995,27 @@
                     log('响应完成', 'success');
                     break;
                 case 'error':
-                    updateAssistantMsg(msgId, {
-                        content: '❌ ' + esc(ev.message), _typing: false, _thinkings: sb
-                            .thinkings, _toolCalls: sb.toolOutputs
-                    });
+                    updateAssistantMsg(msgId, { content: '❌ ' + esc(ev.message), _typing: false, _thinkings: sb.thinkings, _toolCalls: sb.toolOutputs });
                     state.messages = state.messages.filter(m => m._id !== msgId);
                     state.messages.push({ role: 'ai', content: '❌ 错误: ' + ev.message, images: [] });
                     renderMessages();
                     log('错误: ' + ev.message, 'error');
-                    state.isTyping = false;
-                    els.sendBtn.disabled = false;
+                    state.isTyping = false; els.sendBtn.disabled = false;
                     break;
             }
         }
 
         // ============ 工具/任务/频道 ============
         async function loadTools() {
-            try {
-                const r = await axios.get(API + '/tools');
-                state.tools = r.data || [];
-                renderToolToggles();
-            } catch (e) { log('加载工具列表失败: ' + (e.message || e), 'error'); }
+            try { const r = await axios.get(API + '/tools'); state.tools = r.data || []; renderToolToggles(); } catch (e) { log('加载工具列表失败: ' + (e.message || e), 'error'); }
         }
-
         function renderToolToggles() {
             const enabledCount = state.tools.filter(t => t.enabled !== false).length;
             document.getElementById('tools-enabled-count').textContent = `${enabledCount}/${state.tools.length}`;
             const filter = (document.getElementById('tools-search-input')?.value || '').toLowerCase();
-            const filtered = filter ? state.tools.filter(t => t.name.toLowerCase().includes(filter) || (t.description ||
-                '').toLowerCase().includes(filter)) : state.tools;
+            const filtered = filter ? state.tools.filter(t => t.name.toLowerCase().includes(filter) || (t.description || '').toLowerCase().includes(filter)) : state.tools;
             els.toolsToggleList.innerHTML = filtered.map(t => `
-    <div class="tool-toggle-card p-3 border border-[#27272a] bg-[#18181b] rounded-lg hover:border-[#3f3f46] transition-all">
+    <div class="tool-toggle-card p-3 border border-[var(--border-color)] bg-[var(--bg-surface)] rounded-lg hover:border-[var(--border-hover)] transition-all">
       <div class="flex items-center justify-between mb-2">
         <span class="text-xs font-semibold text-gray-200 truncate">${esc(t.name)}</span>
         <label class="relative inline-flex items-center cursor-pointer">
@@ -3309,11 +3034,9 @@
   `).join('');
             // 如果没有匹配工具
             if (filtered.length === 0) {
-                els.toolsToggleList.innerHTML =
-                    '<div style="grid-column:1/-1;text-align:center;padding:24px 8px;color:#52525b;font-size:12px;">没有匹配的工具</div>';
+                els.toolsToggleList.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:24px 8px;color:var(--text-dim);font-size:12px;">没有匹配的工具</div>';
             }
         }
-
         function filterTools() {
             renderToolToggles();
         }
@@ -3330,78 +3053,49 @@
             }
         }
         async function loadTodos() {
-            try {
-                const r = await axios.get(API + '/todos');
-                state.todos = r.data || [];
-                renderTodos();
-            } catch (e) { log('加载任务列表失败: ' + (e.message || e), 'error'); }
+            try { const r = await axios.get(API + '/todos'); state.todos = r.data || []; renderTodos(); } catch (e) { log('加载任务列表失败: ' + (e.message || e), 'error'); }
         }
         async function addTodo() {
-            const v = els.newTodoInput.value.trim();
-            if (!v) return;
+            const v = els.newTodoInput.value.trim(); if (!v) return;
             const item = { id: String(Date.now()), done: false, content: v };
-            try {
-                const r = await axios.post(API + '/todos/new', item);
-                state.todos.push(r.data);
-                renderTodos();
-                els.newTodoInput.value = '';
-            } catch (e) { log('添加任务失败: ' + (e.message || e), 'error'); }
+            try { const r = await axios.post(API + '/todos/new', item); state.todos.push(r.data); renderTodos(); els.newTodoInput.value = ''; } catch (e) { log('添加任务失败: ' + (e.message || e), 'error'); }
         }
         async function toggleTodo(id) {
-            const t = state.todos.find(t => t.id == id);
-            if (!t) return;
+            const t = state.todos.find(t => t.id == id); if (!t) return;
             t.done = !t.done;
-            try {
-                await axios.post(API + '/todos/' + id, t);
-                renderTodos();
-            } catch (e) { log('更新任务失败: ' + (e.message || e), 'error'); }
+            try { await axios.post(API + '/todos/' + id, t); renderTodos(); } catch (e) { log('更新任务失败: ' + (e.message || e), 'error'); }
         }
         async function deleteTodo(id) {
             if (!confirm('删除该任务？')) return;
-            try {
-                await axios.get(API + '/todos/delete/' + id);
-                state.todos = state.todos.filter(t => t.id != id);
-                renderTodos();
-            } catch (e) { log('删除任务失败: ' + (e.message || e), 'error'); }
+            try { await axios.get(API + '/todos/delete/' + id); state.todos = state.todos.filter(t => t.id != id); renderTodos(); } catch (e) { log('删除任务失败: ' + (e.message || e), 'error'); }
         }
-
         function renderTodos() {
-            if (!state.todos?.length) {
-                els.todosList.innerHTML =
-                    '<div style="color:#71717a;font-size:13px;text-align:center;padding:16px;">暂无任务</div>'; return;
-            }
+            if (!state.todos?.length) { els.todosList.innerHTML = '<div style="color:var(--text-dim);font-size:13px;text-align:center;padding:16px;">暂无任务</div>'; return; }
             els.todosList.innerHTML = state.todos.map(t =>
-                `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:#18181b;border-radius:6px;margin-bottom:4px;font-size:13px;border:1px solid #27272a;">
+                `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--bg-surface);border-radius:var(--radius-sm);margin-bottom:4px;font-size:13px;border:1px solid var(--border-color);">
       <div style="display:flex;align-items:center;gap:8px;flex:1;cursor:pointer;" onclick="toggleTodo('${t.id}')">
-        <div style="width:18px;height:18px;border-radius:4px;display:flex;align-items:center;justify-content:center;border:1px solid ${t.done ? '#4ade80' : '#3f3f46'};background:${t.done ? '#166534' : '#09090b'};font-size:10px;color:#4ade80;">${t.done ? '✓' : ''}</div>
-        <span style="color:#d4d4d8;${t.done ? 'text-decoration:line-through;opacity:0.5' : ''}">${esc(t.content)}</span>
+        <div style="width:18px;height:18px;border-radius:4px;display:flex;align-items:center;justify-content:center;border:1px solid ${t.done ? '#4ade80' : 'var(--border-hover)'};background:${t.done ? '#166534' : 'var(--bg-base)'};font-size:10px;color:#4ade80;">${t.done ? '✓' : ''}</div>
+        <span style="color:var(--text-main);${t.done ? 'text-decoration:line-through;opacity:0.5' : ''}">${esc(t.content)}</span>
       </div>
-      <button onclick="deleteTodo('${t.id}')" style="background:none;border:none;color:#71717a;cursor:pointer;padding:4px;font-size:11px;"><i class="fa-solid fa-trash-can"></i></button>
+      <button onclick="deleteTodo('${t.id}')" style="background:none;border:none;color:var(--text-dim);cursor:pointer;padding:4px;font-size:11px;"><i class="fa-solid fa-trash-can"></i></button>
     </div>`
             ).join('');
         }
         async function loadChannels() {
-            try {
-                const r = await axios.get(API + '/channels');
-                state.channels = r.data || [];
-                renderChannels();
-                renderSessions();
-            } catch (e) { log('加载频道列表失败: ' + (e.message || e), 'error'); }
+            try { const r = await axios.get(API + '/channels'); state.channels = r.data || []; renderChannels(); renderSessions(); } catch (e) { log('加载频道列表失败: ' + (e.message || e), 'error'); }
         }
-
         function renderChannels() {
             if (!state.channels?.length) {
-                els.channelsList.innerHTML =
-                    '<div style="color:#71717a;font-size:13px;text-align:center;padding:16px;">暂无频道</div>';
+                els.channelsList.innerHTML = '<div style="color:var(--text-dim);font-size:13px;text-align:center;padding:16px;">暂无频道</div>';
                 return;
             }
             els.channelsList.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-          <span style="font-size:11px;color:#71717a;">共 ${state.channels.length} 个频道</span>
-          <button class="sidebar-btn" onclick="openChannelOverlay()" style="width:auto;padding:0 8px;font-size:12px;color:#a1a1aa;"><i class="fa-solid fa-sliders"></i> 管理</button>
+          <span style="font-size:11px;color:var(--text-dim);">共 ${state.channels.length} 个频道</span>
+          <button class="sidebar-btn" onclick="openChannelOverlay()" style="width:auto;padding:0 8px;font-size:12px;color:var(--text-muted);"><i class="fa-solid fa-sliders"></i> 管理</button>
         </div>
       ` + state.channels.map(c =>
-                `<div style="padding:8px 10px;background:#18181b;border-radius:6px;margin-bottom:4px;font-size:13px;color:#d4d4d8;cursor:pointer;display:flex;align-items:center;gap:8px;border:1px solid #27272a;" onclick="switchSession('${esc(c.name)}')"><i class="fa-solid fa-hashtag" style="color:#71717a;"></i> ${esc(c.name)} <span style="color:${c.status === 'active' ? '#4ade80' : '#71717a'};font-size:10px;margin-left:auto;">${esc(c.status || 'unknown')}</span></div>`
+                `<div style="padding:8px 10px;background:var(--bg-surface);border-radius:6px;margin-bottom:4px;font-size:13px;color:var(--text-main);cursor:pointer;display:flex;align-items:center;gap:8px;border:1px solid var(--border-color);" onclick="switchSession('${esc(c.name)}')"><i class="fa-solid fa-hashtag" style="color:var(--text-dim);"></i> ${esc(c.name)} <span style="color:${c.status === 'active' ? '#4ade80' : 'var(--text-dim)'};font-size:10px;margin-left:auto;">${esc(c.status || 'unknown')}</span></div>`
             ).join('');
         }
 
@@ -3410,16 +3104,8 @@
         els.clearSessionBtn.onclick = clearSession;
         els.summarySessionBtn.onclick = genMemory;
         els.thinkToggle.onchange = (e) => state.thinkMode = e.target.checked;
-        els.userInput.onkeydown = (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendMessageStream();
-            }
-        };
-        els.userInput.addEventListener('input', function () {
-            this.style.height = 'auto';
-            this.style.height = this.scrollHeight + 'px';
-        });
+        els.userInput.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessageStream(); } };
+        els.userInput.addEventListener('input', function () { this.style.height = 'auto'; this.style.height = this.scrollHeight + 'px'; });
         els.sendBtn.onclick = sendMessageStream;
         els.addTodoBtn.onclick = addTodo;
 
@@ -3439,8 +3125,7 @@
                     this.renderFiles(data.entries);
                 } catch (e) {
                     log('文件浏览器加载失败: ' + (e.message || e), 'error');
-                    els.fbListing.innerHTML =
-                        '<div style="padding:24px 12px;color:#f87171;font-size:12px;text-align:center;">加载失败</div>';
+                    els.fbListing.innerHTML = '<div style="padding:24px 12px;color:#f87171;font-size:12px;text-align:center;">加载失败</div>';
                 }
             },
 
@@ -3460,14 +3145,12 @@
                 const parts = path.split('/').filter(Boolean);
                 const parentPath = parts.length > 0 ? '/' + parts.slice(0, -1).join('/') : '/';
                 const isRoot = parts.length === 0;
-                let html =
-                    `<button class="fb-parent-btn" data-path="${esc(parentPath)}" title="返回上一级" ${isRoot ? 'disabled' : ''}><i class="fa-solid fa-arrow-up"></i></button>`;
+                let html = `<button class="fb-parent-btn" data-path="${esc(parentPath)}" title="返回上一级" ${isRoot ? 'disabled' : ''}><i class="fa-solid fa-arrow-up"></i></button>`;
                 html += '<span class="fb-crumb" data-path="/"><i class="fa-solid fa-house"></i></span>';
                 let acc = '';
                 for (const p of parts) {
                     acc += '/' + p;
-                    html +=
-                        `<span class="fb-crumb-sep">›</span><span class="fb-crumb" data-path="${esc(acc)}">${esc(p)}</span>`;
+                    html += `<span class="fb-crumb-sep">›</span><span class="fb-crumb" data-path="${esc(acc)}">${esc(p)}</span>`;
                 }
                 els.fbBreadcrumb.innerHTML = html;
                 // 点击返回上一级
@@ -3481,8 +3164,7 @@
 
             renderFiles(entries) {
                 if (!entries || !entries.length) {
-                    els.fbListing.innerHTML =
-                        '<div style="padding:24px 12px;color:#52525b;font-size:12px;text-align:center;"><i class="fa-solid fa-folder-open" style="display:block;font-size:24px;margin-bottom:8px;opacity:0.3;"></i>空目录</div>';
+                    els.fbListing.innerHTML = '<div style="padding:24px 12px;color:var(--text-dim);font-size:12px;text-align:center;"><i class="fa-solid fa-folder-open" style="display:block;font-size:24px;margin-bottom:8px;opacity:0.3;"></i>空目录</div>';
                     return;
                 }
                 const sorted = [...entries].sort((a, b) => {
@@ -3492,9 +3174,9 @@
                 els.fbListing.innerHTML = sorted.map(entry => {
                     const relPath = entry.path.replace(/\\/g, '/');
                     const isUsed = this.usedFiles.has(relPath);
-                    const iconHtml = entry.is_dir ?
-                        '<i class="fa-solid fa-folder" style="color:#fbbf24;"></i>' :
-                        this.getFileIconHtml(entry.name);
+                    const iconHtml = entry.is_dir
+                        ? '<i class="fa-solid fa-folder" style="color:#fbbf24;"></i>'
+                        : this.getFileIconHtml(entry.name);
                     return `<div class="fb-item" data-path="${esc(relPath)}" data-dir="${entry.is_dir}">
         <span class="fb-item-icon">${iconHtml}</span>
         <span class="fb-item-status ${isUsed ? 'used' : ''}"></span>
@@ -3516,96 +3198,42 @@
             getFileIconHtml(filename) {
                 let cls = 'fa-solid fa-file';
                 const ext = filename.split('.').pop()?.toLowerCase();
-                // 使用 file-icons-js (如已加载)
-                if (window.fileIcons) {
-                    try {
-                        const iconCls = window.fileIcons.getIcon(filename);
-                        if (iconCls) cls = iconCls;
-                    } catch (e) { log('文件图标加载失败: ' + (e.message || e), 'error'); }
-                }
                 // 扩展名 → 颜色映射
                 const colors = {
-                    js: '#f7df1e',
-                    mjs: '#f7df1e',
-                    cjs: '#f7df1e',
-                    ts: '#3178c6',
-                    tsx: '#3178c6',
-                    mts: '#3178c6',
+                    js: '#f7df1e', mjs: '#f7df1e', cjs: '#f7df1e',
+                    ts: '#3178c6', tsx: '#3178c6', mts: '#3178c6',
                     jsx: '#61dafb',
-                    py: '#3572A5',
-                    pyw: '#3572A5',
-                    json: '#5B5B5B',
-                    jsonc: '#5B5B5B',
-                    html: '#e34f26',
-                    htm: '#e34f26',
-                    css: '#1572b6',
-                    scss: '#c6538c',
-                    less: '#1d365d',
-                    md: '#9B59B6',
-                    rst: '#9B59B6',
-                    cpp: '#00599C',
-                    cxx: '#00599C',
-                    cc: '#00599C',
-                    h: '#00599C',
-                    hpp: '#00599C',
-                    hxx: '#00599C',
+                    py: '#3572A5', pyw: '#3572A5',
+                    json: '#5B5B5B', jsonc: '#5B5B5B',
+                    html: '#e34f26', htm: '#e34f26',
+                    css: '#1572b6', scss: '#c6538c', less: '#1d365d',
+                    md: '#9B59B6', rst: '#9B59B6',
+                    cpp: '#00599C', cxx: '#00599C', cc: '#00599C',
+                    h: '#00599C', hpp: '#00599C', hxx: '#00599C',
                     c: '#00599C',
-                    go: '#00ADD8',
-                    rs: '#DEA584',
-                    java: '#b07219',
-                    kt: '#7F52FF',
-                    scala: '#c22d40',
-                    rb: '#CC342D',
-                    php: '#4F5D95',
-                    pl: '#0298c3',
+                    go: '#00ADD8', rs: '#DEA584',
+                    java: '#b07219', kt: '#7F52FF', scala: '#c22d40',
+                    rb: '#CC342D', php: '#4F5D95', pl: '#0298c3',
                     swift: '#F05138',
-                    yaml: '#6CB4EE',
-                    yml: '#6CB4EE',
-                    toml: '#8B8B8B',
-                    png: '#FF6B6B',
-                    jpg: '#FF6B6B',
-                    jpeg: '#FF6B6B',
-                    gif: '#FF6B6B',
-                    svg: '#FFB13B',
-                    webp: '#FF6B6B',
-                    ico: '#FFB13B',
-                    zip: '#7F8C8D',
-                    tar: '#7F8C8D',
-                    gz: '#7F8C8D',
-                    rar: '#7F8C8D',
-                    '7z': '#7F8C8D',
+                    yaml: '#6CB4EE', yml: '#6CB4EE', toml: '#8B8B8B',
+                    png: '#FF6B6B', jpg: '#FF6B6B', jpeg: '#FF6B6B',
+                    gif: '#FF6B6B', svg: '#FFB13B', webp: '#FF6B6B', ico: '#FFB13B',
+                    zip: '#7F8C8D', tar: '#7F8C8D', gz: '#7F8C8D', rar: '#7F8C8D', '7z': '#7F8C8D',
                     pdf: '#E74C3C',
-                    doc: '#2B579A',
-                    docx: '#2B579A',
-                    xls: '#217346',
-                    xlsx: '#217346',
-                    csv: '#217346',
-                    tsv: '#217346',
-                    sh: '#4CAF50',
-                    bash: '#4CAF50',
-                    zsh: '#4CAF50',
-                    bat: '#4CAF50',
-                    ps1: '#4CAF50',
-                    log: '#95A5A6',
-                    txt: '#95A5A6',
-                    cfg: '#8B8B8B',
-                    ini: '#8B8B8B',
-                    conf: '#8B8B8B',
-                    lock: '#7F8C8D',
-                    gitignore: '#DD4C35',
-                    dockerignore: '#DD4C35',
-                    vue: '#42b883',
-                    svelte: '#ff3e00',
-                    sql: '#e38c00',
-                    db: '#e38c00',
-                    sqlite: '#e38c00',
-                    makefile: '#E44D26',
-                    cmake: '#E44D26',
+                    doc: '#2B579A', docx: '#2B579A', xls: '#217346', xlsx: '#217346',
+                    csv: '#217346', tsv: '#217346',
+                    sh: '#4CAF50', bash: '#4CAF50', zsh: '#4CAF50', bat: '#4CAF50', ps1: '#4CAF50',
+                    log: '#95A5A6', txt: '#95A5A6',
+                    cfg: '#8B8B8B', ini: '#8B8B8B', conf: '#8B8B8B',
+                    lock: '#7F8C8D', gitignore: '#DD4C35', dockerignore: '#DD4C35',
+                    vue: '#42b883', svelte: '#ff3e00',
+                    sql: '#e38c00', db: '#e38c00', sqlite: '#e38c00',
+                    makefile: '#E44D26', cmake: '#E44D26',
                     wasm: '#654FF0',
                 };
                 const color = colors[ext] || '';
                 if (cls.startsWith('fa-solid fa-file') && !color) {
-                    return '<i class="fa-solid fa-file" style="color:#71717a;"></i>';
+                    return '<i class="fa-solid fa-file" style="color:var(--text-dim);"></i>';
                 }
                 const colorStyle = color ? ` style="color:${color}"` : '';
                 return `<i class="${cls}"${colorStyle}></i>`;
@@ -3671,16 +3299,11 @@
         // ============ 初始化 ============
         async function init() {
             await loadSettings();
-            state.user = state.settings.user_name || 'User';
-            els.currentUserDisplay.textContent = state.user;
+            state.user = state.settings.user_name || 'User'; els.currentUserDisplay.textContent = state.user;
             state.agentName = state.settings.agent_name || 'assistant';
             document.title = state.user + ' · Chat WebUI';
             state.contextUsage.max = state.settings.max_context || 128000;
-            await getModels();
-            await loadTools();
-            await loadTodos();
-            await loadChannels();
-            await loadSessions();
+            await getModels(); await loadTools(); await loadTodos(); await loadChannels(); await loadSessions();
             // 初始化文件浏览器设置
             fb.autoExpand = state.settings.auto_expand_files !== false;
             fb.updateAutoToggleUI();
