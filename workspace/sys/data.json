@@ -1,14 +1,14 @@
 {
     "usages": {
         "Telegram": {
-            "completion_cost": 1889,
-            "prompt_cost": 17751,
-            "total_cost": 19640
+            "completion_cost": 2780,
+            "prompt_cost": 201172,
+            "total_cost": 203952
         },
         "memory": {
-            "completion_cost": 1689,
-            "prompt_cost": 3440,
-            "total_cost": 5129
+            "completion_cost": 3043,
+            "prompt_cost": 5248,
+            "total_cost": 8291
         }
     }
 }
