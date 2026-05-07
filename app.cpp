@@ -172,71 +172,6 @@ namespace app
         }
         return 0;
     }
-
-    int evolved_memory(std::shared_ptr<run_unit::SessionContext> session_ptr, const std::string &model)
-    {
-        try
-        {
-            size_t total_prompt_tokens = 0;
-            size_t total_completion_tokens = 0;
-            nlohmann::json response;
-            nlohmann::json req = {
-                {"model", model},
-                {"messages", {{{"role", "memory"}, {"content", "Keywords:" + session_ptr->memory["keywords"].get<std::string>()}}, {{"role", "memory"}, {"content", session_ptr->memory["abstracts"]}}, {{"role", "system"}, {"content", "Evaluate the value of the memory content and chat history in improving the work of the user of this memory. "
-                                                                                                                                                                                                                                         "If improvements are needed, output only the improved memory output; if no improvements are needed, output only [PASS]."}}}},
-                {"stream", false}};
-
-            for (auto &msg : session_ptr->messages)
-            {
-                req["messages"].push_back(msg);
-            }
-
-            client.generate(req, response);
-            if (response.contains("usage"))
-            {
-                auto &usage = response["usage"];
-                if (usage.contains("prompt_tokens"))
-                    total_prompt_tokens += usage["prompt_tokens"].get<size_t>();
-                if (usage.contains("completion_tokens"))
-                    total_completion_tokens += usage["completion_tokens"].get<size_t>();
-            }
-            auto output = response["choices"][0]["message"]["content"].get<std::string>();
-            if (output.find("[PASS]") == std::string::npos)
-            {
-                session_ptr->memory["abstracts"] = std::move(output);
-                std::cout << "Abstracts updated successfully." << std::endl;
-
-                req["messages"][1]["content"] = session_ptr->memory["abstracts"];
-                req["messages"][2]["content"] = "Please evaluate the relevance of the following content to the memory content, refine the keywords for the memory, and output only the refined keywords for the memory content.";
-                client.generate(req, response);
-                if (response.contains("usage"))
-                {
-                    auto &usage = response["usage"];
-                    if (usage.contains("prompt_tokens"))
-                        total_prompt_tokens += usage["prompt_tokens"].get<size_t>();
-                    if (usage.contains("completion_tokens"))
-                        total_completion_tokens += usage["completion_tokens"].get<size_t>();
-                }
-                session_ptr->memory["keywords"] = response["choices"][0]["message"]["content"].get<std::string>();
-                std::cout << "Keywords updated successfully." << std::endl;
-            }
-            else
-            {
-                std::cout << "Memory not need to update." << std::endl;
-            }
-            auto &mem_usage = run_unit::agent_data_manager.data["usages"]["memory"];
-            mem_usage["prompt_cost"] = mem_usage.value("prompt_cost", 0) + total_prompt_tokens;
-            mem_usage["completion_cost"] = mem_usage.value("completion_cost", 0) + total_completion_tokens;
-            mem_usage["total_cost"] = mem_usage.value("total_cost", 0) + total_prompt_tokens + total_completion_tokens;
-        }
-        catch (const std::exception &e)
-        {
-            std::cerr << "ERROR - Memory assessment: " << e.what() << '\n';
-            webui_log("ERROR", "evolved_memory", e.what());
-        }
-        return 0;
-    }
-
     namespace server
     {
         std::string build_http_response(int status_code, const std::string &content_type, const std::string &body, bool cors = true)
@@ -477,10 +412,7 @@ namespace app
             try
             {
                 auto session = run_unit::agent_session_manager.get_current();
-                if (session->is_memory_empty())
-                    save_memory(session, run_unit::settings["model"].get<std::string>());
-                else
-                    evolved_memory(session, run_unit::settings["model"].get<std::string>());
+                save_memory(session, run_unit::settings["model"].get<std::string>());
                 json resp = {{"status", "done"}};
                 resp["memory_created_at"] = session->memory["created_at"];
                 output = build_http_response(200, "application/json", resp.dump());
@@ -1008,7 +940,6 @@ namespace app
                 }
             }
         }
-
         int handle_input_packed(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
             try

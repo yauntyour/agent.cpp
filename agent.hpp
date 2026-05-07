@@ -791,8 +791,19 @@ namespace run_unit
         {
             std::time_t t = std::time(nullptr);
             std::string time = std::asctime(std::localtime(&t));
-            std::string abstracts_query = "Summarize the following content, including the current Time, and output only the summary as a memory output:\nTime:" + time;
-            std::string keywords_query = "Extract keywords from the following content, and output only the keywords:\n";
+            std::string abstracts_query;
+            std::string keywords_query;
+            if (is_memory_empty())
+            {
+                abstracts_query += "Summarize the following content, including the current Time, and output only the summary as a memory output:\nTime:" + time;
+                keywords_query += "Extract keywords from the following content, and output only the keywords:\n";
+            }
+            else
+            {
+                abstracts_query += "Update the memories based with old memories and chat history for better work, including the current time, and output only the summary as a new memory output:\nTime:" + time;
+                abstracts_query += "Old Memory Content:\n" + memory["abstracts"].get<std::string>() + "\n\n";
+                keywords_query += "Update the keywords based with old keywords and chat history for better work, and output only the new keywords:\nOld Keywords:\n" + memory["keywords"].get<std::string>() + "\n\n";
+            }
 
             for (auto &msg : messages)
             {
