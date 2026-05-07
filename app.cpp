@@ -920,16 +920,21 @@ namespace app
                     total_prompt_tokens += llm_req["messages"].dump().size() / 4;
                     total_completion_tokens += response_text.size() / 4;
 
-                    json new_message = {
+                    json agent_response = {
                         {"role", run_unit::settings["agent_name"]},
                         {"content", response_text}};
-                    context.push_back(new_message);
-                    session_ptr->messages.push_back(new_message);
+                    context.push_back(agent_response);
+                    session_ptr->messages.push_back(agent_response);
 
                     // 扫描工具/CS 调用
                     std::string sys_out;
                     auto [tools_called, tools_ok] = tool_unit::tools_scan(response_text, sys_out);
                     auto cs_called = cs_unit::cs_scan(response_text, sys_out);
+
+                    if (tools_called == 0 && cs_called == 0)
+                    {
+                        break;
+                    }
 
                     // 发送工具调用事件（每个工具独立发送 start/output/end）
                     auto tool_tags = extractAllTags(response_text, "tool");
@@ -1106,6 +1111,12 @@ namespace app
                     // 提取回复文本
                     std::string response_text = response["choices"][0]["message"]["content"].get<std::string>();
 
+                    json agent_response = {
+                        {"role", run_unit::settings["agent_name"]},
+                        {"content", response_text}};
+                    context.push_back(agent_response);
+                    session_ptr->messages.push_back(agent_response);
+
                     // 记录 token 用量
                     if (response.contains("usage"))
                     {
@@ -1120,15 +1131,6 @@ namespace app
                     std::string sys_out;
                     auto [tools_called, tools_ok] = tool_unit::tools_scan(response_text, sys_out);
                     auto cs_called = cs_unit::cs_scan(response_text, sys_out);
-
-                    if (tools_called == 0 && cs_called == 0)
-                    {
-                        json assistant_msg = {{"role", run_unit::settings["agent_name"]}, {"content", response_text}};
-                        context.push_back(assistant_msg);
-                        session_ptr->messages.push_back(assistant_msg);
-                        final_response = response_text;
-                        break;
-                    }
 
                     // 收集工具调用信息
                     auto tool_tags = extractAllTags(response_text, "tool");

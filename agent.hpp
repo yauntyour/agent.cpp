@@ -673,7 +673,7 @@ namespace run_unit
         std::string data_file;
 
     public:
-        nlohmann::json data;
+        nlohmann::json data = {};
         DataManager() = default;
         DataManager(const std::string &workspace) : data_file(workspace + "/sys/data.json")
         {
@@ -716,14 +716,14 @@ namespace run_unit
             {
                 std::string *url_ptr = nullptr;
                 if (part["image_url"].is_string())
-                    url_ptr = &part["image_url"].get_ref<std::string&>();
+                    url_ptr = &part["image_url"].get_ref<std::string &>();
                 else if (part["image_url"].is_object() && part["image_url"].contains("url"))
-                    url_ptr = &part["image_url"]["url"].get_ref<std::string&>();
+                    url_ptr = &part["image_url"]["url"].get_ref<std::string &>();
 
                 if (url_ptr && url_ptr->find("data:") == 0)
                 {
                     asset_array.push_back("");
-                    std::swap(asset_array.back().get_ref<std::string&>(), *url_ptr);
+                    std::swap(asset_array.back().get_ref<std::string &>(), *url_ptr);
                     part = "#" + std::to_string(asset_array.size() - 1);
                 }
             }
@@ -742,7 +742,7 @@ namespace run_unit
         {
             if (part.is_string())
             {
-                auto &tag = part.get_ref<std::string&>();
+                auto &tag = part.get_ref<std::string &>();
                 if (tag.size() > 1 && tag[0] == '#')
                 {
                     try
@@ -754,7 +754,7 @@ namespace run_unit
                             img["type"] = "image_url";
                             img["image_url"] = nlohmann::json::object();
                             img["image_url"]["url"] = "";
-                            std::swap(img["image_url"]["url"].get_ref<std::string&>(), asset_array[idx].get_ref<std::string&>());
+                            std::swap(img["image_url"]["url"].get_ref<std::string &>(), asset_array[idx].get_ref<std::string &>());
                             part = std::move(img);
                         }
                     }
@@ -852,8 +852,14 @@ namespace run_unit
                             std::string asset_path = workspace + "/assets/messages/" + it->second->session_id + ".json";
                             if (std::filesystem::exists(asset_path))
                             {
-                                try { asset_array = nlohmann::json::parse(tool_unit::readFile(asset_path)); }
-                                catch (...) { asset_array = nlohmann::json::array(); }
+                                try
+                                {
+                                    asset_array = nlohmann::json::parse(tool_unit::readFile(asset_path));
+                                }
+                                catch (...)
+                                {
+                                    asset_array = nlohmann::json::array();
+                                }
                             }
                             for (auto &msg : it->second->messages)
                                 restore_images_in_message(msg, asset_array);
@@ -1305,8 +1311,10 @@ namespace tool_unit
                 }
                 count += 1;
             }
-            if (tool_ok) succeed += 1;
-            else data += "Tool execution error, please check that you're using it correctly and that the parameters are correct!";
+            if (tool_ok)
+                succeed += 1;
+            else
+                data += "Tool execution error, please check that you're using it correctly and that the parameters are correct!";
             data += "\n</system_output>\n";
         }
         return {count, succeed};
