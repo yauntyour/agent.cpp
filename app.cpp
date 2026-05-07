@@ -158,6 +158,8 @@ namespace app
             session_ptr->memory["keywords"] = response["choices"][0]["message"]["content"].get<std::string>();
             std::cout << "Keywords generated successfully." << std::endl;
 
+            session_ptr->memory["created_at"] = std::to_string(std::time(nullptr));
+
             auto &mem_usage = run_unit::agent_data_manager.data["usages"]["memory"];
             mem_usage["prompt_cost"] = mem_usage.value("prompt_cost", 0) + total_prompt_tokens;
             mem_usage["completion_cost"] = mem_usage.value("completion_cost", 0) + total_completion_tokens;
@@ -450,7 +452,10 @@ namespace app
                     return rt::FLAG_ERROR;
                 }
                 run_unit::agent_session_manager.change_session(session_id);
-                json resp = {{"messages", session->messages}};
+                bool has_memory = !session->is_memory_empty();
+                json resp = {{"messages", session->messages}, {"memory", has_memory}};
+                if (has_memory)
+                    resp["memory_created_at"] = session->memory["created_at"];
                 output = build_http_response(200, "application/json", resp.dump());
                 return rt::FLAG_DONE;
             }
@@ -477,6 +482,7 @@ namespace app
                 else
                     evolved_memory(session, run_unit::settings["model"].get<std::string>());
                 json resp = {{"status", "done"}};
+                resp["memory_created_at"] = session->memory["created_at"];
                 output = build_http_response(200, "application/json", resp.dump());
                 return rt::FLAG_DONE;
             }

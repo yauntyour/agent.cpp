@@ -2077,6 +2077,7 @@
       streamBuffers: { content: '', thinking: '', thinkings: [], toolOutputs: [] },
       contextUsage: { total: 0, max: 128000 },
       memoryActive: false,
+      memoryCreatedAt: null,
       _scrollAtBottom: true
     };
     const API = '/api';
@@ -2489,14 +2490,21 @@
       els.contextBarFill.style.width = pct + '%';
       els.contextText.textContent = `${total.toLocaleString()} / ${max.toLocaleString()}`;
     }
-    function updateMemoryIndicator(active) {
+    function updateMemoryIndicator(active, createdAt) {
       state.memoryActive = active;
+      if (createdAt !== undefined) state.memoryCreatedAt = createdAt;
       if (!els.memoryIndicator) return;
       const icon = els.memoryIndicator.querySelector('i');
       if (!icon) return;
       if (active) {
         icon.style.color = '#818cf8';
-        els.memoryIndicator.title = '记忆摘要已启用';
+        let tip = '记忆摘要已启用';
+        if (state.memoryCreatedAt && state.memoryCreatedAt !== '-1') {
+          const d = new Date(parseInt(state.memoryCreatedAt) * 1000);
+          const pad = (n) => String(n).padStart(2, '0');
+          tip += `\n创建时间: ${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+        }
+        els.memoryIndicator.title = tip;
       } else {
         icon.style.color = '#71717a';
         els.memoryIndicator.title = '记忆摘要未启用';
@@ -2531,12 +2539,13 @@
       try {
         const r = await axios.post(API + '/session/msg', { session_id: sid });
         state.currentSessionId = sid;
-        els.currentSessionIdDisplay.textContent = `ID: ${sid}`;
         state.messages = parseMessages(r.data.messages || []);
         renderMessages(); renderSessions(); log(`已切换到: ${sid}`, 'success');
         // 检查是否有记忆摘要
-        const hasMemory = state.messages.some(m => m.role === 'memory');
-        updateMemoryIndicator(hasMemory);
+        const hasMemory = r.data.memory;
+        const memCreatedAt = r.data.memory_created_at;
+        updateMemoryIndicator(hasMemory, memCreatedAt);
+        els.currentSessionIdDisplay.textContent = `ID: ${sid}${hasMemory ? '[🧠]' : '[📃]'}`;
         // 估算上下文用量
         const totalChars = JSON.stringify(r.data.messages || []).length;
         updateContextUsage({ total_cost: totalChars });
@@ -2566,7 +2575,7 @@
     async function genMemory() {
       if (!state.currentSessionId || !confirm('为当前会话生成记忆摘要？')) return;
       const btn = els.summarySessionBtn, orig = btn.innerHTML; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; btn.disabled = true;
-      try { const r = await axios.post(API + '/session/memory'); if (r.data.status === 'done') { toast('记忆已更新', 'success'); updateMemoryIndicator(true); } } catch (e) { toast('记忆生成失败', 'error'); log('记忆生成失败: ' + (e.message || e), 'error'); }
+      try { const r = await axios.post(API + '/session/memory'); if (r.data.status === 'done') { toast('记忆已更新', 'success'); updateMemoryIndicator(true, r.data.memory_created_at); els.currentSessionIdDisplay.textContent = `ID: ${state.currentSessionId} [🧠]`; } } catch (e) { toast('记忆生成失败', 'error'); log('记忆生成失败: ' + (e.message || e), 'error'); }
       finally { btn.innerHTML = orig; btn.disabled = false; }
     }
 
@@ -2914,6 +2923,8 @@
           // 如果服务器返回了新的消息列表，同步
           if (ev.messages && Array.isArray(ev.messages)) {
             const parsed = parseMessages(ev.messages);
+            // 更新session显示中的记忆状态
+            els.currentSessionIdDisplay.textContent = `ID: ${state.currentSessionId}${state.memoryActive ? '[🧠]' : '[📃]'}`;
             // 将 thinkings 和 usage 附加到最后一条 ai 消息
             for (let i = parsed.length - 1; i >= 0; i--) {
               if (parsed[i].role === 'ai') { parsed[i]._thinkings = sb.thinkings; parsed[i]._usage = ev.usage; break; }

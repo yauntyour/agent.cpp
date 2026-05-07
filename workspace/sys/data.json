@@ -6,9 +6,9 @@
             "total_cost": 19640
         },
         "memory": {
-            "completion_cost": 0,
-            "prompt_cost": 0,
-            "total_cost": 0
+            "completion_cost": 1689,
+            "prompt_cost": 3440,
+            "total_cost": 5129
         }
     }
 }

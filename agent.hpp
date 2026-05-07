@@ -769,7 +769,7 @@ namespace run_unit
     struct SessionContext
     {
         nlohmann::json messages = nlohmann::json::array(); // 每个元素为 {role, content}
-        nlohmann::json memory = {{"keywords", ""}, {"abstracts", ""}};
+        nlohmann::json memory = {{"keywords", ""}, {"abstracts", ""}, {"created_at", "-1"}};
         bool loaded = false;
         bool thinking = false;
         std::string session_id;
@@ -878,7 +878,7 @@ namespace run_unit
                         {
                             it->second->memory = nlohmann::json::parse(tool_unit::readFile(memory_path));
                             if (!it->second->memory.contains("abstracts") || !it->second->memory.contains("keywords"))
-                                it->second->memory = {{"keywords", ""}, {"abstracts", ""}};
+                                it->second->memory = {{"keywords", ""}, {"abstracts", ""}, {"created_at", "-1"}};
                         }
                         catch (const std::exception &e)
                         {
@@ -921,7 +921,7 @@ namespace run_unit
             auto ses = get_current();
             ses->messages.clear();
             ses->memory.clear();
-            ses->memory = {{"keywords", ""}, {"abstracts", ""}};
+            ses->memory = {{"keywords", ""}, {"abstracts", ""}, {"created_at", "-1"}};
         }
 
         void remove_session(const std::string &id)
