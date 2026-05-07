@@ -8,9 +8,13 @@
 
 ## WebUI
 
+搭配使用stable-diffusion.cpp & llama.cpp自动化混合端，利用image-drawer tool即可实现在对话中生成图像
+
+> [yauntyour/agent.cpp-tools: skills for agent](https://github.com/yauntyour/agent.cpp-tools)
+
 ![WebUI 截图](./assets/WebUI_1.png)
 
-文件使用状态预览系统（禁止操作&0注入风险）
+文件使用状态预览系统（0注入风险）、自动化记忆系统
 
 ![文件系统](./assets/WebUI_2.png)
 
@@ -38,8 +42,8 @@ rm -rf ./* && git clone --recurse-submodules https://github.com/yauntyour/agent.
 - **极致轻量**：核心由 `agent.hpp` 单头文件 + `app.cpp` 入口构成，充分利用 C++20 零拷贝与栈上分配特性，运行开销极低。
 - **工作区隔离**：所有用户资源（工具、系统脚本、会话、记忆、提示词）统一存放于 `workspace/` 目录下，结构与部署清晰。
 - **文件使用追踪**：系统自动追踪工具调用中访问过的文件，WebUI 实时展示文件使用状态，防止误操作。
-- **图片资产管理**：Base64 图片数据自动从会话记录中剥离并存储至 `assets/messages/`，大幅缩减会话文件体积。
-- **流式响应**：支持 SSE 流式生成，逐 Token 回调输出，并可分离推理内容（thinking）与回复内容。
+- **图片资产管理**：Base64 图片数据自动从会话记录中剥离并存储至 `workspace/assets/messages/`，大幅缩减会话文件体积。
+- **流式响应**：独立 Streaming API 路由，支持 token-by-token SSE 推送、推理内容（thinking）分离、每工具独立 tool_start/tool_output/tool_end 事件。
 - **完整工具链**：通过 Python CLI 桥接方式，支持任意 Python 工具的原生链式调用。
 - **100% 可控**：系统提示词（System Prompt）完全开放自定义，无隐藏魔法指令。
 - **轻量化扩展设计**：工具直接调用 Python CLI 脚本，避免加载臃肿的技能包描述，最大限度节省上下文 Token。
@@ -59,19 +63,19 @@ rm -rf ./* && git clone --recurse-submodules https://github.com/yauntyour/agent.
 ├── webui.html                 # WebUI 前端页面
 ├── CMakeLists.txt             # CMake 构建配置（含 FetchContent + CPack）
 ├── settings.json              # 系统配置文件
+├── assets/                    # 仓库级资源（WebUI 截图）
+│   ├── WebUI_1.png            # WebUI 截图
+│   └── WebUI_2.png            # 文件系统预览截图
 │
 └── workspace/                 # 工作区根目录（所有用户资源集中管理）
     ├── agent.txt              # 系统提示词文件（100% 自定义）
     ├── sessions/              # 会话记录持久化（JSON，图片已剥离）
     ├── memorys/               # 会话记忆持久化
-    ├── assets/                # 静态资源
-    │   ├── WebUI_1.png        # WebUI 截图
-    │   ├── WebUI_2.png        # 文件系统预览截图
-    │   └── messages/          # 图片资产存储（Base64 自动剥离存放）
+    ├── assets/                # 运行态资源
+    │   ├── messages/          # 图片资产存储（Base64 自动剥离存放）
+    │   └── output.png         # 工具输出文件
     ├── sys/                   # 系统指令、工具调度与通信核心
     │   ├── cs.txt             # CS 指令系统帮助
-    │   ├── sys_state.py       # 系统状态查询脚本
-    │   ├── sys_tools.py       # 工具调度脚本
     │   ├── tg_bot.py          # Telegram 频道驱动
     │   ├── data.json          # 用量统计数据
     │   └── todos.json         # 待办事项
@@ -180,7 +184,7 @@ def print_tool_help():
 
 ### 自动会话记忆
 
-当会话上下文长度超过配置的阈值时，系统会自动触发记忆摘要生成（或更新），并将记忆注入当前上下文。阈值可通过配置文件调整：
+当会话上下文长度超过配置的阈值时，系统会自动触发记忆摘要生成（或更新），并将记忆注入当前上下文。每次记忆生成时自动记录 `created_at` 时间戳，可通过 session API 查询。阈值可通过配置文件调整：
 
 ```json
 "max_context": 1048576
