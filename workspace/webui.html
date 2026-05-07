@@ -2446,6 +2446,8 @@
       <div class="setting-row check-row"><input type="checkbox" id="s-stream" ${s.stream ? 'checked' : ''}><label for="s-stream">启用流式传输</label></div>
       <div class="setting-row"><label>最大工具/系统调用轮数</label><input type="number" id="s-max_mpc_rounds" value="${s.max_mpc_rounds || 5}" min="1" max="50"></div>
       <div class="setting-row"><label>上下文窗口大小</label><input type="number" id="s-max_context" value="${s.max_context || 128000}" min="1000"></div>
+      <div class="setting-row"><label>自动记忆摘要阈值 (%)</label><input type="number" id="s-auto_summary_threshold" value="${s.auto_summary_threshold || 0}" min="0" max="100"></div>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:-6px;padding-left:4px;">上下文使用超过此百分比时自动生成记忆摘要。设为 0 禁用</div>
       <div class="setting-row check-row"><input type="checkbox" id="s-auto_expand_files" ${s.auto_expand_files !== false ? 'checked' : ''}><label for="s-auto_expand_files">文件浏览器自动展开（工具调用时）</label></div>
     </div>
     <div class="setting-group">
@@ -2470,6 +2472,7 @@
                 auto_expand_files: $('#s-auto_expand_files')?.checked !== false,
                 max_mpc_rounds: parseInt($('#s-max_mpc_rounds')?.value) || 5,
                 max_context: parseInt($('#s-max_context')?.value) || 128000,
+                auto_summary_threshold: parseInt($('#s-auto_summary_threshold')?.value) || 0,
                 channels: state.settings.channels || []
             };
             state.settings = ns;
@@ -2606,9 +2609,14 @@
                 const memCreatedAt = r.data.memory_created_at;
                 updateMemoryIndicator(hasMemory, memCreatedAt);
                 els.currentSessionIdDisplay.textContent = `ID: ${sid}${hasMemory ? '[🧠]' : '[📃]'}`;
-                // 估算上下文用量
+                // 重置自动摘要追踪
+                _lastSummaryTotal = 0;
+                _autoSummaryRunning = false;
+                // 按消息字符数估算当前上下文用量
                 const totalChars = JSON.stringify(r.data.messages || []).length;
-                updateContextUsage({ total_cost: totalChars });
+                state.contextUsage.total = totalChars;
+                state.contextUsage.max = state.settings.max_context || 128000;
+                updateContextUsage({ total_cost: state.contextUsage.total });
             } catch (e) { toast('无法加载会话', 'error'); log('切换会话失败: ' + (e.message || e), 'error'); }
             finally { hideLoading(); }
         }
@@ -2637,6 +2645,41 @@
             const btn = els.summarySessionBtn, orig = btn.innerHTML; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; btn.disabled = true;
             try { const r = await axios.post(API + '/session/memory'); if (r.data.status === 'done') { toast('记忆已更新', 'success'); updateMemoryIndicator(true, r.data.memory_created_at); els.currentSessionIdDisplay.textContent = `ID: ${state.currentSessionId} [🧠]`; } } catch (e) { toast('记忆生成失败', 'error'); log('记忆生成失败: ' + (e.message || e), 'error'); }
             finally { btn.innerHTML = orig; btn.disabled = false; }
+        }
+
+        // ============ 自动记忆摘要 ============
+        let _autoSummaryRunning = false;
+        let _lastSummaryTotal = 0;
+        async function checkAutoSummary() {
+            const threshold = state.settings.auto_summary_threshold || 0;
+            if (threshold <= 0) return;
+            if (_autoSummaryRunning) return;
+            if (!state.currentSessionId) return;
+
+            const total = state.contextUsage.total || 0;
+            const max = state.contextUsage.max || 128000;
+            if (max <= 0) return;
+
+            const pct = (total / max) * 100;
+            if (pct < threshold) return;
+
+            // 已有记忆且总量未显著增长，跳过
+            if (state.memoryActive && _lastSummaryTotal > 0 && total - _lastSummaryTotal < max * 0.05) return;
+
+            _autoSummaryRunning = true;
+            try {
+                const r = await axios.post(API + '/session/memory');
+                if (r.data.status === 'done') {
+                    updateMemoryIndicator(true, r.data.memory_created_at);
+                    els.currentSessionIdDisplay.textContent = `ID: ${state.currentSessionId} [🧠]`;
+                    log(`自动记忆摘要已生成 (使用率: ${pct.toFixed(0)}%)`, 'success');
+                    _lastSummaryTotal = total;
+                }
+            } catch (e) {
+                log('自动记忆摘要失败: ' + (e.message || e), 'error');
+            } finally {
+                _autoSummaryRunning = false;
+            }
         }
 
         // ============ 模型列表 ============
@@ -2914,7 +2957,7 @@
 
                 // 更新上下文使用显示
                 if (result.usage) {
-                    state.contextUsage.total = result.usage.total_cost || (result.usage.prompt_cost + result.usage.completion_cost) || 0;
+                    state.contextUsage.total = result.usage.total_cost || 0;
                     state.contextUsage.max = state.settings.max_context || 128000;
                     updateContextUsage({ total_cost: state.contextUsage.total });
                 }
@@ -2928,6 +2971,8 @@
                 state.messages.push(finalMsg);
                 renderMessages();
                 log('响应完成', 'success');
+                // 自动记忆摘要检查
+                checkAutoSummary();
 
             } catch (e) {
                 state.messages = state.messages.filter(m => m._id !== msgId);
@@ -2972,7 +3017,7 @@
                     updateAssistantMsg(msgId, { content: sb.content, _typing: false, _thinkings: sb.thinkings, _toolCalls: sb.toolOutputs, _usage: ev.usage });
                     // 更新上下文使用显示
                     if (ev.usage) {
-                        state.contextUsage.total = ev.usage.total_cost || (ev.usage.prompt_cost + ev.usage.completion_cost) || 0;
+                        state.contextUsage.total = ev.usage.total_cost || 0;
                         state.contextUsage.max = state.settings.max_context || 128000;
                         updateContextUsage({ total_cost: state.contextUsage.total });
                     }
@@ -2993,6 +3038,8 @@
                     }
                     renderMessages();
                     log('响应完成', 'success');
+                    // 自动记忆摘要检查
+                    checkAutoSummary();
                     break;
                 case 'error':
                     updateAssistantMsg(msgId, { content: '❌ ' + esc(ev.message), _typing: false, _thinkings: sb.thinkings, _toolCalls: sb.toolOutputs });
