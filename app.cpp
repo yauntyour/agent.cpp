@@ -1122,9 +1122,9 @@ namespace app
 
                 if (!session_ptr->is_memory_empty())
                     context.push_back({{"role", "memory"}, {"content", session_ptr->memory["abstracts"]}});
-
-                for (auto &msg : session_ptr->messages)
-                    context.push_back(msg);
+                else
+                    for (auto &msg : session_ptr->messages)
+                        context.push_back(msg);
 
                 json contents = json::array();
                 if (!channel.empty())
