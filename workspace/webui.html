@@ -1920,6 +1920,34 @@
             border-radius: var(--radius-sm);
             border: 1px solid rgba(99, 102, 241, 0.1);
         }
+
+        /* ---- 频道 token 行内编辑 ---- */
+        .channel-token-row {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+        .channel-token-row input {
+            flex: 1;
+        }
+        .channel-config-section {
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid var(--border-color);
+        }
+        .channel-config-title {
+            font-size: 11px;
+            color: var(--text-dim);
+            margin-bottom: 6px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .channel-config-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+        }
     </style>
 </head>
 
@@ -2343,8 +2371,11 @@
             if (!state.settings.channels || !state.settings.channels.length) {
                 html += '<div style="color:var(--text-dim);font-size:13px;text-align:center;padding:20px;">暂无频道</div>';
             } else {
-                html += '<div class="channel-hint"><i class="fa-solid fa-circle-info" style="margin-right:4px;"></i>修改后请点击底部"保存到系统配置"生效</div>';
-                html += state.settings.channels.map((c, idx) => `
+                html += '<div class="channel-hint"><i class="fa-solid fa-circle-info" style="margin-right:4px;"></i>修改后点击底部"保存到系统配置"生效；Token 加密存储于 workspace/tokens/ 目录</div>';
+                html += state.settings.channels.map((c, idx) => {
+                    const cfg = c.config || {};
+                    const tokenKey = 'ch-token-' + idx;
+                    return `
           <div class="channel-item" data-idx="${idx}">
             <div class="channel-item-header">
               <span class="channel-item-name"><i class="fa-solid fa-hashtag" style="color:var(--text-dim);margin-right:4px;"></i>${esc(c.name)}</span>
@@ -2365,17 +2396,54 @@
                 <option value="inactive" ${c.status === 'inactive' ? 'selected' : ''}>inactive</option>
               </select>
             </div>
+            <!-- Bot Token（加密存储，仅可修改不可查看） -->
+            <div class="channel-field">
+              <label>Bot Token <span style="color:var(--text-dim);font-weight:400;">（加密存储，仅可修改）</span></label>
+              <div class="channel-token-row">
+                <input type="password" id="${tokenKey}" placeholder="(已加密 — 输入新值覆盖)" autocomplete="off">
+                <button class="channel-btn danger" style="flex:0;padding:6px 10px;" onclick="clearTokenField('${tokenKey}')"><i class="fa-solid fa-eraser"></i></button>
+              </div>
+            </div>
+            <!-- channel.config 其他字段自动渲染 -->
+            <div class="channel-config-section">
+              <div class="channel-config-title">额外配置</div>
+              ${renderChannelConfig(cfg, idx)}
+            </div>
             <div class="channel-actions">
               <button class="channel-btn save" onclick="saveChannel(${idx})"><i class="fa-solid fa-check"></i> 更新</button>
             </div>
           </div>
-        `).join('');
+        `}).join('');
             }
             html += `<button class="add-channel-btn" onclick="addChannelForm()"><i class="fa-solid fa-plus"></i> 添加新频道</button>`;
             if (state.settings.channels && state.settings.channels.length) {
                 html += `<button class="save-btn" onclick="persistChannelSettings()" style="margin-top:4px;"><i class="fa-solid fa-floppy-disk"></i> 保存到系统配置</button>`;
             }
             container.innerHTML = html;
+        }
+
+        // 自动渲染 channel.config 中除 bot_token 外的所有字段
+        function renderChannelConfig(cfg, idx) {
+            if (!cfg || !Object.keys(cfg).length) return '<div style="font-size:11px;color:var(--text-dim);">无额外配置</div>';
+            return Object.entries(cfg)
+                .filter(([k]) => k !== 'bot_token') // bot_token 单独处理
+                .map(([k, v]) => {
+                    const uid = 'chcfg-' + idx + '-' + k;
+                    let input;
+                    if (typeof v === 'boolean') {
+                        input = `<select id="${uid}" class="ch-cfg-val"><option value="true" ${v ? 'selected' : ''}>true</option><option value="false" ${!v ? 'selected' : ''}>false</option></select>`;
+                    } else if (typeof v === 'number') {
+                        input = `<input type="number" id="${uid}" class="ch-cfg-val" value="${v}">`;
+                    } else {
+                        input = `<input type="text" id="${uid}" class="ch-cfg-val" value="${esc(String(v))}">`;
+                    }
+                    return `<div class="channel-field"><label>${esc(k)}</label>${input}</div>`;
+                }).join('');
+        }
+
+        function clearTokenField(id) {
+            const input = document.getElementById(id);
+            if (input) { input.value = ''; input.placeholder = '(已加密 — 输入新值覆盖)'; }
         }
         function addChannelForm() {
             const container = els.channelOverlayBody;
@@ -2402,7 +2470,7 @@
             const status = $('.ch-status-new')?.value || 'active';
             if (!name) { toast('频道名称不能为空', 'error'); return; }
             if (state.settings.channels.find(c => c.name === name)) { toast('频道名称已存在', 'error'); return; }
-            state.settings.channels.push({ name, path, status, user_count: 1 });
+            state.settings.channels.push({ name, path, status, user_count: 1, config: {} });
             toast('频道已添加', 'success');
             renderChannelManager();
         }
@@ -2414,7 +2482,39 @@
             const status = item.querySelector('.ch-status')?.value;
             if (!name) { toast('频道名称不能为空', 'error'); return; }
             if (state.settings.channels.find((c, i) => c.name === name && i !== idx)) { toast('频道名称已存在', 'error'); return; }
+
+            // 收集自动渲染的 config 字段
+            const oldCfg = state.settings.channels[idx].config || {};
+            const newCfg = {};
+            const cfgInputs = item.querySelectorAll('.ch-cfg-val');
+            cfgInputs.forEach(inp => {
+                const id = inp.id; // chcfg-<idx>-<key>
+                const key = id.replace('chcfg-' + idx + '-', '');
+                let val = inp.value;
+                if (inp.tagName === 'SELECT') val = inp.value === 'true';
+                else if (inp.type === 'number') val = Number(val);
+                newCfg[key] = val;
+            });
+
             state.settings.channels[idx] = { ...state.settings.channels[idx], name, path, status };
+
+            // 持久化加密 token（仅当用户输入了新值）
+            const tokenInput = document.getElementById('ch-token-' + idx);
+            if (tokenInput && tokenInput.value.trim()) {
+                const tokenVal = tokenInput.value.trim();
+                // 异步加密存储
+                (async () => {
+                    try {
+                        await axios.post(API + '/channel/token', { name, token: tokenVal });
+                        tokenInput.value = '';
+                        tokenInput.placeholder = '(已加密保存)';
+                        toast(name + ' Token 已加密存储', 'success');
+                    } catch (e) {
+                        toast(name + ' Token 保存失败', 'error');
+                    }
+                })();
+            }
+
             toast('频道已更新', 'success');
             renderChannelManager();
         }
@@ -2425,8 +2525,27 @@
             renderChannelManager();
         }
         async function persistChannelSettings() {
+            rebuildChannelConfigs();
             await saveSettings();
             toast('频道配置已保存到系统', 'success');
+        }
+        function rebuildChannelConfigs() {
+            (state.settings.channels || []).forEach((c, idx) => {
+                const item = els.channelOverlayBody.querySelector(`[data-idx="${idx}"]`);
+                if (!item) return;
+                const cfgInputs = item.querySelectorAll('.ch-cfg-val');
+                if (!cfgInputs.length) return;
+                const newCfg = { ...(c.config || {}) };
+                cfgInputs.forEach(inp => {
+                    const id = inp.id;
+                    const key = id.replace('chcfg-' + idx + '-', '');
+                    let val = inp.value;
+                    if (inp.tagName === 'SELECT') val = inp.value === 'true';
+                    else if (inp.type === 'number') val = Number(val);
+                    newCfg[key] = val;
+                });
+                state.settings.channels[idx].config = newCfg;
+            });
         }
 
         // ============ 设置表单 ============

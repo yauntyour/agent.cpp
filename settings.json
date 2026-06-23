@@ -4,30 +4,30 @@
     "auto_summary_threshold": 90,
     "channels": [
         {
+            "config": {
+                "backend_url": "http://127.0.0.1:8080/api/input",
+                "model": "default",
+                "proxy": "http://127.0.0.1:10809",
+                "think": false,
+                "timeout": 600
+            },
             "name": "Telegram",
             "path": "sys/tg_bot.py",
-            "status": "inactive",
-            "user_count": 1,
-            "config": {
-                "proxy": "http://127.0.0.1:10809",
-                "backend_url": "http://127.0.0.1:8080/api/input",
-                "timeout": 600,
-                "think": false,
-                "model": "default"
-            }
+            "status": "active",
+            "user_count": 1
         },
         {
+            "config": {
+                "backend_url": "http://127.0.0.1:8080/api/input",
+                "ilink_base": "https://ilinkai.weixin.qq.com",
+                "model": "default",
+                "think": false,
+                "timeout": 600
+            },
             "name": "WeChat",
             "path": "sys/wx_bot.py",
-            "status": "inactive",
-            "user_count": 1,
-            "config": {
-                "ilink_base": "https://ilinkai.weixin.qq.com",
-                "backend_url": "http://127.0.0.1:8080/api/input",
-                "timeout": 600,
-                "think": false,
-                "model": "default"
-            }
+            "status": "active",
+            "user_count": 1
         }
     ],
     "max_context": 1048576,
