@@ -13,6 +13,33 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 # 查找 CURL
 find_package(CURL REQUIRED)
 
+# 查找 libsodium
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+    pkg_check_modules(SODIUM libsodium)
+endif()
+if(NOT SODIUM_FOUND)
+    find_path(SODIUM_INCLUDE_DIR sodium.h
+        HINTS
+            ${MSYS2_DIR}/mingw64/include
+            /mingw64/include
+            /usr/include
+            /usr/local/include
+    )
+    find_library(SODIUM_LIBRARY sodium
+        HINTS
+            ${MSYS2_DIR}/mingw64/lib
+            /mingw64/lib
+            /usr/lib
+            /usr/local/lib
+    )
+    if(SODIUM_INCLUDE_DIR AND SODIUM_LIBRARY)
+        set(SODIUM_FOUND TRUE)
+        set(SODIUM_INCLUDE_DIRS ${SODIUM_INCLUDE_DIR})
+        set(SODIUM_LIBRARIES ${SODIUM_LIBRARY})
+    endif()
+endif()
+
 # ---------- Boost (header-only) ----------
 set(Boost_NO_BOOST_CMAKE ON)
 find_package(Boost REQUIRED)
@@ -36,10 +63,16 @@ target_link_libraries(app PRIVATE
     CURL::libcurl
     Boost::boost
     nlohmann_json::nlohmann_json
+    ${SODIUM_LIBRARIES}
 )
 
 if(WIN32)
     target_link_libraries(app PRIVATE ws2_32 wsock32)
+endif()
+
+# libsodium 头文件
+if(SODIUM_INCLUDE_DIRS)
+    target_include_directories(app PRIVATE ${SODIUM_INCLUDE_DIRS})
 endif()
 
 # ========== 安装规则 ==========

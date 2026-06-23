@@ -3,6 +3,7 @@
 sessions/*
 memorys/*
 *.a
+*.pyc
 *.dll
 *.zip
 build

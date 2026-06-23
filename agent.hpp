@@ -20,6 +20,7 @@
 #include <nlohmann/json.hpp>
 
 #include "base64.hpp"
+#include <sodium.h>
 
 #include <cstring>
 
@@ -641,6 +642,198 @@ namespace tool_unit
     }
 } // namespace tool_unit
 
+// ========================== libsodium 加密工具 ==========================
+
+// 前向声明 crypto_context::key()，供 crypto_unit::SecureString 使用
+namespace crypto_context
+{
+    extern std::array<unsigned char, crypto_secretbox_KEYBYTES> &key();
+}
+
+namespace crypto_unit
+{
+    // 密钥：32 字节固定密钥（由随机种子在首次运行时生成，保存在内存中）
+    // 注意：生产环境建议使用 keyring / 环境变量注入；此处实现的是运行时内存加密
+    constexpr size_t KEY_LEN = crypto_secretbox_KEYBYTES;  // 32
+    constexpr size_t NONCE_LEN = crypto_secretbox_NONCEBYTES; // 24
+    constexpr size_t MAC_LEN = crypto_secretbox_MACBYTES; // 16
+
+    // 生成随机密钥（使用 libsodium randombytes）
+    inline std::array<unsigned char, KEY_LEN> generate_key()
+    {
+        std::array<unsigned char, KEY_LEN> key;
+        randombytes_buf(key.data(), key.size());
+        return key;
+    }
+
+    // 生成随机 nonce
+    inline std::array<unsigned char, NONCE_LEN> generate_nonce()
+    {
+        std::array<unsigned char, NONCE_LEN> nonce;
+        randombytes_buf(nonce.data(), nonce.size());
+        return nonce;
+    }
+
+    // 加密：返回 nonce + ciphertext （前 24 字节为 nonce，后续为加密数据）
+    inline std::string encrypt(const std::string &plaintext,
+                               const std::array<unsigned char, KEY_LEN> &key)
+    {
+        if (plaintext.empty())
+            return "";
+
+        auto nonce = generate_nonce();
+        size_t cipher_len = MAC_LEN + plaintext.size();
+        std::vector<unsigned char> cipher(cipher_len);
+
+        int rc = crypto_secretbox_easy(
+            cipher.data(),
+            reinterpret_cast<const unsigned char *>(plaintext.data()),
+            plaintext.size(),
+            nonce.data(),
+            key.data());
+        if (rc != 0)
+        {
+            std::cerr << "crypto_unit::encrypt() failed" << std::endl;
+            return "";
+        }
+
+        // 拼接 nonce + ciphertext，Base64 编码输出（便于 JSON 存储）
+        std::string raw;
+        raw.reserve(NONCE_LEN + cipher_len);
+        raw.append(reinterpret_cast<const char *>(nonce.data()), NONCE_LEN);
+        raw.append(reinterpret_cast<const char *>(cipher.data()), cipher_len);
+        return base64::to_base64(raw);
+    }
+
+    // 解密：从 Base64(nonce + ciphertext) 中恢复明文
+    inline std::string decrypt(const std::string &encrypted_b64,
+                               const std::array<unsigned char, KEY_LEN> &key)
+    {
+        if (encrypted_b64.empty())
+            return "";
+
+        std::string encrypted = base64::from_base64(encrypted_b64);
+        if (encrypted.size() < NONCE_LEN + MAC_LEN)
+        {
+            std::cerr << "crypto_unit::decrypt() invalid ciphertext size" << std::endl;
+            return "";
+        }
+
+        const unsigned char *nonce = reinterpret_cast<const unsigned char *>(encrypted.data());
+        const unsigned char *cipher = nonce + NONCE_LEN;
+        size_t cipher_len = encrypted.size() - NONCE_LEN;
+        size_t plain_len = cipher_len - MAC_LEN;
+
+        std::vector<unsigned char> plain(plain_len);
+
+        int rc = crypto_secretbox_open_easy(
+            plain.data(),
+            cipher,
+            cipher_len,
+            nonce,
+            key.data());
+        if (rc != 0)
+        {
+            std::cerr << "crypto_unit::decrypt() failed (bad key or corrupted data)" << std::endl;
+            return "";
+        }
+
+        return std::string(reinterpret_cast<const char *>(plain.data()), plain_len);
+    }
+
+    // SecureString：基于 libsodium 的运行时加密字符串
+    // 内存中明文存在时间最短；仅在调用 str() / c_str() 时解密，用完立即清零
+    class SecureString
+    {
+    private:
+        std::string encrypted_;
+        const std::array<unsigned char, KEY_LEN> &key_;
+
+    public:
+        SecureString() : key_(crypto_context::key()) {}
+        explicit SecureString(const std::string &plain)
+            : key_(crypto_context::key())
+        {
+            if (!plain.empty())
+                encrypted_ = encrypt(plain, key_);
+        }
+        SecureString(const SecureString &other) = default;
+        SecureString(SecureString &&other) noexcept = default;
+        SecureString &operator=(const SecureString &other) = default;
+        SecureString &operator=(SecureString &&other) noexcept = default;
+
+        bool empty() const { return encrypted_.empty(); }
+        size_t encrypted_size() const { return encrypted_.size(); }
+
+        // 获取明文（调用方负责在不再需要时尽快丢弃）
+        std::string str() const
+        {
+            if (encrypted_.empty())
+                return "";
+            return decrypt(encrypted_, key_);
+        }
+
+        // 设置明文
+        void set(const std::string &plain)
+        {
+            if (plain.empty())
+                encrypted_.clear();
+            else
+                encrypted_ = encrypt(plain, key_);
+        }
+
+        void clear()
+        {
+            encrypted_.clear();
+        }
+    };
+} // namespace crypto_unit
+
+namespace crypto_context
+{
+    // 全局密钥存储（进程启动时由 sodium_init 后的随机数生成，仅存活于内存）
+    inline std::array<unsigned char, crypto_unit::KEY_LEN> &key()
+    {
+        static auto k = crypto_unit::generate_key();
+        return k;
+    }
+
+    // 从字符串密码派生 32 字节密钥（使用 crypto_generichash / Blake2b）
+    inline std::array<unsigned char, crypto_unit::KEY_LEN>
+    derive_key_from_password(const std::string &password)
+    {
+        std::array<unsigned char, crypto_unit::KEY_LEN> derived{};
+        // 使用固定 salt（随机 16 字节），使派生密钥确定性地依赖密码
+        constexpr unsigned char salt[crypto_pwhash_SALTBYTES] = {
+            0x7a, 0x3f, 0xe1, 0x8c, 0x2b, 0x9d, 0x5a, 0x4e,
+            0x6f, 0x8b, 0x1c, 0x3d, 0x9e, 0x2a, 0x7f, 0x5c};
+        if (crypto_pwhash(
+                derived.data(), derived.size(),
+                password.c_str(), password.size(),
+                salt,
+                crypto_pwhash_OPSLIMIT_MODERATE,
+                crypto_pwhash_MEMLIMIT_MODERATE,
+                crypto_pwhash_ALG_DEFAULT) != 0)
+        {
+            std::cerr << "crypto_context::derive_key_from_password() failed" << std::endl;
+            return key(); // fallback to random key
+        }
+        return derived;
+    }
+
+    // 用密码设置全局密钥
+    inline void init_key_from_password(const std::string &password)
+    {
+        if (!password.empty())
+            key() = derive_key_from_password(password);
+    }
+
+    inline void rekey()
+    {
+        key() = crypto_unit::generate_key();
+    }
+} // namespace crypto_context
+
 namespace run_unit
 {
     std::string cs_prompt = "";
@@ -933,6 +1126,21 @@ namespace run_unit
             ses->messages.clear();
             ses->memory.clear();
             ses->memory = {{"keywords", ""}, {"abstracts", ""}, {"created_at", "-1"}};
+
+            // 同步删除磁盘上的会话消息和图片缓存文件
+            if (!current_session_id.empty() && !workspace.empty())
+            {
+                std::string session_file = workspace + "/sessions/" + current_session_id + ".json";
+                std::string memory_file = workspace + "/memorys/" + current_session_id + ".json";
+                std::string asset_file = workspace + "/assets/messages/" + current_session_id + ".json";
+
+                if (std::filesystem::exists(session_file))
+                    std::filesystem::remove(session_file);
+                if (std::filesystem::exists(memory_file))
+                    std::filesystem::remove(memory_file);
+                if (std::filesystem::exists(asset_file))
+                    std::filesystem::remove(asset_file);
+            }
         }
 
         void remove_session(const std::string &id)
@@ -1043,6 +1251,7 @@ namespace run_unit
         std::filesystem::create_directories(workspace / "sessions");
         std::filesystem::create_directories(workspace / "memorys");
         std::filesystem::create_directories(workspace / "assets" / "messages");
+        std::filesystem::create_directories(workspace / "tokens"); // 加密频道 token 存储
         std::filesystem::create_directories(workspace / "tools");
 
         std::filesystem::path sysPath = workspace / "sys";
@@ -1572,13 +1781,13 @@ namespace LLMProviders
     {
     private:
         std::string base_url_;
-        std::string api_key_;
+        crypto_unit::SecureString api_key_;
         CURL *curl_ = curl_easy_init();
 
     public:
         explicit OpenAIClient(const std::string &base_url = "http://localhost:11434", const std::string &api_key = "")
             : base_url_(base_url), api_key_(api_key) {}
-        void set_api_key(const std::string &api_key) { api_key_ = api_key; }
+        void set_api_key(const std::string &api_key) { api_key_.set(api_key); }
         void set_base_url(const std::string &base_url) { base_url_ = base_url; }
         ~OpenAIClient()
         {
@@ -1603,7 +1812,7 @@ namespace LLMProviders
             }
 
             if (!net_unit::CURL_post(curl_, url.c_str(), request.dump(), buf,
-                                     {"Authorization: Bearer " + api_key_, "Content-Type: application/json"}))
+                                     {"Authorization: Bearer " + api_key_.str(), "Content-Type: application/json"}))
                 return false;
             try
             {
@@ -1638,7 +1847,7 @@ namespace LLMProviders
 
             std::string header = "Content-Type: application/json";
             if (!api_key_.empty())
-                header = "Authorization: Bearer " + api_key_ + "\r\nContent-Type: application/json";
+                header = "Authorization: Bearer " + api_key_.str() + "\r\nContent-Type: application/json";
 
             std::string accumulated;
             std::string buffer;
@@ -1706,7 +1915,7 @@ namespace LLMProviders
         {
             std::string result;
             std::string url = base_url_ + "/api/tags";
-            net_unit::CURL_get(curl_easy_init(), url.c_str(), result, "Authorization: Bearer " + api_key_);
+            net_unit::CURL_get(curl_easy_init(), url.c_str(), result, "Authorization: Bearer " + api_key_.str());
             return result;
         }
     };

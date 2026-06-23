@@ -21,6 +21,49 @@ namespace fs = std::filesystem;
 
 namespace app
 {
+    // 默认配置模板 —— settings.json 找不到时自动生成
+    static const std::string DEFAULT_SETTINGS = R"({
+    "agent_name": "assistant",
+    "auto_expand_files": false,
+    "auto_summary_threshold": 90,
+    "channels": [
+        {
+            "name": "Telegram",
+            "path": "sys/tg_bot.py",
+            "status": "inactive",
+            "user_count": 1,
+            "config": {
+                "proxy": "http://127.0.0.1:10809",
+                "backend_url": "http://127.0.0.1:8080/api/input",
+                "timeout": 600,
+                "think": false,
+                "model": "default"
+            }
+        },
+        {
+            "name": "WeChat",
+            "path": "sys/wx_bot.py",
+            "status": "inactive",
+            "user_count": 1,
+            "config": {
+                "ilink_base": "https://ilinkai.weixin.qq.com",
+                "backend_url": "http://127.0.0.1:8080/api/input",
+                "timeout": 600,
+                "think": false,
+                "model": "default"
+            }
+        }
+    ],
+    "max_context": 1048576,
+    "max_mpc_rounds": 5,
+    "model": "uGemma4",
+    "prompt": "agent.txt",
+    "server_address": "http://localhost:11434",
+    "stream": true,
+    "user_name": "Yauntyours",
+    "workspace": "./workspace/"
+})";
+
     void replaceAll(std::string &str, const std::string &from, const std::string &to)
     {
         if (from.empty())
@@ -74,14 +117,76 @@ namespace app
 
     int init_app(const std::string &setting_path = "settings.json", const std::string &password = "", const std::string &apikey = "")
     {
+        // 当 settings.json 不存在时，自动使用默认配置模板生成
+        if (!std::filesystem::exists(setting_path))
+        {
+            std::cout << "Warning - settings.json not found, creating default..." << std::endl;
+            tool_unit::writeFile(setting_path, DEFAULT_SETTINGS);
+        }
         run_unit::init_check(setting_path);
         client.set_base_url(run_unit::settings["server_address"].get_ref<const std::string &>());
+
+        // 初始化 libsodium（必须在任何 crypto_* 函数前调用）
+        if (sodium_init() < 0)
+        {
+            std::cerr << "Error: libsodium initialization failed" << std::endl;
+            exit(1);
+        }
+
+        // ——— 启动密码校验：workspace/sys/key 存储 Argon2id 哈希，输入密码必须匹配 ———
+        {
+            std::string ws = run_unit::settings["workspace"].get<std::string>();
+            std::string key_path = ws + "/sys/key";
+
+            if (!std::filesystem::exists(key_path))
+            {
+                // 首次运行：生成 key 文件
+                if (!password.empty())
+                {
+                    char stored_hash[crypto_pwhash_STRBYTES];
+                    if (crypto_pwhash_str(stored_hash, password.c_str(), password.size(),
+                                          crypto_pwhash_OPSLIMIT_MODERATE,
+                                          crypto_pwhash_MEMLIMIT_MODERATE) != 0)
+                    {
+                        std::cerr << "Error: failed to hash password" << std::endl;
+                        exit(1);
+                    }
+                    tool_unit::writeFile(key_path, std::string(stored_hash));
+                    std::cout << "Password hash saved to workspace/sys/key" << std::endl;
+                }
+            }
+            else
+            {
+                // 已有 key 文件：强制验证
+                if (password.empty())
+                {
+                    std::cerr << "Error: password required but not provided" << std::endl;
+                    exit(1);
+                }
+                std::string stored_hash_str = tool_unit::readFile(key_path);
+                if (!stored_hash_str.empty() && stored_hash_str.back() == '\n')
+                    stored_hash_str.pop_back();
+                if (crypto_pwhash_str_verify(stored_hash_str.c_str(),
+                                             password.c_str(), password.size()) != 0)
+                {
+                    std::cerr << "Error: incorrect password — system terminated" << std::endl;
+                    exit(1);
+                }
+                std::cout << "Password verified OK" << std::endl;
+            }
+        }
+
+        // 用密码派生 32 字节加密密钥，API key 以密文形式保存在内存中
+        crypto_context::init_key_from_password(password);
         client.set_api_key(apikey);
 
-        uint8_t password_hash[SHA3_256_DIGEST_SIZE];
-        if (!SHA3_256((const uint8_t *)password.c_str(), password.length(), password_hash))
-            return 1;
-        run_unit::settings.emplace("password", to_hex_string(password_hash, SHA3_256_DIGEST_SIZE));
+        // SHA3-256 密码哈希注入 settings（供 Web UI 会话认证）
+        {
+            uint8_t password_hash[SHA3_256_DIGEST_SIZE];
+            if (!SHA3_256((const uint8_t *)password.c_str(), password.length(), password_hash))
+                exit(1);
+            run_unit::settings.emplace("password", to_hex_string(password_hash, SHA3_256_DIGEST_SIZE));
+        }
 
         Admin = run_unit::settings["user_name"].get<std::string>();
         // 仅启用 enabled 的工具
@@ -208,6 +313,11 @@ namespace app
         int handle_data(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
 
         int handle_channels_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+
+        // ——— 频道 Token 管理 ———
+        int handle_channel_token_set(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+        int handle_channel_token_get(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+
         int handle_tools_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
 
         int handle_todos_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
@@ -245,6 +355,8 @@ namespace app
             router.on("/api/session/clear", handle_session_clear);
 
             router.on("/api/channels", handle_channels_list);
+            router.on("/api/channel/token", handle_channel_token_set);    // POST — 加密存储
+            router.on("/api/channel/token/:name", handle_channel_token_get); // GET — 解密读取
             router.on("/api/tools", handle_tools_list);
             router.on("/api/tools/toggle", handle_tools_toggle);
             router.on("/api/fs/list", handle_fs_list);
@@ -487,6 +599,110 @@ namespace app
             output = build_http_response(200, "application/json", run_unit::settings["channels"].dump());
             return rt::FLAG_DONE;
         }
+
+        // —————————————— 频道 Token 加密存储 API ——————————————
+
+        // POST /api/channel/token  body: {"name":"Telegram","token":"1234:xxxx"}
+        // 将 token 加密后存入 workspace/tokens/<name>.enc
+        int handle_channel_token_set(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+        {
+            try
+            {
+                size_t header_end = input.find("\r\n\r\n");
+                std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
+                json req = json::parse(body);
+
+                std::string name = req.value("name", "");
+                std::string token = req.value("token", "");
+                if (name.empty())
+                {
+                    output = build_http_response(400, "application/json", R"({"error":"missing name"})");
+                    return rt::FLAG_ERROR;
+                }
+
+                std::string ws = run_unit::settings["workspace"].get<std::string>();
+                std::string token_dir = ws + "/tokens";
+                std::filesystem::create_directories(token_dir);
+                std::string file_path = token_dir + "/" + name + ".enc";
+
+                if (token.empty())
+                {
+                    // 空 token → 删除文件
+                    if (std::filesystem::exists(file_path))
+                        std::filesystem::remove(file_path);
+                    output = build_http_response(200, "application/json",
+                                                 json{{"status","deleted"},{"name",name}}.dump());
+                }
+                else
+                {
+                    // 加密存储
+                    std::string encrypted = crypto_unit::encrypt(token, crypto_context::key());
+                    if (encrypted.empty())
+                    {
+                        output = build_http_response(500, "application/json", R"({"error":"encryption failed"})");
+                        return rt::FLAG_ERROR;
+                    }
+                    tool_unit::writeFile(file_path, encrypted);
+                    output = build_http_response(200, "application/json",
+                                                 json{{"status","saved"},{"name",name}}.dump());
+                }
+                return rt::FLAG_DONE;
+            }
+            catch (const std::exception &e)
+            {
+                webui_log("ERROR", "handle_channel_token_set", e.what());
+                output = build_http_response(500, "application/json", json{{"error", e.what()}}.dump());
+                return rt::FLAG_ERROR;
+            }
+        }
+
+        // GET /api/channel/token/:name  → 返回解密后的 {name, token}
+        // Python 机器人启动时调用此接口获取 bot_token
+        int handle_channel_token_get(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+        {
+            try
+            {
+                auto it = params.find("name");
+                std::string name = (it != params.end()) ? it->second : "";
+                if (name.empty())
+                {
+                    output = build_http_response(400, "application/json", R"({"error":"missing name"})");
+                    return rt::FLAG_ERROR;
+                }
+
+                std::string ws = run_unit::settings["workspace"].get<std::string>();
+                std::string file_path = ws + "/tokens/" + name + ".enc";
+
+                if (!std::filesystem::exists(file_path))
+                {
+                    output = build_http_response(404, "application/json",
+                                                 json{{"error","token not found"},{"name",name}}.dump());
+                    return rt::FLAG_ERROR;
+                }
+
+                std::string encrypted = tool_unit::readFile(file_path);
+                if (!encrypted.empty() && encrypted.back() == '\n')
+                    encrypted.pop_back();
+
+                std::string token = crypto_unit::decrypt(encrypted, crypto_context::key());
+                if (token.empty())
+                {
+                    output = build_http_response(500, "application/json", R"({"error":"decryption failed"})");
+                    return rt::FLAG_ERROR;
+                }
+
+                output = build_http_response(200, "application/json",
+                                             json{{"name",name},{"token",token}}.dump());
+                return rt::FLAG_DONE;
+            }
+            catch (const std::exception &e)
+            {
+                webui_log("ERROR", "handle_channel_token_get", e.what());
+                output = build_http_response(500, "application/json", json{{"error", e.what()}}.dump());
+                return rt::FLAG_ERROR;
+            }
+        }
+
         int handle_tools_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
             output = build_http_response(200, "application/json", run_unit::tools_list.dump());
@@ -1054,6 +1270,8 @@ namespace app
                     context.push_back(agent_response);
                     session_ptr->messages.push_back(agent_response);
 
+                    final_response += response_text;
+
                     // 记录 token 用量
                     if (response.contains("usage"))
                     {
@@ -1148,24 +1366,27 @@ int main(int argc, char *argv[])
     try
     {
         std::cout << get_system_status() << std::endl;
-        int port = 8080;
+
+        // ——— 所有运行参数仅从 CLI 传入，不从 settings.json 读取 ———
         std::string settings_path = "settings.json";
+        int port = 8080;
         std::string __pw = "";
         std::string apikey = "";
+
         for (int i = 1; i < argc; ++i)
         {
             std::string arg = argv[i];
-            if (arg == "-p" || arg == "--port")
-            {
-                if (i + 1 < argc)
-                    port = std::stoi(argv[++i]);
-                else
-                    throw std::runtime_error("Missing value after " + arg);
-            }
-            else if (arg == "--settings")
+            if (arg == "--settings")
             {
                 if (i + 1 < argc)
                     settings_path = argv[++i];
+                else
+                    throw std::runtime_error("Missing value after " + arg);
+            }
+            else if (arg == "-p" || arg == "--port")
+            {
+                if (i + 1 < argc)
+                    port = std::stoi(argv[++i]);
                 else
                     throw std::runtime_error("Missing value after " + arg);
             }
@@ -1189,6 +1410,8 @@ int main(int argc, char *argv[])
         boost::asio::io_context io_context;
         rt::router router;
         app::server::register_routes(router);
+
+        std::cout << "http://localhost:" << port << std::endl;
         servic::Server server(io_context, port);
         server.run(router);
     }

@@ -1,9 +1,17 @@
-import logging
-import requests
-import json
-import base64
+"""
+agent.cpp Telegram Bot 插件
+=============================
+从 agent.cpp/settings.json 的 channels[Telegram].config 读取配置。
+bot_token 通过 http://127.0.0.1:8080/api/channel/token/Telegram 解密读取。
+"""
+
 import asyncio
+import logging
+import json
+import os
+import base64
 import re
+import requests
 from typing import List, Tuple, Optional
 from telegram import Update
 from telegram.constants import ChatAction
@@ -21,14 +29,55 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ---------- 配置（可按需替换为环境变量） ----------
-PROXY = "http://127.0.0.1:10809"
-BOT_API_TOKEN = "8784040222:AAEcJBGK6tj_Qar4wqA4UBjdK64nDhC1wEs"
-BACKEND_URL = "http://127.0.0.1:8080/api/input"
-TIMEOUT = 600
+# ---------- 从 settings.json 加载配置 ----------
+def _load_channel_config(channel_name="Telegram"):
+    """从 ../../settings.json 读取指定 channel 的 config"""
+    script_dir = os.path.dirname(__file__)
+    settings_path = os.path.join(script_dir, "..", "..", "settings.json")
+    with open(settings_path, "r", encoding="utf-8") as f:
+        settings = json.load(f)
+    for ch in settings.get("channels", []):
+        if ch.get("name") == channel_name:
+            # 不返回 bot_token 字段
+            cfg = dict(ch.get("config", {}))
+            cfg.pop("bot_token", None)
+            return cfg
+    raise RuntimeError(f"Channel '{channel_name}' not found in settings.json")
 
 
-# ---------- Markdown 安全分割（保留原逻辑） ----------
+def _fetch_bot_token(channel_name="Telegram"):
+    """从 C++ 主进程 API 获取解密后的 bot_token"""
+    backend = CFG.get("backend_url", "http://127.0.0.1:8080/api/input")
+    # 从 backend_url 推导出 base URL
+    base_url = backend.rsplit("/api/", 1)[0] if "/api/" in backend else "http://127.0.0.1:8080"
+    token_url = f"{base_url}/api/channel/token/{channel_name}"
+    try:
+        resp = requests.get(token_url, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            return data.get("token", "")
+        elif resp.status_code == 404:
+            logger.warning("Token not found for %s (not configured yet)", channel_name)
+            return ""
+        else:
+            logger.error("Failed to fetch token for %s: HTTP %d %s", channel_name, resp.status_code, resp.text)
+            return ""
+    except Exception as e:
+        logger.error("Failed to connect to token API: %s", e)
+        return ""
+
+
+CFG = _load_channel_config("Telegram")
+
+PROXY = CFG.get("proxy", "")
+BACKEND_URL = CFG.get("backend_url", "http://127.0.0.1:8080/api/input")
+TIMEOUT = CFG.get("timeout", 600)
+THINK = CFG.get("think", False)
+MODEL = CFG.get("model", "default")
+CHANNEL = "Telegram"
+BOT_API_TOKEN = _fetch_bot_token("Telegram")
+
+# ---------- Markdown 安全分割 ----------
 def _find_markdown_spans(text: str) -> List[Tuple[int, int]]:
     spans = []
     for match in re.finditer(r"```.*?```", text, re.DOTALL):
@@ -136,10 +185,6 @@ async def safe_send(message, text: str, **kwargs):
 
 # ---------- 辅助解析函数 ----------
 def extract_assistant_reply(messages: List[dict]) -> Optional[str]:
-    """
-    从后端返回的消息列表中提取最后一个助手（非 user / tool）的文本回复。
-    内容可能是字符串或数组，数组时拼接所有 text 片段。
-    """
     for msg in reversed(messages):
         role = msg.get("role", "")
         if role in ("user", "tool"):
@@ -159,9 +204,6 @@ def extract_assistant_reply(messages: List[dict]) -> Optional[str]:
 
 
 def extract_images(messages: List[dict]) -> List[str]:
-    """
-    扫描所有消息，提取 content 数组中的 image_url 对象，返回 base64 字符串列表。
-    """
     images = []
     for msg in messages:
         content = msg.get("content")
@@ -188,11 +230,10 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_id=update.effective_chat.id, action=ChatAction.TYPING
     )
 
-    # 构造请求体
     req_data = {
-        "model": "default",
-        "think": False,  # 如需开启思考模式可改为 True
-        "channel": "Telegram",
+        "model": MODEL,
+        "think": THINK,
+        "channel": CHANNEL,
     }
 
     if update.message.text:
@@ -208,7 +249,6 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Message type is empty or not supported.")
         return
 
-    # 请求后端
     try:
         resp = requests.post(BACKEND_URL, json=req_data, timeout=TIMEOUT)
         resp.raise_for_status()
@@ -218,12 +258,11 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("连接丢失了嘤嘤嘤~")
         return
 
-    # 解析回复
     messages = data.get("messages", [])
     reply_text = extract_assistant_reply(messages)
     reply_images = extract_images(messages)
 
-    # 思考过程（可选发送）
+    # 思考过程
     thinkings = data.get("thinkings", [])
     if thinkings and isinstance(thinkings, list):
         thinking_blocks = [f"💭 {t}" for t in thinkings if t]
@@ -245,7 +284,6 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 发送图片回复
     for img_b64 in reply_images:
         try:
-            # 去除 data URI 前缀
             if "," in img_b64:
                 img_b64 = img_b64.split(",")[1]
             img_bytes = base64.b64decode(img_b64)
@@ -264,13 +302,14 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---------- 主入口 ----------
 if __name__ == "__main__":
     try:
-        application = (
+        builder = (
             ApplicationBuilder()
             .token(BOT_API_TOKEN)
-            .proxy(PROXY)
-            .get_updates_proxy(PROXY)
-            .build()
         )
+        if PROXY:
+            builder = builder.proxy(PROXY).get_updates_proxy(PROXY)
+
+        application = builder.build()
 
         application.add_handler(CommandHandler("start", start))
         application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, echo))

@@ -10,6 +10,7 @@ cmd = [
     "-o",
     "app",
     "-lcurl",
+    "-lsodium",
     "-lws2_32",
     "-lwsock32",
     "-std=c++26",
