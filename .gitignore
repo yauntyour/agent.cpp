@@ -10,3 +10,5 @@ build
 _CPack_Packages
 .claude
 .playwright-cli
+workspace/webui.log
+*.enc

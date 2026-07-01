@@ -1,5 +1,13 @@
 # 更新内容
 
+17. 新增模型供应商选择功能：
+    - 支持 OpenAI（标准接口）、Ollama、Llama.cpp 三种供应商
+    - WebUI 聊天头部新增供应商选择器，支持运行时动态切换
+    - 设置表单新增供应商下拉选择
+    - 新增 `POST /api/provider` 接口，支持 API 级别供应商切换
+    - `settings.json` 新增 `provider` 字段（默认 `openai`）
+    - 所有供应商统一使用 `set_base_url()` / `set_api_key()` 接口
+    - Ollama/Llama 不支持流式时自动回退到非流式模式
 1. 新增系统状态监控（CPU/内存），支持 Windows/Linux/macOS 三平台
 2. 新增 webui.log 错误日志系统，所有 HTTP 处理加入异常捕获与日志记录
 3. 修复 HTTP 响应中文乱码（添加 charset=utf-8）

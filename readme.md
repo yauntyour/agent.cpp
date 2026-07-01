@@ -40,6 +40,7 @@ rm -rf ./* && git clone --recurse-submodules https://github.com/yauntyour/agent.
 ## 核心特性
 
 - **极致轻量**：核心由 `agent.hpp` 单头文件 + `app.cpp` 入口构成，充分利用 C++20 零拷贝与栈上分配特性，运行开销极低。
+- **多供应商支持**：内置 OpenAI（标准接口）、Ollama、Llama.cpp 三种 LLM 供应商，支持 WebUI 运行时动态切换，无需重启服务。
 - **工作区隔离**：所有用户资源（工具、系统脚本、会话、记忆、提示词）统一存放于 `workspace/` 目录下，结构与部署清晰。
 - **文件使用追踪**：系统自动追踪工具调用中访问过的文件，WebUI 实时展示文件使用状态，防止误操作。
 - **图片资产管理**：Base64 图片数据自动从会话记录中剥离并存储至 `workspace/assets/messages/`，大幅缩减会话文件体积。
@@ -215,6 +216,7 @@ def print_tool_help():
     "user_name": "Yauntyours",                   // 用户名称
     "agent_name": "assistant",                   // Agent 角色名
     "workspace": "./workspace/",                 // 工作区根目录（含 sessions/ memorys/ sys/ tools/ 等子目录）
+    "provider": "openai",                        // 模型供应商：openai（标准接口）/ ollama / llama
     "server_address": "http://localhost:11434",  // LLM 服务地址（兼容 OpenAI API 格式）
     "model": "uGemma4",                          // 模型名称
     "prompt": "agent.txt",                       // 系统提示词文件路径（相对于 workspace）

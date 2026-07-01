@@ -1252,6 +1252,7 @@ namespace run_unit
         std::filesystem::create_directories(workspace / "memorys");
         std::filesystem::create_directories(workspace / "assets" / "messages");
         std::filesystem::create_directories(workspace / "tokens"); // 加密频道 token 存储
+        std::filesystem::create_directories(workspace / "tokens" / "providers"); // 加密供应商 API Key 存储
         std::filesystem::create_directories(workspace / "tools");
 
         std::filesystem::path sysPath = workspace / "sys";
@@ -1279,7 +1280,11 @@ namespace run_unit
             throw std::runtime_error("Error - prompt not found or is not a regular file. Please check your settings.");
 
         if (!settings.contains("server_address") || settings["server_address"].get<std::string>().empty())
-            throw std::runtime_error("Error - missing or empty 'server_address' in settings");
+        {
+            // 兼容新格式：检查 providers 数组
+            if (!settings.contains("providers") || !settings["providers"].is_array() || settings["providers"].empty())
+                throw std::runtime_error("Error - missing 'providers' array or 'server_address' in settings");
+        }
 
         std::filesystem::path webui = workspace / "webui.html";
         if (!std::filesystem::exists(webui))
@@ -1329,9 +1334,10 @@ namespace run_unit
             std::cerr << "Error: missing 'workspace'" << std::endl;
             return false;
         }
-        if (!j.contains("server_address") || !j["server_address"].is_string())
+        // 兼容新旧格式：检查 providers 数组或 server_address
+        if (!j.contains("providers") && (!j.contains("server_address") || !j["server_address"].is_string()))
         {
-            std::cerr << "Error: missing 'server_address'" << std::endl;
+            std::cerr << "Error: missing 'providers' array or 'server_address'" << std::endl;
             return false;
         }
         if (!j.contains("model") || !j["model"].is_string())
@@ -1682,10 +1688,14 @@ namespace LLMProviders
     {
     private:
         std::string base_url_;
+        crypto_unit::SecureString api_key_;
         CURL *curl_ = curl_easy_init();
 
     public:
-        explicit LlamaClient(const std::string &base_url = "http://localhost:8080") : base_url_(base_url) {}
+        explicit LlamaClient(const std::string &base_url = "http://localhost:8080", const std::string &api_key = "")
+            : base_url_(base_url), api_key_(api_key) {}
+        void set_api_key(const std::string &api_key) { api_key_.set(api_key); }
+        void set_base_url(const std::string &base_url) { base_url_ = base_url; }
         ~LlamaClient()
         {
             if (curl_)
@@ -1706,7 +1716,10 @@ namespace LLMProviders
         {
             std::string buf;
             std::string url = base_url_ + "/chat/completions";
-            if (!net_unit::CURL_post(curl_, url.c_str(), request.dump(), buf, "Content-Type: application/json"))
+            std::string header = "Content-Type: application/json";
+            if (!api_key_.empty())
+                header = "Authorization: Bearer " + api_key_.str() + "\r\nContent-Type: application/json";
+            if (!net_unit::CURL_post(curl_, url.c_str(), request.dump(), buf, header))
                 return false;
             try
             {
@@ -1722,8 +1735,11 @@ namespace LLMProviders
         std::string models()
         {
             std::string result;
-            std::string url = base_url_ + "/api/tags";
-            net_unit::CURL_get(curl_easy_init(), url.c_str(), result);
+            std::string url = base_url_ + "/v1/models";
+            std::string header = "Content-Type: application/json";
+            if (!api_key_.empty())
+                header = "Authorization: Bearer " + api_key_.str() + "\r\nContent-Type: application/json";
+            net_unit::CURL_get(curl_easy_init(), url.c_str(), result, header);
             return result;
         }
     };
@@ -1732,11 +1748,14 @@ namespace LLMProviders
     {
     private:
         std::string base_url_;
+        crypto_unit::SecureString api_key_;
         CURL *curl_ = curl_easy_init();
 
     public:
-        explicit OllamaClient() = default;
-        explicit OllamaClient(const std::string &base_url = "http://localhost:11434") : base_url_(base_url) {}
+        explicit OllamaClient(const std::string &base_url = "http://localhost:11434", const std::string &api_key = "")
+            : base_url_(base_url), api_key_(api_key) {}
+        void set_api_key(const std::string &api_key) { api_key_.set(api_key); }
+        void set_base_url(const std::string &base_url) { base_url_ = base_url; }
         ~OllamaClient()
         {
             if (curl_)
@@ -1747,7 +1766,10 @@ namespace LLMProviders
         {
             std::string buf;
             std::string url = base_url_ + "/v1/chat/completions";
-            if (!net_unit::CURL_post(curl_, url.c_str(), request.dump(), buf, "Content-Type: application/json"))
+            std::string header = "Content-Type: application/json";
+            if (!api_key_.empty())
+                header = "Authorization: Bearer " + api_key_.str() + "\r\nContent-Type: application/json";
+            if (!net_unit::CURL_post(curl_, url.c_str(), request.dump(), buf, header))
                 return false;
             try
             {

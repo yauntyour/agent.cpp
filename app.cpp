@@ -58,7 +58,16 @@ namespace app
     "max_mpc_rounds": 5,
     "model": "uGemma4",
     "prompt": "agent.txt",
-    "server_address": "http://localhost:11434",
+    "current_provider": "openai-default",
+    "providers": [
+        {
+            "id": "openai-default",
+            "name": "OpenAI",
+            "type": "openai",
+            "server_address": "http://localhost:11434",
+            "has_key": false
+        }
+    ],
     "stream": true,
     "user_name": "Yauntyours",
     "workspace": "./workspace/"
@@ -105,7 +114,164 @@ namespace app
     }
     static size_t im_token_len = sizeof("<|im_start|>\n<|im_end|>") - 1;
     static std::string tools_list_str; // 工具列表的字符串表示
-    static auto client = LLMProviders::OpenAIClient();
+
+    // ==================== 模型供应商支持 ====================
+    enum class ProviderType { OpenAI, Ollama, Llama };
+    static ProviderType current_provider = ProviderType::OpenAI;
+    static LLMProviders::OpenAIClient openai_client;
+    static LLMProviders::OllamaClient ollama_client;
+    static LLMProviders::LlamaClient llama_client;
+
+    std::string client_models()
+    {
+        switch (current_provider)
+        {
+        case ProviderType::OpenAI:
+            return openai_client.models();
+        case ProviderType::Ollama:
+            return ollama_client.models();
+        case ProviderType::Llama:
+            return llama_client.models();
+        }
+        return "";
+    }
+
+    bool client_generate(nlohmann::json &req, nlohmann::json &resp)
+    {
+        switch (current_provider)
+        {
+        case ProviderType::OpenAI:
+            return openai_client.generate(req, resp);
+        case ProviderType::Ollama:
+            return ollama_client.generate(req, resp);
+        case ProviderType::Llama:
+            return llama_client.generate(req, resp);
+        }
+        return false;
+    }
+
+    std::string client_stream_generate(
+        nlohmann::json &req,
+        std::function<void(const std::string &)> on_token,
+        std::function<void(const std::string &)> on_thinking = nullptr)
+    {
+        switch (current_provider)
+        {
+        case ProviderType::OpenAI:
+            return openai_client.stream_generate(req, on_token, on_thinking);
+        case ProviderType::Ollama:
+        case ProviderType::Llama:
+        {
+            // Ollama/Llama 不支持流式，回退到非流式
+            nlohmann::json resp;
+            if (current_provider == ProviderType::Ollama)
+                ollama_client.generate(req, resp);
+            else
+                llama_client.generate(req, resp);
+            if (resp.contains("choices") && !resp["choices"].empty())
+            {
+                std::string content = resp["choices"][0]["message"]["content"].get<std::string>();
+                if (on_token)
+                    on_token(content);
+                return content;
+            }
+            return "";
+        }
+        }
+        return "";
+    }
+
+    void switch_provider(const std::string &provider_type, const std::string &base_url, const std::string &api_key)
+    {
+        if (provider_type == "ollama")
+        {
+            current_provider = ProviderType::Ollama;
+            ollama_client.set_base_url(base_url);
+            ollama_client.set_api_key(api_key);
+            std::cout << "Provider switched to Ollama: " << base_url << std::endl;
+        }
+        else if (provider_type == "llama")
+        {
+            current_provider = ProviderType::Llama;
+            llama_client.set_base_url(base_url);
+            llama_client.set_api_key(api_key);
+            std::cout << "Provider switched to Llama: " << base_url << std::endl;
+        }
+        else
+        {
+            current_provider = ProviderType::OpenAI;
+            openai_client.set_base_url(base_url);
+            openai_client.set_api_key(api_key);
+            std::cout << "Provider switched to OpenAI: " << base_url << std::endl;
+        }
+    }
+
+    // 根据 provider id 从 providers 数组中查找并切换
+    bool switch_provider_by_id(const std::string &provider_id)
+    {
+        if (!run_unit::settings.contains("providers"))
+            return false;
+        auto &providers = run_unit::settings["providers"];
+        for (auto &p : providers)
+        {
+            if (p.value("id", "") == provider_id)
+            {
+                std::string type = p.value("type", "openai");
+                std::string base_url = p.value("server_address", "");
+
+                // 从加密文件读取 api_key
+                std::string api_key = "";
+                std::string ws = run_unit::settings.value("workspace", ".");
+                std::string key_file = ws + "/tokens/providers/" + provider_id + ".enc";
+                if (std::filesystem::exists(key_file))
+                {
+                    std::string encrypted = tool_unit::readFile(key_file);
+                    if (!encrypted.empty())
+                    {
+                        if (encrypted.back() == '\n')
+                            encrypted.pop_back();
+                        api_key = crypto_unit::decrypt(encrypted, crypto_context::key());
+                    }
+                }
+
+                switch_provider(type, base_url, api_key);
+                run_unit::settings["current_provider"] = provider_id;
+                tool_unit::writeFile(run_unit::setting_file_path, run_unit::settings.dump(4));
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // 根据 provider id 从 providers 数组中查找
+    json* find_provider(const std::string &provider_id)
+    {
+        if (!run_unit::settings.contains("providers"))
+            return nullptr;
+        auto &providers = run_unit::settings["providers"];
+        for (auto &p : providers)
+        {
+            if (p.value("id", "") == provider_id)
+            {
+                return &p;
+            }
+        }
+        return nullptr;
+    }
+
+    std::string provider_to_string()
+    {
+        switch (current_provider)
+        {
+        case ProviderType::OpenAI:
+            return "openai";
+        case ProviderType::Ollama:
+            return "ollama";
+        case ProviderType::Llama:
+            return "llama";
+        }
+        return "openai";
+    }
 
     std::string to_hex_string(const uint8_t *hash, size_t len)
     {
@@ -124,7 +290,39 @@ namespace app
             tool_unit::writeFile(setting_path, DEFAULT_SETTINGS);
         }
         run_unit::init_check(setting_path);
-        client.set_base_url(run_unit::settings["server_address"].get_ref<const std::string &>());
+
+        // 初始化供应商（使用 providers 数组）
+        {
+            std::string current_prov_id = run_unit::settings.value("current_provider", "openai-default");
+            // 兼容旧版配置：如果 providers 数组不存在，从旧的 provider 和 server_address 迁移
+            if (!run_unit::settings.contains("providers") || run_unit::settings["providers"].empty())
+            {
+                std::string old_provider = run_unit::settings.value("provider", "openai");
+                std::string old_server = run_unit::settings.value("server_address", "http://localhost:11434");
+                json new_provider = {
+                    {"id", "openai-default"},
+                    {"name", "OpenAI"},
+                    {"type", old_provider},
+                    {"server_address", old_server},
+                    {"has_key", false}
+                };
+                run_unit::settings["providers"] = json::array({new_provider});
+                run_unit::settings["current_provider"] = "openai-default";
+                tool_unit::writeFile(run_unit::setting_file_path, run_unit::settings.dump(4));
+                current_prov_id = "openai-default";
+            }
+            if (!switch_provider_by_id(current_prov_id))
+            {
+                // 如果找不到指定的 provider，使用第一个
+                auto &providers = run_unit::settings["providers"];
+                if (!providers.empty())
+                {
+                    std::string first_id = providers[0].value("id", "");
+                    if (!first_id.empty())
+                        switch_provider_by_id(first_id);
+                }
+            }
+        }
 
         // 初始化 libsodium（必须在任何 crypto_* 函数前调用）
         if (sodium_init() < 0)
@@ -178,7 +376,13 @@ namespace app
 
         // 用密码派生 32 字节加密密钥，API key 以密文形式保存在内存中
         crypto_context::init_key_from_password(password);
-        client.set_api_key(apikey);
+        // 设置 API key 到当前供应商
+        if (current_provider == ProviderType::OpenAI)
+            openai_client.set_api_key(apikey);
+        else if (current_provider == ProviderType::Ollama)
+            ollama_client.set_api_key(apikey);
+        else
+            llama_client.set_api_key(apikey);
 
         // SHA3-256 密码哈希注入 settings（供 Web UI 会话认证）
         {
@@ -238,7 +442,7 @@ namespace app
                 {"model", model},
                 {"messages", {{{"role", "system"}, {"content", aq}}}},
                 {"stream", false}};
-            client.generate(req, response);
+            client_generate(req, response);
             if (response.contains("usage"))
             {
                 auto &usage = response["usage"];
@@ -251,7 +455,7 @@ namespace app
             std::cout << "Abstracts generated successfully." << std::endl;
 
             req["messages"][0]["content"] = kq;
-            client.generate(req, response);
+            client_generate(req, response);
             if (response.contains("usage"))
             {
                 auto &usage = response["usage"];
@@ -311,6 +515,17 @@ namespace app
         int handle_models(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
         int handle_settings(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
         int handle_data(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+        int handle_provider(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+
+        // ——— 供应商管理 ———
+        int handle_providers_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+        int handle_providers_add(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+        int handle_providers_update(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+        int handle_providers_delete(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+
+        // ——— 供应商 API Key 加密存储 ———
+        int handle_provider_key_set(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+        int handle_provider_key_get(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
 
         int handle_channels_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
 
@@ -345,6 +560,17 @@ namespace app
             router.on("/api/models", handle_models);
             router.on("/api/settings", handle_settings);
             router.on("/api/data", handle_data);
+            router.on("/api/provider", handle_provider);
+
+            // 供应商管理 API
+            router.on("/api/providers", handle_providers_list);
+            router.on("/api/providers/add", handle_providers_add);
+            router.on("/api/providers/update", handle_providers_update);
+            router.on("/api/providers/delete", handle_providers_delete);
+
+            // 供应商 API Key 加密存储 API
+            router.on("/api/provider/key", handle_provider_key_set);         // POST — 加密存储
+            router.on("/api/provider/key/:id", handle_provider_key_get);     // GET — 解密读取
 
             router.on("/api/input", handle_input_packed);
             router.on("/api/session", handle_session_list);
@@ -394,7 +620,7 @@ namespace app
         {
             try
             {
-                output = build_http_response(200, "application/json", client.models());
+                output = build_http_response(200, "application/json", client_models());
                 return rt::FLAG_DONE;
             }
             catch (const std::exception &e)
@@ -594,6 +820,379 @@ namespace app
                 return rt::FLAG_ERROR;
             }
         }
+        int handle_provider(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+        {
+            try
+            {
+                size_t header_end = input.find("\r\n\r\n");
+                std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
+                json request = json::parse(body);
+
+                std::string provider_id = request.value("provider_id", "");
+                if (provider_id.empty())
+                {
+                    output = build_http_response(400, "application/json", R"({"error":"missing provider_id"})");
+                    return rt::FLAG_ERROR;
+                }
+
+                if (!switch_provider_by_id(provider_id))
+                {
+                    output = build_http_response(404, "application/json", R"({"error":"provider not found"})");
+                    return rt::FLAG_ERROR;
+                }
+
+                json resp = {
+                    {"status", "OK"},
+                    {"provider_id", provider_id}};
+                output = build_http_response(200, "application/json", resp.dump());
+                return rt::FLAG_DONE;
+            }
+            catch (const std::exception &e)
+            {
+                webui_log("ERROR", "handle_provider", e.what());
+                output = build_http_response(500, "application/json", json{{"error", e.what()}}.dump());
+                return rt::FLAG_ERROR;
+            }
+        }
+
+        // —————————————— 供应商管理 API ——————————————
+
+        // GET /api/providers → 返回所有供应商列表
+        int handle_providers_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+        {
+            try
+            {
+                json resp = {
+                    {"providers", run_unit::settings.value("providers", json::array())},
+                    {"current_provider", run_unit::settings.value("current_provider", "")}};
+                output = build_http_response(200, "application/json", resp.dump());
+                return rt::FLAG_DONE;
+            }
+            catch (const std::exception &e)
+            {
+                webui_log("ERROR", "handle_providers_list", e.what());
+                output = build_http_response(500, "application/json", json{{"error", e.what()}}.dump());
+                return rt::FLAG_ERROR;
+            }
+        }
+
+        // POST /api/providers/add → 添加新供应商
+        int handle_providers_add(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+        {
+            try
+            {
+                size_t header_end = input.find("\r\n\r\n");
+                std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
+                json request = json::parse(body);
+
+                std::string id = request.value("id", "");
+                std::string name = request.value("name", "");
+                std::string type = request.value("type", "openai");
+                std::string server_address = request.value("server_address", "");
+                std::string api_key = request.value("api_key", "");
+
+                if (id.empty() || name.empty())
+                {
+                    output = build_http_response(400, "application/json", R"({"error":"missing id or name"})");
+                    return rt::FLAG_ERROR;
+                }
+
+                // 检查 id 是否已存在
+                if (!run_unit::settings.contains("providers"))
+                    run_unit::settings["providers"] = json::array();
+                for (auto &p : run_unit::settings["providers"])
+                {
+                    if (p.value("id", "") == id)
+                    {
+                        output = build_http_response(409, "application/json", R"({"error":"provider id already exists"})");
+                        return rt::FLAG_ERROR;
+                    }
+                }
+
+                // 如果提供了 api_key，加密存储到文件
+                if (!api_key.empty())
+                {
+                    std::string ws = run_unit::settings["workspace"].get<std::string>();
+                    std::string key_dir = ws + "/tokens/providers";
+                    std::filesystem::create_directories(key_dir);
+                    std::string file_path = key_dir + "/" + id + ".enc";
+                    std::string encrypted = crypto_unit::encrypt(api_key, crypto_context::key());
+                    if (encrypted.empty())
+                    {
+                        output = build_http_response(500, "application/json", R"({"error":"encryption failed"})");
+                        return rt::FLAG_ERROR;
+                    }
+                    tool_unit::writeFile(file_path, encrypted);
+                }
+
+                // 不在 settings.json 中存储 api_key，只标记是否有 key
+                json new_provider = {
+                    {"id", id},
+                    {"name", name},
+                    {"type", type},
+                    {"server_address", server_address},
+                    {"has_key", !api_key.empty()}};
+                run_unit::settings["providers"].push_back(new_provider);
+                tool_unit::writeFile(run_unit::setting_file_path, run_unit::settings.dump(4));
+
+                json resp = {{"status", "OK"}, {"provider", new_provider}};
+                output = build_http_response(200, "application/json", resp.dump());
+                return rt::FLAG_DONE;
+            }
+            catch (const std::exception &e)
+            {
+                webui_log("ERROR", "handle_providers_add", e.what());
+                output = build_http_response(500, "application/json", json{{"error", e.what()}}.dump());
+                return rt::FLAG_ERROR;
+            }
+        }
+
+        // POST /api/providers/update → 更新供应商配置
+        int handle_providers_update(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+        {
+            try
+            {
+                size_t header_end = input.find("\r\n\r\n");
+                std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
+                json request = json::parse(body);
+
+                std::string id = request.value("id", "");
+                if (id.empty())
+                {
+                    output = build_http_response(400, "application/json", R"({"error":"missing id"})");
+                    return rt::FLAG_ERROR;
+                }
+
+                json *provider = find_provider(id);
+                if (!provider)
+                {
+                    output = build_http_response(404, "application/json", R"({"error":"provider not found"})");
+                    return rt::FLAG_ERROR;
+                }
+
+                // 更新字段（只更新提供的字段）
+                if (request.contains("name"))
+                    (*provider)["name"] = request["name"];
+                if (request.contains("type"))
+                    (*provider)["type"] = request["type"];
+                if (request.contains("server_address"))
+                    (*provider)["server_address"] = request["server_address"];
+
+                // 如果提供了 api_key，加密存储到文件
+                if (request.contains("api_key"))
+                {
+                    std::string api_key = request["api_key"].get<std::string>();
+                    std::string ws = run_unit::settings["workspace"].get<std::string>();
+                    std::string key_dir = ws + "/tokens/providers";
+                    std::filesystem::create_directories(key_dir);
+                    std::string file_path = key_dir + "/" + id + ".enc";
+
+                    if (api_key.empty())
+                    {
+                        // 空 api_key → 删除文件
+                        if (std::filesystem::exists(file_path))
+                            std::filesystem::remove(file_path);
+                        (*provider)["has_key"] = false;
+                    }
+                    else
+                    {
+                        std::string encrypted = crypto_unit::encrypt(api_key, crypto_context::key());
+                        if (encrypted.empty())
+                        {
+                            output = build_http_response(500, "application/json", R"({"error":"encryption failed"})");
+                            return rt::FLAG_ERROR;
+                        }
+                        tool_unit::writeFile(file_path, encrypted);
+                        (*provider)["has_key"] = true;
+                    }
+                }
+
+                tool_unit::writeFile(run_unit::setting_file_path, run_unit::settings.dump(4));
+
+                // 如果更新的是当前活跃的供应商，重新切换
+                std::string current_id = run_unit::settings.value("current_provider", "");
+                if (current_id == id)
+                {
+                    switch_provider_by_id(id);
+                }
+
+                json resp = {{"status", "OK"}, {"provider", *provider}};
+                output = build_http_response(200, "application/json", resp.dump());
+                return rt::FLAG_DONE;
+            }
+            catch (const std::exception &e)
+            {
+                webui_log("ERROR", "handle_providers_update", e.what());
+                output = build_http_response(500, "application/json", json{{"error", e.what()}}.dump());
+                return rt::FLAG_ERROR;
+            }
+        }
+
+        // POST /api/providers/delete → 删除供应商
+        int handle_providers_delete(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+        {
+            try
+            {
+                size_t header_end = input.find("\r\n\r\n");
+                std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
+                json request = json::parse(body);
+
+                std::string id = request.value("id", "");
+                if (id.empty())
+                {
+                    output = build_http_response(400, "application/json", R"({"error":"missing id"})");
+                    return rt::FLAG_ERROR;
+                }
+
+                if (!run_unit::settings.contains("providers"))
+                {
+                    output = build_http_response(404, "application/json", R"({"error":"no providers"})");
+                    return rt::FLAG_ERROR;
+                }
+
+                // 不允许删除最后一个供应商
+                if (run_unit::settings["providers"].size() <= 1)
+                {
+                    output = build_http_response(400, "application/json", R"({"error":"cannot delete the last provider"})");
+                    return rt::FLAG_ERROR;
+                }
+
+                auto &providers = run_unit::settings["providers"];
+                for (auto it = providers.begin(); it != providers.end(); ++it)
+                {
+                    if (it->value("id", "") == id)
+                    {
+                        // 如果删除的是当前供应商，切换到第一个
+                        std::string current_id = run_unit::settings.value("current_provider", "");
+                        if (current_id == id)
+                        {
+                            std::string first_id = providers[0].value("id", "");
+                            if (first_id != id)
+                                switch_provider_by_id(first_id);
+                            else if (providers.size() > 1)
+                                switch_provider_by_id(providers[1].value("id", ""));
+                        }
+                        providers.erase(it);
+                        tool_unit::writeFile(run_unit::setting_file_path, run_unit::settings.dump(4));
+                        json resp = {{"status", "OK"}};
+                        output = build_http_response(200, "application/json", resp.dump());
+                        return rt::FLAG_DONE;
+                    }
+                }
+
+                output = build_http_response(404, "application/json", R"({"error":"provider not found"})");
+                return rt::FLAG_ERROR;
+            }
+            catch (const std::exception &e)
+            {
+                webui_log("ERROR", "handle_providers_delete", e.what());
+                output = build_http_response(500, "application/json", json{{"error", e.what()}}.dump());
+                return rt::FLAG_ERROR;
+            }
+        }
+
+        // —————————————— 供应商 API Key 加密存储 API ——————————————
+
+        // POST /api/provider/key  body: {"id":"deepseek-1","api_key":"sk-xxxx"}
+        // 将 api_key 加密后存入 workspace/tokens/providers/<id>.enc
+        int handle_provider_key_set(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+        {
+            try
+            {
+                size_t header_end = input.find("\r\n\r\n");
+                std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
+                json req = json::parse(body);
+
+                std::string id = req.value("id", "");
+                std::string api_key = req.value("api_key", "");
+                if (id.empty())
+                {
+                    output = build_http_response(400, "application/json", R"({"error":"missing id"})");
+                    return rt::FLAG_ERROR;
+                }
+
+                std::string ws = run_unit::settings["workspace"].get<std::string>();
+                std::string key_dir = ws + "/tokens/providers";
+                std::filesystem::create_directories(key_dir);
+                std::string file_path = key_dir + "/" + id + ".enc";
+
+                if (api_key.empty())
+                {
+                    // 空 api_key → 删除文件
+                    if (std::filesystem::exists(file_path))
+                        std::filesystem::remove(file_path);
+                    output = build_http_response(200, "application/json",
+                                                 json{{"status","deleted"},{"id",id}}.dump());
+                }
+                else
+                {
+                    // 加密存储
+                    std::string encrypted = crypto_unit::encrypt(api_key, crypto_context::key());
+                    if (encrypted.empty())
+                    {
+                        output = build_http_response(500, "application/json", R"({"error":"encryption failed"})");
+                        return rt::FLAG_ERROR;
+                    }
+                    tool_unit::writeFile(file_path, encrypted);
+                    output = build_http_response(200, "application/json",
+                                                 json{{"status","saved"},{"id",id}}.dump());
+                }
+                return rt::FLAG_DONE;
+            }
+            catch (const std::exception &e)
+            {
+                webui_log("ERROR", "handle_provider_key_set", e.what());
+                output = build_http_response(500, "application/json", json{{"error", e.what()}}.dump());
+                return rt::FLAG_ERROR;
+            }
+        }
+
+        // GET /api/provider/key/:id  → 返回解密后的 {id, api_key}
+        int handle_provider_key_get(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+        {
+            try
+            {
+                auto it = params.find("id");
+                std::string id = (it != params.end()) ? it->second : "";
+                if (id.empty())
+                {
+                    output = build_http_response(400, "application/json", R"({"error":"missing id"})");
+                    return rt::FLAG_ERROR;
+                }
+
+                std::string ws = run_unit::settings["workspace"].get<std::string>();
+                std::string file_path = ws + "/tokens/providers/" + id + ".enc";
+
+                if (!std::filesystem::exists(file_path))
+                {
+                    output = build_http_response(404, "application/json",
+                                                 json{{"error","api_key not found"},{"id",id}}.dump());
+                    return rt::FLAG_ERROR;
+                }
+
+                std::string encrypted = tool_unit::readFile(file_path);
+                if (!encrypted.empty() && encrypted.back() == '\n')
+                    encrypted.pop_back();
+
+                std::string api_key = crypto_unit::decrypt(encrypted, crypto_context::key());
+                if (api_key.empty())
+                {
+                    output = build_http_response(500, "application/json", R"({"error":"decryption failed"})");
+                    return rt::FLAG_ERROR;
+                }
+
+                output = build_http_response(200, "application/json",
+                                             json{{"id",id},{"api_key",api_key}}.dump());
+                return rt::FLAG_DONE;
+            }
+            catch (const std::exception &e)
+            {
+                webui_log("ERROR", "handle_provider_key_get", e.what());
+                output = build_http_response(500, "application/json", json{{"error", e.what()}}.dump());
+                return rt::FLAG_ERROR;
+            }
+        }
+
         int handle_channels_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
             output = build_http_response(200, "application/json", run_unit::settings["channels"].dump());
@@ -1056,7 +1655,7 @@ namespace app
                         {"messages", context},
                         {"think", think_mode}};
 
-                    std::string response_text = client.stream_generate(
+                    std::string response_text = client_stream_generate(
                         llm_req,
                         [&](const std::string &chunk)
                         {
@@ -1249,7 +1848,7 @@ namespace app
                         {"think", think_mode}};
 
                     json response;
-                    if (!client.generate(llm_req, response))
+                    if (!client_generate(llm_req, response))
                     {
                         output = build_http_response(500, "application/json", R"({"error":"LLM generate failed"})");
                         return rt::FLAG_ERROR;

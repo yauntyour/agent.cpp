@@ -30,11 +30,21 @@
             "user_count": 1
         }
     ],
+    "current_provider": "openai-default",
     "max_context": 1048576,
     "max_mpc_rounds": 5,
     "model": "uGemma4",
+    "password": "a2aba198385559c15dc12398e197d556ef3cd6b45329d003b8886a0eecedec05",
     "prompt": "agent.txt",
-    "server_address": "http://localhost:11434",
+    "providers": [
+        {
+            "has_key": false,
+            "id": "openai-default",
+            "name": "OpenAI",
+            "server_address": "http://localhost:11434",
+            "type": "openai"
+        }
+    ],
     "stream": true,
     "user_name": "Yauntyours",
     "workspace": "./workspace/"

@@ -27,6 +27,7 @@
             --text-main: #e8e8ed;
             --text-muted: #9898a6;
             --text-dim: #5c5c6e;
+            --chat-header-bg: rgba(12, 12, 18, 0.85);
             --radius-sm: 6px;
             --radius-md: 10px;
             --radius-lg: 14px;
@@ -36,6 +37,74 @@
             --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
             --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
             --transition-smooth: 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        [data-theme="light"] {
+            --bg-base: #f8f9fc;
+            --bg-panel: #ffffff;
+            --bg-surface: #f1f3f8;
+            --bg-elevated: #e8ebf0;
+            --border-color: #dde0e8;
+            --border-hover: #c4c8d4;
+            --accent-color: #6366f1;
+            --accent-hover: #4f46e5;
+            --accent-glow: rgba(99, 102, 241, 0.1);
+            --text-main: #1a1d2e;
+            --text-muted: #5c6070;
+            --text-dim: #9096a6;
+            --chat-header-bg: rgba(255, 255, 255, 0.85);
+            --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+            --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.1);
+            --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.12);
+        }
+
+        [data-theme="light"] .msg-avatar.ai-av {
+            background: #e8ebf0;
+        }
+
+        [data-theme="light"] .msg-avatar.user-av {
+            background: #6366f1;
+        }
+
+        [data-theme="light"] .msg-bubble.ai-bub {
+            background: #f1f3f8;
+            border-color: #dde0e8;
+        }
+
+        [data-theme="light"] .msg-bubble.user-bub {
+            background: #6366f1;
+        }
+
+        [data-theme="light"] ::-webkit-scrollbar-thumb {
+            background: rgba(0, 0, 0, 0.1);
+        }
+
+        [data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        [data-theme="light"] .think-block {
+            background: #f1f3f8;
+            border-color: #dde0e8;
+        }
+
+        [data-theme="light"] .tool-call {
+            background: #f1f3f8;
+            border-color: #dde0e8;
+        }
+
+        [data-theme="light"] .sys-output-block {
+            background: #f1f3f8;
+            border-color: #dde0e8;
+        }
+
+        [data-theme="light"] pre {
+            background: #f1f3f8 !important;
+            border-color: #dde0e8 !important;
+        }
+
+        [data-theme="light"] code {
+            color: #1a1d2e;
         }
 
         * {
@@ -252,7 +321,7 @@
             align-items: center;
             justify-content: space-between;
             padding: 0 20px;
-            background: rgba(12, 12, 18, 0.85);
+            background: var(--chat-header-bg);
             backdrop-filter: blur(16px);
             border-bottom: 1px solid var(--border-color);
             flex-shrink: 0;
@@ -331,6 +400,74 @@
 
         .model-opt:hover {
             background: var(--bg-surface);
+        }
+
+        /* 供应商选择器 */
+        .provider-selector {
+            position: relative;
+        }
+
+        .provider-btn {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 10px;
+            border-radius: var(--radius-sm);
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--accent-color);
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all var(--transition-fast);
+        }
+
+        .provider-btn:hover {
+            background: var(--accent-glow);
+            border-color: var(--accent-color);
+        }
+
+        .provider-dropdown {
+            position: absolute;
+            left: 0;
+            top: 100%;
+            margin-top: 6px;
+            width: 180px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-lg);
+            z-index: 60;
+            display: none;
+            overflow: hidden;
+        }
+
+        .provider-dropdown.show {
+            display: block;
+        }
+
+        .provider-opt {
+            width: 100%;
+            padding: 10px 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: var(--text-main);
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            transition: all 0.1s;
+            text-align: left;
+        }
+
+        .provider-opt:hover {
+            background: var(--bg-surface);
+        }
+
+        .provider-opt.active {
+            color: var(--accent-color);
+            background: var(--accent-glow);
         }
 
         .chat-header-right {
@@ -1346,6 +1483,29 @@
             resize: vertical;
         }
 
+        .setting-row select {
+            width: 100%;
+            background: var(--bg-base);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 7px 10px;
+            color: var(--text-main);
+            font-size: 13px;
+            outline: none;
+            transition: border-color var(--transition-fast);
+            font-family: inherit;
+            cursor: pointer;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239898a6' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 10px center;
+            padding-right: 30px;
+        }
+
+        .setting-row select:focus {
+            border-color: var(--accent-color);
+        }
+
         .setting-row.check-row {
             display: flex;
             align-items: center;
@@ -1992,6 +2152,21 @@
         <main id="main">
             <header class="chat-header">
                 <div class="chat-header-left">
+                    <div class="provider-selector">
+                        <button class="provider-btn" id="provider-dropdown-btn">
+                            <i class="fa-solid fa-server" style="font-size:11px;"></i>
+                            <span id="provider-name-display">加载中...</span>
+                            <i class="fa-solid fa-chevron-down" style="font-size:8px;color:var(--text-dim);"></i>
+                        </button>
+                        <div class="provider-dropdown" id="provider-dropdown-menu">
+                            <div id="provider-dropdown-list"></div>
+                            <div style="border-top:1px solid var(--border-color);margin-top:4px;padding-top:4px;">
+                                <button class="provider-opt" onclick="openProvidersManager()" style="color:var(--text-dim);font-size:11px;">
+                                    <i class="fa-solid fa-gear"></i> 管理供应商...
+                                </button>
+                            </div>
+                        </div>
+                    </div>
                     <div class="model-selector">
                         <button class="model-btn" id="model-dropdown-btn">
                             <span class="model-dot" id="connection-status-dot"
@@ -2014,6 +2189,8 @@
                             class="fa-solid fa-brain"></i><span id="memory-time-text"></span></span>
                     <button class="icon-btn" id="file-browser-btn" title="文件浏览器"><i
                             class="fa-solid fa-folder-tree"></i></button>
+                    <button class="icon-btn" id="theme-toggle-btn" title="切换主题"><i
+                            class="fa-solid fa-circle-half-stroke"></i></button>
                     <button class="icon-btn" id="settings-gear-btn" title="设置"><i class="fa-solid fa-gear"></i></button>
                 </div>
             </header>
@@ -2076,6 +2253,7 @@
             </div>
             <div class="overlay-tabs">
                 <button class="overlay-tab active" data-otab="settings">配置</button>
+                <button class="overlay-tab" data-otab="providers">供应商</button>
                 <button class="overlay-tab" data-otab="tools">工具</button>
                 <button class="overlay-tab" data-otab="todos">任务</button>
                 <button class="overlay-tab" data-otab="channels">频道</button>
@@ -2086,6 +2264,15 @@
                     <div id="settings-form-container"></div>
                     <button class="save-btn" id="save-settings-btn"><i class="fa-solid fa-floppy-disk"></i>
                         应用配置</button>
+                </div>
+                <div class="overlay-panel" id="opanel-providers">
+                    <div id="providers-header-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+                        <span style="font-size:12px;color:var(--text-muted);font-weight:500;">模型供应商管理</span>
+                        <button class="save-btn" onclick="addProviderForm()" style="margin-left:auto;margin-top:0;padding:6px 12px;font-size:11px;background:var(--accent-color);">
+                            <i class="fa-solid fa-plus"></i> 添加供应商
+                        </button>
+                    </div>
+                    <div id="providers-list"></div>
                 </div>
                 <div class="overlay-panel" id="opanel-tools">
                     <div id="tools-header-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
@@ -2172,7 +2359,10 @@
             contextUsage: { total: 0, max: 128000 },
             memoryActive: false,
             memoryCreatedAt: null,
-            _scrollAtBottom: true
+            _scrollAtBottom: true,
+            providers: [],
+            currentProviderId: null,
+            theme: localStorage.getItem('theme') || 'dark'
         };
         const API = '/api';
 
@@ -2190,6 +2380,9 @@
             modelDropdownBtn: $('#model-dropdown-btn'), modelDropdownMenu: $('#model-dropdown-menu'),
             modelDropdownList: $('#model-dropdown-list'), modelNameDisplay: $('#model-name-display'),
             connectionStatusDot: $('#connection-status-dot'),
+            providerDropdownBtn: $('#provider-dropdown-btn'), providerDropdownMenu: $('#provider-dropdown-menu'),
+            providerNameDisplay: $('#provider-name-display'), providerDropdownList: $('#provider-dropdown-list'),
+            providersList: $('#providers-list'),
             attachBtn: $('#attach-btn'), fileUpload: $('#file-upload'),
             imagePreviewContainer: $('#image-preview-container'),
             settingsFormContainer: $('#settings-form-container'), saveSettingsBtn: $('#save-settings-btn'),
@@ -2200,6 +2393,7 @@
             channelOverlay: $('#channel-overlay'), channelOverlayBody: $('#channel-overlay-body'),
             closeStatsBtn: $('#close-stats-btn'), closeChannelBtn: $('#close-channel-btn'),
             fileBrowserBtn: $('#file-browser-btn'),
+            themeToggleBtn: $('#theme-toggle-btn'),
             fbPanel: $('#file-browser-panel'),
             fbBreadcrumb: $('#fb-breadcrumb'),
             fbListing: $('#fb-listing'),
@@ -2556,7 +2750,6 @@
       <div class="setting-row"><label>用户昵称</label><input type="text" id="s-user_name" value="${esc(s.user_name || '')}"></div>
       <div class="setting-row"><label>Agent昵称</label><input type="text" id="s-agent_name" value="${esc(s.agent_name || '')}"></div>
       <div class="setting-row"><label>工作区路径</label><input type="text" id="s-workspace" value="${esc(s.workspace || '')}"></div>
-      <div class="setting-row"><label>服务器地址</label><input type="text" id="s-server_address" value="${esc(s.server_address || '')}"></div>
       <div class="setting-row"><label>默认模型</label><input type="text" id="s-model" value="${esc(s.model || '')}"></div>
       <div class="setting-row"><label>系统提示词</label><input type="text" id="s-prompt" value="${esc(s.prompt || '')}"></div>
     </div>
@@ -2579,14 +2772,17 @@
   `;
         }
         async function loadSettings() {
-            try { const r = await axios.post(API + '/settings', { updata: false }); state.settings = r.data; state.channels = state.settings.channels || []; } catch (e) { toast('加载设置失败', 'error'); log('加载设置失败: ' + (e.message || e), 'error'); }
+            try { const r = await axios.post(API + '/settings', { updata: false }); state.settings = r.data; state.channels = state.settings.channels || []; state.providers = state.settings.providers || []; } catch (e) { toast('加载设置失败', 'error'); log('加载设置失败: ' + (e.message || e), 'error'); }
             renderSettingsForm(state.settings);
+            await loadProviders();
         }
         async function saveSettings() {
             const ns = {
                 user_name: $('#s-user_name')?.value || '', agent_name: $('#s-agent_name')?.value || '',
-                workspace: $('#s-workspace')?.value || '', server_address: $('#s-server_address')?.value || '',
+                workspace: $('#s-workspace')?.value || '',
                 model: $('#s-model')?.value || '', prompt: $('#s-prompt')?.value || '',
+                current_provider: state.settings.current_provider || state.currentProviderId || 'openai-default',
+                providers: state.settings.providers || state.providers || [],
                 stream: $('#s-stream')?.checked || false,
                 auto_expand_files: $('#s-auto_expand_files')?.checked !== false,
                 max_mpc_rounds: parseInt($('#s-max_mpc_rounds')?.value) || 5,
@@ -2799,6 +2995,260 @@
             } finally {
                 _autoSummaryRunning = false;
             }
+        }
+
+        // ============ 供应商选择 ============
+        const providerTypeIcons = {
+            openai: { icon: 'fa-bolt', color: '#4ade80' },
+            ollama: { icon: 'fa-brain', color: '#60a5fa' },
+            llama: { icon: 'fa-microchip', color: '#f59e0b' }
+        };
+
+        async function loadProviders() {
+            try {
+                const r = await axios.get(API + '/providers');
+                state.providers = r.data.providers || [];
+                state.currentProviderId = r.data.current_provider || '';
+            } catch (e) {
+                log('加载供应商列表失败: ' + (e.message || e), 'error');
+            }
+            initProvider();
+            renderProviderDropdown();
+            renderProviders();
+        }
+
+        function initProvider() {
+            const currentId = state.currentProviderId || state.settings.current_provider || '';
+            const provider = state.providers.find(p => p.id === currentId);
+            if (provider) {
+                els.providerNameDisplay.textContent = provider.name || provider.id;
+                state.currentProviderId = provider.id;
+            } else if (state.providers.length > 0) {
+                const first = state.providers[0];
+                els.providerNameDisplay.textContent = first.name || first.id;
+                state.currentProviderId = first.id;
+            } else {
+                els.providerNameDisplay.textContent = '未配置';
+            }
+        }
+
+        function renderProviderDropdown() {
+            els.providerDropdownList.innerHTML = state.providers.map(p => {
+                const typeInfo = providerTypeIcons[p.type] || providerTypeIcons.openai;
+                const isActive = p.id === state.currentProviderId;
+                return `<button class="provider-opt ${isActive ? 'active' : ''}" data-provider-id="${esc(p.id)}" onclick="selectProvider('${esc(p.id)}')">
+                    <i class="fa-solid ${typeInfo.icon}" style="color:${typeInfo.color};"></i> ${esc(p.name || p.id)}
+                </button>`;
+            }).join('');
+        }
+
+        async function selectProvider(providerId) {
+            if (providerId === state.currentProviderId) return;
+            try {
+                const r = await axios.post(API + '/provider', { provider_id: providerId });
+                if (r.data.status === 'OK') {
+                    state.currentProviderId = providerId;
+                    state.settings.current_provider = providerId;
+                    const provider = state.providers.find(p => p.id === providerId);
+                    els.providerNameDisplay.textContent = provider ? (provider.name || provider.id) : providerId;
+                    renderProviderDropdown();
+                    els.providerDropdownMenu.classList.remove('show');
+                    toast('已切换到 ' + (provider ? provider.name : providerId), 'success');
+                    log('供应商已切换: ' + providerId, 'success');
+                    state.currentModel = null;
+                    await getModels();
+                }
+            } catch (e) {
+                toast('切换供应商失败: ' + (e.response?.data?.error || e.message), 'error');
+                log('切换供应商失败: ' + (e.message || e), 'error');
+            }
+        }
+
+        els.providerDropdownBtn.onclick = (e) => { e.stopPropagation(); els.providerDropdownMenu.classList.toggle('show'); };
+        document.addEventListener('click', () => els.providerDropdownMenu.classList.remove('show'));
+
+        // ============ 供应商管理 ============
+        function renderProviders() {
+            if (!els.providersList) return;
+            if (!state.providers.length) {
+                els.providersList.innerHTML = '<div style="color:var(--text-dim);font-size:13px;text-align:center;padding:24px;">暂无供应商，请添加</div>';
+                return;
+            }
+            els.providersList.innerHTML = state.providers.map(p => {
+                const typeInfo = providerTypeIcons[p.type] || providerTypeIcons.openai;
+                const isActive = p.id === state.currentProviderId;
+                const hasKey = p.has_key !== false;
+                return `<div class="channel-item" style="border-color:${isActive ? '#6366f1' : 'var(--border-color)'};" data-provider-id="${esc(p.id)}">
+                    <div class="channel-item-header">
+                        <span style="display:flex;align-items:center;gap:8px;">
+                            <i class="fa-solid ${typeInfo.icon}" style="color:${typeInfo.color};font-size:14px;"></i>
+                            <span class="channel-item-name">${esc(p.name || p.id)}</span>
+                            ${isActive ? '<span style="font-size:10px;color:#4ade80;background:rgba(74,222,128,0.1);padding:2px 6px;border-radius:4px;">当前使用</span>' : ''}
+                        </span>
+                        <div style="display:flex;gap:4px;">
+                            ${!isActive ? `<button class="channel-btn" onclick="selectProvider('${esc(p.id)}')" title="切换到此供应商"><i class="fa-solid fa-check"></i></button>` : ''}
+                            <button class="channel-btn" onclick="editProviderForm('${esc(p.id)}')" title="编辑"><i class="fa-solid fa-pen"></i></button>
+                            <button class="channel-btn danger" onclick="deleteProvider('${esc(p.id)}')" title="删除"><i class="fa-solid fa-trash"></i></button>
+                        </div>
+                    </div>
+                    <div style="font-size:11px;color:var(--text-dim);margin-top:6px;">
+                        <div>类型: ${esc(p.type)} | 地址: ${esc(p.server_address || '未设置')} | API Key: ${hasKey ? '<span style="color:#4ade80;">已配置</span>' : '<span style="color:var(--text-dim);">未配置</span>'}</div>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        function addProviderForm() {
+            const container = els.providersList;
+            const addBtn = container.querySelector('.add-provider-btn');
+            if (addBtn) addBtn.remove();
+            const div = document.createElement('div');
+            div.className = 'channel-item';
+            div.style.borderColor = '#6366f1';
+            div.innerHTML = `
+        <div class="channel-item-header"><span class="channel-item-name" style="color:#a5b4fc;">新供应商</span></div>
+        <div class="channel-field"><label>名称</label><input type="text" class="prov-name-new" placeholder="如: DeepSeek"></div>
+        <div class="channel-field"><label>ID</label><input type="text" class="prov-id-new" placeholder="如: deepseek-1 (唯一标识)"></div>
+        <div class="channel-field"><label>类型</label>
+            <select class="prov-type-new">
+                <option value="openai">OpenAI (兼容接口)</option>
+                <option value="ollama">Ollama</option>
+                <option value="llama">Llama.cpp</option>
+            </select>
+        </div>
+        <div class="channel-field"><label>服务器地址</label><input type="text" class="prov-url-new" placeholder="如: https://api.deepseek.com/v1"></div>
+        <div class="channel-field"><label>API Key</label><input type="password" class="prov-key-new" placeholder="可选"></div>
+        <div class="channel-actions">
+          <button class="channel-btn save" onclick="commitNewProvider()"><i class="fa-solid fa-check"></i> 创建</button>
+          <button class="channel-btn secondary" onclick="renderProviders()"><i class="fa-solid fa-times"></i> 取消</button>
+        </div>
+      `;
+            container.appendChild(div);
+        }
+
+        function commitNewProvider() {
+            const name = document.querySelector('.prov-name-new')?.value.trim();
+            const id = document.querySelector('.prov-id-new')?.value.trim();
+            const type = document.querySelector('.prov-type-new')?.value || 'openai';
+            const server_address = document.querySelector('.prov-url-new')?.value.trim();
+            const api_key = document.querySelector('.prov-key-new')?.value.trim() || '';
+            if (!name || !id) { toast('名称和ID不能为空', 'error'); return; }
+            if (state.providers.find(p => p.id === id)) { toast('供应商ID已存在', 'error'); return; }
+            (async () => {
+                try {
+                    const r = await axios.post(API + '/providers/add', { id, name, type, server_address, api_key: '' });
+                    if (r.data.status === 'OK') {
+                        state.providers.push(r.data.provider);
+                        state.settings.providers = state.providers;
+                        // 如果有 api_key，通过加密接口单独存储
+                        if (api_key) {
+                            await axios.post(API + '/provider/key', { id, api_key });
+                            r.data.provider.has_key = true;
+                        }
+                        toast('供应商已添加', 'success');
+                        renderProviders();
+                        renderProviderDropdown();
+                    }
+                } catch (e) {
+                    toast('添加失败: ' + (e.response?.data?.error || e.message), 'error');
+                }
+            })();
+        }
+
+        function editProviderForm(providerId) {
+            const provider = state.providers.find(p => p.id === providerId);
+            if (!provider) return;
+            const container = els.providersList;
+            const item = container.querySelector(`[data-provider-id="${providerId}"]`);
+            if (!item) return;
+            const hasKey = provider.has_key !== false;
+            item.innerHTML = `
+        <div class="channel-item-header"><span class="channel-item-name" style="color:#a5b4fc;">编辑供应商</span></div>
+        <div class="channel-field"><label>名称</label><input type="text" class="prov-name-edit" value="${esc(provider.name || '')}"></div>
+        <div class="channel-field"><label>类型</label>
+            <select class="prov-type-edit">
+                <option value="openai" ${provider.type === 'openai' ? 'selected' : ''}>OpenAI (兼容接口)</option>
+                <option value="ollama" ${provider.type === 'ollama' ? 'selected' : ''}>Ollama</option>
+                <option value="llama" ${provider.type === 'llama' ? 'selected' : ''}>Llama.cpp</option>
+            </select>
+        </div>
+        <div class="channel-field"><label>服务器地址</label><input type="text" class="prov-url-edit" value="${esc(provider.server_address || '')}"></div>
+        <div class="channel-field"><label>API Key</label><input type="password" class="prov-key-edit" placeholder="${hasKey ? '(已加密存储，留空保持不变)' : '(输入新的 API Key)'}"></div>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:-4px;padding-left:4px;">API Key 将加密存储在 workspace/tokens/providers/ 目录下</div>
+        <div class="channel-actions">
+          <button class="channel-btn save" onclick="commitEditProvider('${esc(providerId)}')"><i class="fa-solid fa-check"></i> 保存</button>
+          <button class="channel-btn secondary" onclick="renderProviders()"><i class="fa-solid fa-times"></i> 取消</button>
+        </div>
+      `;
+        }
+
+        function commitEditProvider(providerId) {
+            const name = document.querySelector('.prov-name-edit')?.value.trim();
+            const type = document.querySelector('.prov-type-edit')?.value;
+            const server_address = document.querySelector('.prov-url-edit')?.value.trim();
+            const api_key = document.querySelector('.prov-key-edit')?.value.trim();
+            if (!name) { toast('名称不能为空', 'error'); return; }
+            const payload = { id: providerId, name, type, server_address };
+            (async () => {
+                try {
+                    const r = await axios.post(API + '/providers/update', payload);
+                    if (r.data.status === 'OK') {
+                        const idx = state.providers.findIndex(p => p.id === providerId);
+                        if (idx !== -1) state.providers[idx] = r.data.provider;
+                        state.settings.providers = state.providers;
+                        // 如果有 api_key，通过加密接口单独存储
+                        if (api_key) {
+                            await axios.post(API + '/provider/key', { id: providerId, api_key });
+                            r.data.provider.has_key = true;
+                        } else if (api_key === '') {
+                            // 空字符串表示删除 key
+                            await axios.post(API + '/provider/key', { id: providerId, api_key: '' });
+                            r.data.provider.has_key = false;
+                        }
+                        toast('供应商已更新', 'success');
+                        renderProviders();
+                        renderProviderDropdown();
+                        initProvider();
+                    }
+                } catch (e) {
+                    toast('更新失败: ' + (e.response?.data?.error || e.message), 'error');
+                }
+            })();
+        }
+
+        function deleteProvider(providerId) {
+            if (!confirm('确定删除此供应商？')) return;
+            if (state.providers.length <= 1) { toast('不能删除最后一个供应商', 'error'); return; }
+            (async () => {
+                try {
+                    const r = await axios.post(API + '/providers/delete', { id: providerId });
+                    if (r.data.status === 'OK') {
+                        state.providers = state.providers.filter(p => p.id !== providerId);
+                        state.settings.providers = state.providers;
+                        if (state.currentProviderId === providerId) {
+                            await loadProviders();
+                        }
+                        toast('供应商已删除', 'success');
+                        renderProviders();
+                        renderProviderDropdown();
+                    }
+                } catch (e) {
+                    toast('删除失败: ' + (e.response?.data?.error || e.message), 'error');
+                }
+            })();
+        }
+
+        function openProvidersManager() {
+            els.providerDropdownMenu.classList.remove('show');
+            openOverlay();
+            // 切换到供应商标签
+            $$('.overlay-tab').forEach(b => b.classList.remove('active'));
+            $$('.overlay-panel').forEach(p => p.classList.remove('active'));
+            const tab = document.querySelector('.overlay-tab[data-otab="providers"]');
+            if (tab) tab.classList.add('active');
+            const panel = document.getElementById('opanel-providers');
+            if (panel) panel.classList.add('active');
+            renderProviders();
         }
 
         // ============ 模型列表 ============
@@ -3462,8 +3912,31 @@
             toast(`文件自动展开已${fb.autoExpand ? '开启' : '关闭'}`, 'info');
         };
 
+        // ============ 主题切换 ============
+        function applyTheme(theme) {
+            state.theme = theme;
+            document.documentElement.setAttribute('data-theme', theme);
+            localStorage.setItem('theme', theme);
+            const icon = els.themeToggleBtn?.querySelector('i');
+            if (icon) {
+                icon.className = theme === 'dark' ? 'fa-solid fa-circle-half-stroke' : 'fa-solid fa-circle-half-stroke';
+            }
+        }
+
+        function toggleTheme() {
+            const newTheme = state.theme === 'dark' ? 'light' : 'dark';
+            applyTheme(newTheme);
+            toast(`已切换到${newTheme === 'dark' ? '深色' : '浅色'}主题`, 'info');
+        }
+
+        els.themeToggleBtn.onclick = toggleTheme;
+
+        // 初始化主题
+        applyTheme(state.theme);
+
         // ============ 初始化 ============
         async function init() {
+            applyTheme(state.theme);
             await loadSettings();
             state.user = state.settings.user_name || 'User'; els.currentUserDisplay.textContent = state.user;
             state.agentName = state.settings.agent_name || 'assistant';

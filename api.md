@@ -49,7 +49,40 @@
 
 * **响应 (200 OK)**: `{"status": "OK"}`
 
-### 1.5 发送控制指令
+### 1.5 切换模型供应商
+
+* **路径**: `/api/provider`
+* **方法**: `POST`
+* **描述**: 运行时动态切换 LLM 供应商（OpenAI/Ollama/Llama.cpp），并更新配置文件。
+* **请求 Body (JSON)**:
+
+```json
+{
+  "provider": "openai",
+  "server_address": "http://localhost:11434",
+  "api_key": ""
+}
+
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `provider` | string | 否 | 供应商类型：`openai`（默认）、`ollama`、`llama` |
+| `server_address` | string | 否 | LLM 服务地址，不传则使用当前配置 |
+| `api_key` | string | 否 | API 密钥，不传则使用当前密钥 |
+
+* **响应 (200 OK)**:
+
+```json
+{
+  "status": "OK",
+  "provider": "openai",
+  "server_address": "http://localhost:11434"
+}
+
+```
+
+### 1.6 发送控制指令
 
 * **路径**: `/api/control`
 * **方法**: `POST`
