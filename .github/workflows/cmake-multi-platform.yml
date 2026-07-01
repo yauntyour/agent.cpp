@@ -54,6 +54,8 @@ jobs:
         run: |
           brew update
           brew install cmake ninja curl boost libsodium
+          brew --prefix libsodium
+          ls -la $(brew --prefix libsodium)/lib/ || true
 
       # ---------- Windows (MSYS2) 依赖 ----------
       - name: Setup MSYS2 and install dependencies (Windows)

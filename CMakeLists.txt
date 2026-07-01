@@ -16,30 +16,43 @@ find_package(CURL REQUIRED)
 # 查找 libsodium
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)
-    pkg_check_modules(SODIUM libsodium)
+    pkg_check_modules(SODIUM QUIET IMPORTED_TARGET libsodium)
 endif()
 if(NOT SODIUM_FOUND)
-    find_path(SODIUM_INCLUDE_DIR sodium.h
-        HINTS
-            ${MSYS2_DIR}/mingw64/include
-            /mingw64/include
-            /usr/include
-            /usr/local/include
-            /opt/homebrew/include
-    )
+    find_package(Sodium CONFIG QUIET)
+endif()
+if(NOT SODIUM_FOUND)
     find_library(SODIUM_LIBRARY sodium
         HINTS
             ${MSYS2_DIR}/mingw64/lib
             /mingw64/lib
-            /usr/lib
-            /usr/local/lib
             /opt/homebrew/lib
+            /usr/local/lib
     )
-    if(SODIUM_INCLUDE_DIR AND SODIUM_LIBRARY)
+    find_path(SODIUM_INCLUDE_DIR sodium.h
+        HINTS
+            ${MSYS2_DIR}/mingw64/include
+            /mingw64/include
+            /opt/homebrew/include
+            /usr/local/include
+    )
+    if(SODIUM_LIBRARY AND SODIUM_INCLUDE_DIR)
         set(SODIUM_FOUND TRUE)
-        set(SODIUM_INCLUDE_DIRS ${SODIUM_INCLUDE_DIR})
         set(SODIUM_LIBRARIES ${SODIUM_LIBRARY})
+        set(SODIUM_INCLUDE_DIRS ${SODIUM_INCLUDE_DIR})
     endif()
+endif()
+if(NOT SODIUM_FOUND)
+    message(FATAL_ERROR "Could not find libsodium. On macOS run: brew install libsodium")
+endif()
+message(STATUS "Sodium found: LIBRARY=${SODIUM_LIBRARIES} INCLUDE=${SODIUM_INCLUDE_DIRS}")
+if(TARGET PkgConfig::SODIUM)
+    message(STATUS "Using PkgConfig::SODIUM imported target")
+elseif(TARGET Sodium::sodium)
+    message(STATUS "Using Sodium::sodium imported target")
+elseif(TARGET sodium)
+    message(STATUS "Using sodium imported target")
+    add_library(Sodium::sodium ALIAS sodium)
 endif()
 
 # ---------- Boost (header-only) ----------
@@ -65,15 +78,21 @@ target_link_libraries(app PRIVATE
     CURL::libcurl
     Boost::boost
     nlohmann_json::nlohmann_json
-    ${SODIUM_LIBRARIES}
 )
+if(TARGET PkgConfig::SODIUM)
+    target_link_libraries(app PRIVATE PkgConfig::SODIUM)
+elseif(TARGET Sodium::sodium)
+    target_link_libraries(app PRIVATE Sodium::sodium)
+elseif(SODIUM_LIBRARIES)
+    target_link_libraries(app PRIVATE ${SODIUM_LIBRARIES})
+endif()
 
 if(WIN32)
     target_link_libraries(app PRIVATE ws2_32 wsock32)
 endif()
 
 # libsodium 头文件
-if(SODIUM_INCLUDE_DIRS)
+if(SODIUM_INCLUDE_DIRS AND NOT TARGET PkgConfig::SODIUM AND NOT TARGET Sodium::sodium)
     target_include_directories(app PRIVATE ${SODIUM_INCLUDE_DIRS})
 endif()
 
