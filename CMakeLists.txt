@@ -43,7 +43,14 @@ if(NOT SODIUM_FOUND)
     endif()
 endif()
 if(NOT SODIUM_FOUND)
-    message(FATAL_ERROR "Could not find libsodium. On macOS run: brew install libsodium")
+    message(STATUS "libsodium not found on system, building from source via FetchContent")
+    FetchContent_Declare(
+        libsodium
+        GIT_REPOSITORY https://github.com/jedisct1/libsodium.git
+        GIT_TAG 1.0.20-RELEASE
+    )
+    set(SODIUM_FOUND TRUE)
+    FetchContent_MakeAvailable(libsodium)
 endif()
 message(STATUS "Sodium found: LIBRARY=${SODIUM_LIBRARIES} INCLUDE=${SODIUM_INCLUDE_DIRS}")
 if(TARGET PkgConfig::SODIUM)

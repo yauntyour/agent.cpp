@@ -759,8 +759,8 @@ namespace crypto_unit
         }
         SecureString(const SecureString &other) = default;
         SecureString(SecureString &&other) noexcept = default;
-        SecureString &operator=(const SecureString &other) = default;
-        SecureString &operator=(SecureString &&other) noexcept = default;
+        SecureString &operator=(const SecureString &other) = delete;
+        SecureString &operator=(SecureString &&other) noexcept = delete;
 
         bool empty() const { return encrypted_.empty(); }
         size_t encrypted_size() const { return encrypted_.size(); }
