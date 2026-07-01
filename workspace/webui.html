@@ -2421,7 +2421,7 @@
             d.className = type === 'error' ? 'log-error' : type === 'success' ? 'log-success' : '';
             els.systemLogs.appendChild(d); els.systemLogs.scrollTop = els.systemLogs.scrollHeight;
         }
-        function esc(s) { if (!s) return ''; return s.replace(/[&<>]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[m]); }
+        function esc(s) { if (!s) return ''; return s.replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[m]); }
         function fixToolTags(text) {
             if (!text) return text;
             let r = text.replace(/<system_output>([\s\S]*?)<\/system_output>/g, (_, content) => {
@@ -3759,13 +3759,13 @@
 
             renderBreadcrumb(path) {
                 const parts = path.split('/').filter(Boolean);
-                const parentPath = parts.length > 0 ? '/' + parts.slice(0, -1).join('/') : '/';
+                const parentPath = parts.length > 1 ? parts.slice(0, -1).join('/') : '';
                 const isRoot = parts.length === 0;
                 let html = `<button class="fb-parent-btn" data-path="${esc(parentPath)}" title="返回上一级" ${isRoot ? 'disabled' : ''}><i class="fa-solid fa-arrow-up"></i></button>`;
-                html += '<span class="fb-crumb" data-path="/"><i class="fa-solid fa-house"></i></span>';
+                html += '<span class="fb-crumb" data-path=""><i class="fa-solid fa-house"></i></span>';
                 let acc = '';
                 for (const p of parts) {
-                    acc += '/' + p;
+                    acc += (acc ? '/' : '') + p;
                     html += `<span class="fb-crumb-sep">›</span><span class="fb-crumb" data-path="${esc(acc)}">${esc(p)}</span>`;
                 }
                 els.fbBreadcrumb.innerHTML = html;
