@@ -25,6 +25,7 @@ if(NOT SODIUM_FOUND)
             /mingw64/include
             /usr/include
             /usr/local/include
+            /opt/homebrew/include
     )
     find_library(SODIUM_LIBRARY sodium
         HINTS
@@ -32,6 +33,7 @@ if(NOT SODIUM_FOUND)
             /mingw64/lib
             /usr/lib
             /usr/local/lib
+            /opt/homebrew/lib
     )
     if(SODIUM_INCLUDE_DIR AND SODIUM_LIBRARY)
         set(SODIUM_FOUND TRUE)

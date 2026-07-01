@@ -81,7 +81,11 @@ jobs:
         run: |
           mkdir build
           cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release
+          EXTRA_FLAGS=""
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            EXTRA_FLAGS="-DCMAKE_PREFIX_PATH=$(brew --prefix)"
+          fi
+          cmake .. -DCMAKE_BUILD_TYPE=Release $EXTRA_FLAGS
 
       # ---------- 编译 ----------
       - name: Build (Windows MSYS2)
@@ -113,29 +117,6 @@ jobs:
         run: |
           cd build
           cpack -G TGZ
-
-      # ---------- 重命名 Nightly 包（去掉版本号） ----------
-      - name: Rename package for Nightly (Windows MSYS2)
-        if: (github.event_name == 'schedule' || github.event_name ==
-          'workflow_dispatch') && runner.os == 'Windows'
-        shell: msys2 {0}
-        run: |
-          cd build
-          OLD_NAME=$(ls *${{ matrix.asset_suffix }} | head -1)
-          NEW_NAME="${{ matrix.artifact_name }}${{ matrix.asset_suffix }}"
-          mv "$OLD_NAME" "$NEW_NAME"
-          echo "Renamed $OLD_NAME -> $NEW_NAME"
-
-      - name: Rename package for Nightly (Unix)
-        if: (github.event_name == 'schedule' || github.event_name ==
-          'workflow_dispatch') && runner.os != 'Windows'
-        shell: bash
-        run: |
-          cd build
-          OLD_NAME=$(ls *${{ matrix.asset_suffix }} | head -1)
-          NEW_NAME="${{ matrix.artifact_name }}${{ matrix.asset_suffix }}"
-          mv "$OLD_NAME" "$NEW_NAME"
-          echo "Renamed $OLD_NAME -> $NEW_NAME"
 
       # ---------- 确定最终包名 ----------
       - name: Determine package file name
