@@ -14,52 +14,50 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 find_package(CURL REQUIRED)
 
 # 查找 libsodium
+include(FetchContent)
+
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)
-    pkg_check_modules(SODIUM QUIET IMPORTED_TARGET libsodium)
+    pkg_check_modules(SODIUM QUIET libsodium)
 endif()
 if(NOT SODIUM_FOUND)
     find_package(Sodium CONFIG QUIET)
 endif()
-if(NOT SODIUM_FOUND)
-    find_library(SODIUM_LIBRARY sodium
-        HINTS
-            ${MSYS2_DIR}/mingw64/lib
-            /mingw64/lib
-            /opt/homebrew/lib
-            /usr/local/lib
-    )
-    find_path(SODIUM_INCLUDE_DIR sodium.h
-        HINTS
-            ${MSYS2_DIR}/mingw64/include
-            /mingw64/include
-            /opt/homebrew/include
-            /usr/local/include
-    )
-    if(SODIUM_LIBRARY AND SODIUM_INCLUDE_DIR)
-        set(SODIUM_FOUND TRUE)
-        set(SODIUM_LIBRARIES ${SODIUM_LIBRARY})
-        set(SODIUM_INCLUDE_DIRS ${SODIUM_INCLUDE_DIR})
-    endif()
-endif()
-if(NOT SODIUM_FOUND)
+
+# 始终通过 find_library 获取完整路径，避免 macOS 上 -lsodium 找不到库的问题
+set(_sodium_hints
+    ${SODIUM_LIBRARY_DIRS}
+    ${MSYS2_DIR}/mingw64/lib
+    /mingw64/lib
+    /opt/homebrew/lib
+    /usr/local/lib
+    /usr/lib
+    /usr/lib/x86_64-linux-gnu
+)
+find_library(SODIUM_LIBRARY sodium HINTS ${_sodium_hints})
+
+set(_sodium_include_hints
+    ${SODIUM_INCLUDE_DIRS}
+    ${MSYS2_DIR}/mingw64/include
+    /mingw64/include
+    /opt/homebrew/include
+    /usr/local/include
+    /usr/include
+)
+find_path(SODIUM_INCLUDE_DIR sodium.h HINTS ${_sodium_include_hints})
+
+if(SODIUM_LIBRARY AND SODIUM_INCLUDE_DIR)
+    set(SODIUM_INCLUDE_DIRS ${SODIUM_INCLUDE_DIR})
+    set(SODIUM_LIBRARIES ${SODIUM_LIBRARY})
+    message(STATUS "Found libsodium: ${SODIUM_LIBRARY}")
+else()
     message(STATUS "libsodium not found on system, building from source via FetchContent")
     FetchContent_Declare(
         libsodium
         GIT_REPOSITORY https://github.com/jedisct1/libsodium.git
         GIT_TAG 1.0.20-RELEASE
     )
-    set(SODIUM_FOUND TRUE)
     FetchContent_MakeAvailable(libsodium)
-endif()
-message(STATUS "Sodium found: LIBRARY=${SODIUM_LIBRARIES} INCLUDE=${SODIUM_INCLUDE_DIRS}")
-if(TARGET PkgConfig::SODIUM)
-    message(STATUS "Using PkgConfig::SODIUM imported target")
-elseif(TARGET Sodium::sodium)
-    message(STATUS "Using Sodium::sodium imported target")
-elseif(TARGET sodium)
-    message(STATUS "Using sodium imported target")
-    add_library(Sodium::sodium ALIAS sodium)
 endif()
 
 # ---------- Boost (header-only) ----------
@@ -67,7 +65,6 @@ set(Boost_NO_BOOST_CMAKE ON)
 find_package(Boost REQUIRED)
 
 # ---------- nlohmann_json (header-only) ----------
-include(FetchContent)
 FetchContent_Declare(
     nlohmann_json
     GIT_REPOSITORY https://github.com/nlohmann/json.git
@@ -86,21 +83,17 @@ target_link_libraries(app PRIVATE
     Boost::boost
     nlohmann_json::nlohmann_json
 )
-if(TARGET PkgConfig::SODIUM)
-    target_link_libraries(app PRIVATE PkgConfig::SODIUM)
-elseif(TARGET Sodium::sodium)
-    target_link_libraries(app PRIVATE Sodium::sodium)
-elseif(SODIUM_LIBRARIES)
+if(SODIUM_LIBRARIES)
     target_link_libraries(app PRIVATE ${SODIUM_LIBRARIES})
+    if(SODIUM_INCLUDE_DIRS)
+        target_include_directories(app PRIVATE ${SODIUM_INCLUDE_DIRS})
+    endif()
+elseif(TARGET sodium)
+    target_link_libraries(app PRIVATE sodium)
 endif()
 
 if(WIN32)
     target_link_libraries(app PRIVATE ws2_32 wsock32)
-endif()
-
-# libsodium 头文件
-if(SODIUM_INCLUDE_DIRS AND NOT TARGET PkgConfig::SODIUM AND NOT TARGET Sodium::sodium)
-    target_include_directories(app PRIVATE ${SODIUM_INCLUDE_DIRS})
 endif()
 
 # ========== 安装规则 ==========
