@@ -24,8 +24,9 @@ namespace app
     // 默认配置模板 —— settings.json 找不到时自动生成
     static const std::string DEFAULT_SETTINGS = R"({
     "agent_name": "assistant",
-    "auto_expand_files": false,
-    "auto_summary_threshold": 90,
+    "filesystem": {
+        "auto_expand": false
+    },
     "channels": [
         {
             "name": "Telegram",
@@ -389,7 +390,7 @@ namespace app
             uint8_t password_hash[SHA3_256_DIGEST_SIZE];
             if (!SHA3_256((const uint8_t *)password.c_str(), password.length(), password_hash))
                 exit(1);
-            run_unit::settings.emplace("password", to_hex_string(password_hash, SHA3_256_DIGEST_SIZE));
+            run_unit::settings.emplace("webui_password", to_hex_string(password_hash, SHA3_256_DIGEST_SIZE));
         }
 
         Admin = run_unit::settings["user_name"].get<std::string>();

@@ -1,7 +1,8 @@
 {
     "agent_name": "assistant",
-    "auto_expand_files": false,
-    "auto_summary_threshold": 90,
+    "filesystem": {
+        "auto_expand": false
+    },
     "channels": [
         {
             "config": {
@@ -34,7 +35,7 @@
     "max_context": 1048576,
     "max_mpc_rounds": 5,
     "model": "uGemma4",
-    "password": "a2aba198385559c15dc12398e197d556ef3cd6b45329d003b8886a0eecedec05",
+    "webui_password": "a2aba198385559c15dc12398e197d556ef3cd6b45329d003b8886a0eecedec05",
     "prompt": "agent.txt",
     "providers": [
         {

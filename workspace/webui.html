@@ -2760,7 +2760,7 @@
       <div class="setting-row"><label>上下文窗口大小</label><input type="number" id="s-max_context" value="${s.max_context || 128000}" min="1000"></div>
       <div class="setting-row"><label>自动记忆摘要阈值 (%)</label><input type="number" id="s-auto_summary_threshold" value="${s.auto_summary_threshold || 0}" min="0" max="100"></div>
       <div style="font-size:11px;color:var(--text-dim);margin-top:-6px;padding-left:4px;">上下文使用超过此百分比时自动生成记忆摘要。设为 0 禁用</div>
-      <div class="setting-row check-row"><input type="checkbox" id="s-auto_expand_files" ${s.auto_expand_files !== false ? 'checked' : ''}><label for="s-auto_expand_files">文件浏览器自动展开（工具调用时）</label></div>
+      <div class="setting-row check-row"><input type="checkbox" id="s-auto_expand" ${s.filesystem?.auto_expand !== false ? 'checked' : ''}><label for="s-auto_expand">文件浏览器自动展开（工具调用时）</label></div>
     </div>
     <div class="setting-group">
       <div class="setting-group-title">频道配置</div>
@@ -2784,7 +2784,7 @@
                 current_provider: state.settings.current_provider || state.currentProviderId || 'openai-default',
                 providers: state.settings.providers || state.providers || [],
                 stream: $('#s-stream')?.checked || false,
-                auto_expand_files: $('#s-auto_expand_files')?.checked !== false,
+                filesystem: { auto_expand: $('#s-auto_expand')?.checked !== false },
                 max_mpc_rounds: parseInt($('#s-max_mpc_rounds')?.value) || 5,
                 max_context: parseInt($('#s-max_context')?.value) || 128000,
                 auto_summary_threshold: parseInt($('#s-auto_summary_threshold')?.value) || 0,
@@ -3944,7 +3944,7 @@
             state.contextUsage.max = state.settings.max_context || 128000;
             await getModels(); await loadTools(); await loadTodos(); await loadChannels(); await loadSessions();
             // 初始化文件浏览器设置
-            fb.autoExpand = state.settings.auto_expand_files !== false;
+            fb.autoExpand = state.settings.filesystem?.auto_expand !== false;
             fb.updateAutoToggleUI();
         }
         init();
