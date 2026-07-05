@@ -29,44 +29,45 @@ namespace app
     },
     "channels": [
         {
+            "config": {
+                "backend_url": "http://127.0.0.1:8080/api/input",
+                "model": "default",
+                "proxy": "http://127.0.0.1:10809",
+                "think": false,
+                "timeout": 600
+            },
             "name": "Telegram",
             "path": "sys/tg_bot.py",
-            "status": "inactive",
-            "user_count": 1,
-            "config": {
-                "proxy": "http://127.0.0.1:10809",
-                "backend_url": "http://127.0.0.1:8080/api/input",
-                "timeout": 600,
-                "think": false,
-                "model": "default"
-            }
+            "status": "active",
+            "user_count": 1
         },
         {
+            "config": {
+                "backend_url": "http://127.0.0.1:8080/api/input",
+                "ilink_base": "https://ilinkai.weixin.qq.com",
+                "model": "default",
+                "think": false,
+                "timeout": 600
+            },
             "name": "WeChat",
             "path": "sys/wx_bot.py",
-            "status": "inactive",
-            "user_count": 1,
-            "config": {
-                "ilink_base": "https://ilinkai.weixin.qq.com",
-                "backend_url": "http://127.0.0.1:8080/api/input",
-                "timeout": 600,
-                "think": false,
-                "model": "default"
-            }
+            "status": "active",
+            "user_count": 1
         }
     ],
+    "current_provider": "openai-default",
     "max_context": 1048576,
     "max_mpc_rounds": 5,
     "model": "uGemma4",
+    "webui_password": "a2aba198385559c15dc12398e197d556ef3cd6b45329d003b8886a0eecedec05",
     "prompt": "agent.txt",
-    "current_provider": "openai-default",
     "providers": [
         {
+            "has_key": false,
             "id": "openai-default",
             "name": "OpenAI",
-            "type": "openai",
             "server_address": "http://localhost:11434",
-            "has_key": false
+            "type": "openai"
         }
     ],
     "stream": true,
@@ -113,11 +114,15 @@ namespace app
             // 日志本身不抛出异常
         }
     }
-    static size_t im_token_len = sizeof("<|im_start|>\n<|im_end|>") - 1;
     static std::string tools_list_str; // 工具列表的字符串表示
 
     // ==================== 模型供应商支持 ====================
-    enum class ProviderType { OpenAI, Ollama, Llama };
+    enum class ProviderType
+    {
+        OpenAI,
+        Ollama,
+        Llama
+    };
     static ProviderType current_provider = ProviderType::OpenAI;
     static LLMProviders::OpenAIClient openai_client;
     static LLMProviders::OllamaClient ollama_client;
@@ -245,7 +250,7 @@ namespace app
     }
 
     // 根据 provider id 从 providers 数组中查找
-    json* find_provider(const std::string &provider_id)
+    json *find_provider(const std::string &provider_id)
     {
         if (!run_unit::settings.contains("providers"))
             return nullptr;
@@ -305,8 +310,7 @@ namespace app
                     {"name", "OpenAI"},
                     {"type", old_provider},
                     {"server_address", old_server},
-                    {"has_key", false}
-                };
+                    {"has_key", false}};
                 run_unit::settings["providers"] = json::array({new_provider});
                 run_unit::settings["current_provider"] = "openai-default";
                 tool_unit::writeFile(run_unit::setting_file_path, run_unit::settings.dump(4));
@@ -570,8 +574,8 @@ namespace app
             router.on("/api/providers/delete", handle_providers_delete);
 
             // 供应商 API Key 加密存储 API
-            router.on("/api/provider/key", handle_provider_key_set);         // POST — 加密存储
-            router.on("/api/provider/key/:id", handle_provider_key_get);     // GET — 解密读取
+            router.on("/api/provider/key", handle_provider_key_set);     // POST — 加密存储
+            router.on("/api/provider/key/:id", handle_provider_key_get); // GET — 解密读取
 
             router.on("/api/input", handle_input_packed);
             router.on("/api/session", handle_session_list);
@@ -582,7 +586,7 @@ namespace app
             router.on("/api/session/clear", handle_session_clear);
 
             router.on("/api/channels", handle_channels_list);
-            router.on("/api/channel/token", handle_channel_token_set);    // POST — 加密存储
+            router.on("/api/channel/token", handle_channel_token_set);       // POST — 加密存储
             router.on("/api/channel/token/:name", handle_channel_token_get); // GET — 解密读取
             router.on("/api/tools", handle_tools_list);
             router.on("/api/tools/toggle", handle_tools_toggle);
@@ -1123,7 +1127,7 @@ namespace app
                     if (std::filesystem::exists(file_path))
                         std::filesystem::remove(file_path);
                     output = build_http_response(200, "application/json",
-                                                 json{{"status","deleted"},{"id",id}}.dump());
+                                                 json{{"status", "deleted"}, {"id", id}}.dump());
                 }
                 else
                 {
@@ -1136,7 +1140,7 @@ namespace app
                     }
                     tool_unit::writeFile(file_path, encrypted);
                     output = build_http_response(200, "application/json",
-                                                 json{{"status","saved"},{"id",id}}.dump());
+                                                 json{{"status", "saved"}, {"id", id}}.dump());
                 }
                 return rt::FLAG_DONE;
             }
@@ -1167,7 +1171,7 @@ namespace app
                 if (!std::filesystem::exists(file_path))
                 {
                     output = build_http_response(404, "application/json",
-                                                 json{{"error","api_key not found"},{"id",id}}.dump());
+                                                 json{{"error", "api_key not found"}, {"id", id}}.dump());
                     return rt::FLAG_ERROR;
                 }
 
@@ -1183,7 +1187,7 @@ namespace app
                 }
 
                 output = build_http_response(200, "application/json",
-                                             json{{"id",id},{"api_key",api_key}}.dump());
+                                             json{{"id", id}, {"api_key", api_key}}.dump());
                 return rt::FLAG_DONE;
             }
             catch (const std::exception &e)
@@ -1231,7 +1235,7 @@ namespace app
                     if (std::filesystem::exists(file_path))
                         std::filesystem::remove(file_path);
                     output = build_http_response(200, "application/json",
-                                                 json{{"status","deleted"},{"name",name}}.dump());
+                                                 json{{"status", "deleted"}, {"name", name}}.dump());
                 }
                 else
                 {
@@ -1244,7 +1248,7 @@ namespace app
                     }
                     tool_unit::writeFile(file_path, encrypted);
                     output = build_http_response(200, "application/json",
-                                                 json{{"status","saved"},{"name",name}}.dump());
+                                                 json{{"status", "saved"}, {"name", name}}.dump());
                 }
                 return rt::FLAG_DONE;
             }
@@ -1276,7 +1280,7 @@ namespace app
                 if (!std::filesystem::exists(file_path))
                 {
                     output = build_http_response(404, "application/json",
-                                                 json{{"error","token not found"},{"name",name}}.dump());
+                                                 json{{"error", "token not found"}, {"name", name}}.dump());
                     return rt::FLAG_ERROR;
                 }
 
@@ -1292,7 +1296,7 @@ namespace app
                 }
 
                 output = build_http_response(200, "application/json",
-                                             json{{"name",name},{"token",token}}.dump());
+                                             json{{"name", name}, {"token", token}}.dump());
                 return rt::FLAG_DONE;
             }
             catch (const std::exception &e)
@@ -1302,7 +1306,6 @@ namespace app
                 return rt::FLAG_ERROR;
             }
         }
-
         int handle_tools_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
             output = build_http_response(200, "application/json", run_unit::tools_list.dump());
