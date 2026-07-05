@@ -22,13 +22,13 @@
 
 ```bash
 #Linux：
-sudo apt-get install -y libcurl4-openssl-dev libboost-dev
+sudo apt-get install -y libcurl4-openssl-dev libboost-dev libsodium-dev
 
 #Windows （msys2）：
-pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja mingw-w64-x86_64-curl mingw-w64-x86_64-boost
+pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja mingw-w64-x86_64-curl mingw-w64-x86_64-boost mingw-w64-x86_64-libsodium
 
 #MacOS：
-brew install cmake ninja curl boost
+brew install cmake ninja curl boost libsodium
 ```
 
 懒狗安装指令：
@@ -40,7 +40,7 @@ rm -rf ./* && git clone --recurse-submodules https://github.com/yauntyour/agent.
 ## 核心特性
 
 - **极致轻量**：核心由 `agent.hpp` 单头文件 + `app.cpp` 入口构成，充分利用 C++20 零拷贝与栈上分配特性，运行开销极低。
-- **多供应商支持**：内置 OpenAI（标准接口）、Ollama、Llama.cpp 三种 LLM 供应商，支持 WebUI 运行时动态切换，无需重启服务。
+- **多供应商支持**：支持 OpenAI（标准接口）、Ollama、Llama.cpp 三种 LLM 供应商，支持 WebUI 运行时动态切换及多供应商配置并存，无需重启服务。
 - **工作区隔离**：所有用户资源（工具、系统脚本、会话、记忆、提示词）统一存放于 `workspace/` 目录下，结构与部署清晰。
 - **文件使用追踪**：系统自动追踪工具调用中访问过的文件，WebUI 实时展示文件使用状态，防止误操作。
 - **图片资产管理**：Base64 图片数据自动从会话记录中剥离并存储至 `workspace/assets/messages/`，大幅缩减会话文件体积。
@@ -49,6 +49,7 @@ rm -rf ./* && git clone --recurse-submodules https://github.com/yauntyour/agent.
 - **100% 可控**：系统提示词（System Prompt）完全开放自定义，无隐藏魔法指令。
 - **轻量化扩展设计**：工具直接调用 Python CLI 脚本，避免加载臃肿的技能包描述，最大限度节省上下文 Token。
 - **会话记忆系统**：支持自动/手动将对话历史摘要为记忆，并实时更新会话上下文。
+- **频道支持**：内置 Telegram 与 WeChat 频道驱动，支持多频道并发接入与独立会话记忆。
 - **会话记录热加载**：切换会话或频道时，记忆与聊天记录无缝动态加载，图片数据自动恢复。
 - **记忆自动演进**：当会话已存在记忆时，系统会基于既有记忆与最新交互自动优化并更新记忆内容，实现经验积累的闭环。
 
@@ -60,16 +61,21 @@ rm -rf ./* && git clone --recurse-submodules https://github.com/yauntyour/agent.
 .
 ├── agent.hpp                  # Agent 主循环、会话管理、工具调度、LLM 通信核心
 ├── app.cpp                    # 程序入口，初始化 HTTP 服务与 API 路由
-├── servic.cpp                 # WebUI 后端服务与 API 处理
-├── webui.html                 # WebUI 前端页面
+├── servic.cpp/                # HTTP 服务层 (git submodule)，基于 C++20 coroutine + Boost.Asio
+├── base64.hpp                 # Base64 编解码工具
 ├── CMakeLists.txt             # CMake 构建配置（含 FetchContent + CPack）
+├── build.py                   # 简易构建脚本（g++ 直接编译）
 ├── settings.json              # 系统配置文件
+├── api.md                     # REST API 接口文档
+├── release.md                 # 版本更新日志
 ├── assets/                    # 仓库级资源（WebUI 截图）
 │   ├── WebUI_1.png            # WebUI 截图
 │   └── WebUI_2.png            # 文件系统预览截图
 │
 └── workspace/                 # 工作区根目录（所有用户资源集中管理）
     ├── agent.txt              # 系统提示词文件（100% 自定义）
+    ├── webui.html             # WebUI 前端页面
+    ├── webui.log              # WebUI 错误日志
     ├── sessions/              # 会话记录持久化（JSON，图片已剥离）
     ├── memorys/               # 会话记忆持久化
     ├── assets/                # 运行态资源
@@ -78,8 +84,10 @@ rm -rf ./* && git clone --recurse-submodules https://github.com/yauntyour/agent.
     ├── sys/                   # 系统指令、工具调度与通信核心
     │   ├── cs.txt             # CS 指令系统帮助
     │   ├── tg_bot.py          # Telegram 频道驱动
+    │   ├── wx_bot.py          # WeChat 频道驱动
     │   ├── data.json          # 用量统计数据
     │   └── todos.json         # 待办事项
+    ├── tokens/                # 加密的 API Key 存储
     └── tools/                 # 自定义 Python 工具目录
         ├── tools.json         # 工具注册清单
         ├── image-drawer/      # 图像生成工具
@@ -216,19 +224,51 @@ def print_tool_help():
     "user_name": "Yauntyours",                   // 用户名称
     "agent_name": "assistant",                   // Agent 角色名
     "workspace": "./workspace/",                 // 工作区根目录（含 sessions/ memorys/ sys/ tools/ 等子目录）
-    "provider": "openai",                        // 模型供应商：openai（标准接口）/ ollama / llama
-    "server_address": "http://localhost:11434",  // LLM 服务地址（兼容 OpenAI API 格式）
     "model": "uGemma4",                          // 模型名称
     "prompt": "agent.txt",                       // 系统提示词文件路径（相对于 workspace）
     "stream": true,                              // 是否启用流式响应（SSE 逐 Token 输出）
     "max_mpc_rounds": 5,                         // 最大多轮工具调用轮次
     "max_context": 1048576,                      // 触发自动记忆摘要的上下文长度阈值（字节）
+    "webui_password": "",                        // WebUI 登录密码（SHA3-256 哈希后存储）
+    "filesystem": {
+        "auto_expand": false                     // 是否自动展开文件系统面板
+    },
+    "current_provider": "openai-default",        // 当前使用的供应商 ID（对应 providers 数组中的条目）
+    "providers": [
+        {
+            "id": "openai-default",              // 供应商唯一标识
+            "type": "openai",                    // 供应商类型：openai / ollama / llama
+            "name": "OpenAI",                    // 供应商显示名称
+            "server_address": "http://localhost:11434",  // LLM 服务地址（兼容 OpenAI API 格式）
+            "has_key": false                     // 是否已配置 API Key
+        }
+    ],
     "channels": [
         {
             "name": "Telegram",
             "status": "active",
             "user_count": 1,
-            "path": "sys/tg_bot.py"              // 频道对应的驱动脚本（相对于 workspace）
+            "path": "sys/tg_bot.py",             // 频道对应的驱动脚本（相对于 workspace）
+            "config": {
+                "backend_url": "http://127.0.0.1:8080/api/input",
+                "model": "default",
+                "proxy": "http://127.0.0.1:10809",
+                "think": false,
+                "timeout": 600
+            }
+        },
+        {
+            "name": "WeChat",
+            "status": "active",
+            "user_count": 1,
+            "path": "sys/wx_bot.py",
+            "config": {
+                "backend_url": "http://127.0.0.1:8080/api/input",
+                "ilink_base": "https://ilinkai.weixin.qq.com",
+                "model": "default",
+                "think": false,
+                "timeout": 600
+            }
         }
     ]
 }
@@ -237,5 +277,10 @@ def print_tool_help():
 ## 授权与致谢
 
 本项目遵循 [Apache-2.0](LICENSE) 协议。在使用或分发时，请保留原始版权与许可声明。若您认可本项目的价值，欢迎点亮 Star ⭐，这对我是极大的鼓励。
+
+## 更多文档
+
+- [API 接口文档](api.md) — 完整的 REST API 接口说明
+- [版本更新日志](release.md) — 各版本更新内容与构建说明
 
 ---
