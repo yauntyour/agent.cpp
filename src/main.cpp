@@ -36,6 +36,7 @@ std::atomic<bool> g_shutdown{false};
 
 void signal_handler(int signum) {
     g_shutdown.store(true);
+    g_is_shutting_down.store(true);
 }
 
 void print_banner() {

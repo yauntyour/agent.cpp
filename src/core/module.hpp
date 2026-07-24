@@ -25,6 +25,8 @@ enum class ModuleState {
     Terminated
 };
 
+inline std::atomic<bool> g_is_shutting_down{false};
+
 template<typename T>
 concept ModuleComponent = requires(T m) {
     { m.name() } -> std::convertible_to<std::string_view>;
@@ -52,9 +54,13 @@ public:
     ~Module() override {
         if (m_state != ModuleState::Terminated) {
             try { shutdown(); } catch (const std::exception& e) {
-                LOG_WARN(static_name(), std::string("Exception during shutdown: ") + e.what());
+                if (!g_is_shutting_down.load()) {
+                    try { LOG_WARN(static_name(), std::string("Exception during shutdown: ") + e.what()); } catch (...) {}
+                }
             } catch (...) {
-                LOG_WARN(static_name(), "Unknown exception during shutdown");
+                if (!g_is_shutting_down.load()) {
+                    try { LOG_WARN(static_name(), "Unknown exception during shutdown"); } catch (...) {}
+                }
             }
         }
     }

@@ -333,6 +333,7 @@ void System::setup_commands() {
     register_command({"/quit", "Exit agent", "/quit", {"/q", "/exit", "/bye"},
         [this](const std::vector<std::string>&) {
             std::cout << "Shutting down..." << std::endl;
+            g_is_shutting_down.store(true);
             shutdown_system();
             exit(0);
         }});
