@@ -3,6 +3,11 @@
 #include "components/session/session.hpp"
 #include "components/agent/agent.hpp"
 #include "components/system/system.hpp"
+#include "components/permission/permission.hpp"
+#include "components/memory/memory.hpp"
+#include "components/edit_history/edit_history.hpp"
+#include "components/notice/notice.hpp"
+#include "components/provider/provider.hpp"
 #include "core/logger.hpp"
 #include "core/exception.hpp"
 #include "utils/crypto.hpp"
@@ -14,11 +19,61 @@
 #include <iostream>
 #include <sstream>
 #include <algorithm>
+#include <fstream>
+#include <filesystem>
+#include <set>
 
 namespace agent {
 
 using json = nlohmann::json;
 namespace asio = boost::asio;
+namespace fs = std::filesystem;
+
+static std::string get_mime_type(const std::string& path) {
+    static const std::map<std::string, std::string> mime_types = {
+        {".html", "text/html"},
+        {".css", "text/css"},
+        {".js", "application/javascript"},
+        {".json", "application/json"},
+        {".png", "image/png"},
+        {".jpg", "image/jpeg"},
+        {".jpeg", "image/jpeg"},
+        {".gif", "image/gif"},
+        {".svg", "image/svg+xml"},
+        {".ico", "image/x-icon"},
+        {".woff", "font/woff"},
+        {".woff2", "font/woff2"},
+        {".ttf", "font/ttf"},
+        {".eot", "application/vnd.ms-fontobject"},
+        {".otf", "font/otf"},
+        {".txt", "text/plain"},
+        {".xml", "application/xml"},
+        {".pdf", "application/pdf"},
+        {".zip", "application/zip"},
+        {".mp3", "audio/mpeg"},
+        {".mp4", "video/mp4"},
+        {".webm", "video/webm"},
+        {".webp", "image/webp"},
+    };
+
+    size_t dot_pos = path.rfind('.');
+    if (dot_pos != std::string::npos) {
+        std::string ext = path.substr(dot_pos);
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+        auto it = mime_types.find(ext);
+        if (it != mime_types.end()) {
+            return it->second;
+        }
+    }
+    return "application/octet-stream";
+}
+
+static std::string read_file_content(const std::string& path) {
+    std::ifstream file(path, std::ios::binary);
+    if (!file.is_open()) return "";
+    return std::string((std::istreambuf_iterator<char>(file)),
+                       std::istreambuf_iterator<char>());
+}
 
 static std::string extract_json_body(const std::string& raw_request) {
     size_t pos = raw_request.find("\r\n\r\n");
@@ -152,6 +207,17 @@ void Router::start() {
     m_impl->server = std::make_unique<servic::Server>(*m_impl->io_ctx,
         static_cast<short>(m_config.port), 300000);
 
+#ifdef AGENT_ENABLE_TLS
+    if (m_config.enable_tls) {
+        if (m_config.cert_path.empty() || m_config.key_path.empty()) {
+            LOG_ERROR("Router", "TLS enabled but cert_path or key_path not configured");
+            throw BaseException("TLS configuration incomplete: cert_path and key_path required");
+        }
+        m_impl->server->enable_tls(m_config.cert_path, m_config.key_path);
+        LOG_INFO("Router", "TLS enabled with cert: " + m_config.cert_path);
+    }
+#endif
+
     for (const auto& route : m_routes) {
         auto handler = route.handler;
         bool auth = route.requires_auth;
@@ -205,6 +271,44 @@ void Router::start() {
 
                 try {
                     json result = handler(req_json, headers);
+
+                    // Check if this is a static file request
+                    if (result.contains("_serve_static") && result["_serve_static"].get<bool>()) {
+                        std::string file_path;
+                        std::string content_type = "text/html";
+
+                        if (result.contains("_file")) {
+                            // Direct file request (e.g., webui.html)
+                            file_path = result["_file"].get<std::string>();
+                            if (result.contains("_content_type")) {
+                                content_type = result["_content_type"].get<std::string>();
+                            }
+                        } else if (result.contains("_static_dir")) {
+                            // Static directory request (e.g., webui/*)
+                            std::string url;
+                            {
+                                std::istringstream iss(raw_request);
+                                iss >> url;
+                            }
+                            // Remove leading /webui/ to get relative path
+                            if (url.substr(0, 7) == "/webui/") {
+                                file_path = "webui/" + url.substr(7);
+                            } else {
+                                file_path = "webui/" + url;
+                            }
+                            content_type = get_mime_type(file_path);
+                        }
+
+                        // Try to read the file
+                        std::string content = read_file_content(file_path);
+                        if (content.empty()) {
+                            raw_response = make_http_response("File not found", 404, "text/plain");
+                        } else {
+                            raw_response = make_http_response(content, 200, content_type);
+                        }
+                        return rt::FLAG_DONE;
+                    }
+
                     raw_response = make_http_response(result.dump());
                 } catch (const agent::BaseException& e) {
                     LOG_ERROR("Router", std::string("Handler error: ") + e.what());
@@ -355,8 +459,15 @@ json Router::error_response(std::string_view message, int code) {
 }
 
 void Router::register_default_routes() {
+    // Serve webui/index.html at root
     add_route({"GET", "/", [this](const json& req, const auto& headers) -> json {
-        return success_response({{"service", "agent.cpp"}, {"version", AGENT_VERSION}});
+        // This will be handled specially in start() to return HTML
+        return {{"_serve_static", true}, {"_file", "webui/index.html"}, {"_content_type", "text/html"}};
+    }, false});
+
+    // Serve static files from webui/ directory
+    add_route({"GET", "/webui/*", [this](const json& req, const auto& headers) -> json {
+        return {{"_serve_static", true}, {"_static_dir", "webui"}};
     }, false});
 
     add_route({"GET", "/api/health", [this](const json& req, const auto& headers) -> json {
@@ -529,6 +640,510 @@ void Router::register_default_routes() {
             {"stream_output", cfg.stream_output}
         });
     }});
+
+    // ── Settings API ─────────────────────────────────────────────
+    add_route({"GET", "/api/settings", [this](const json& req, const auto& headers) -> json {
+        auto& cfg = Config::instance();
+        return success_response({
+            {"user_name", cfg.user_name},
+            {"agent_name", cfg.agent_name},
+            {"default_model", cfg.default_model},
+            {"default_provider", cfg.default_provider},
+            {"max_context_tokens", cfg.max_context_tokens},
+            {"max_mpc_rounds", cfg.max_mpc_rounds},
+            {"request_timeout_sec", cfg.request_timeout_sec},
+            {"stream_output", cfg.stream_output},
+            {"auto_memory", cfg.auto_memory},
+            {"router_enabled", cfg.router_enabled},
+            {"router_port", cfg.router_port},
+            {"router_bind", cfg.router_bind},
+            {"router_tls", cfg.router_tls},
+            {"router_cert_path", cfg.router_cert_path},
+            {"router_key_path", cfg.router_key_path},
+            {"default_tool_permission", cfg.default_tool_permission},
+            {"websearch_proxy", cfg.websearch_proxy},
+            {"webfetch_proxy", cfg.webfetch_proxy},
+            {"webfetch_max_size_mb", cfg.webfetch_max_size_mb},
+            {"webfetch_timeout_sec", cfg.webfetch_timeout_sec}
+        });
+    }});
+
+    add_route({"PUT", "/api/settings", [this](const json& req, const auto& headers) -> json {
+        auto& cfg = Config::instance();
+        if (req.contains("user_name")) cfg.user_name = req["user_name"].get<std::string>();
+        if (req.contains("agent_name")) cfg.agent_name = req["agent_name"].get<std::string>();
+        if (req.contains("default_model")) cfg.default_model = req["default_model"].get<std::string>();
+        if (req.contains("default_provider")) cfg.default_provider = req["default_provider"].get<std::string>();
+        if (req.contains("max_context_tokens")) cfg.max_context_tokens = req["max_context_tokens"].get<int>();
+        if (req.contains("max_mpc_rounds")) cfg.max_mpc_rounds = req["max_mpc_rounds"].get<int>();
+        if (req.contains("request_timeout_sec")) cfg.request_timeout_sec = req["request_timeout_sec"].get<int>();
+        if (req.contains("stream_output")) cfg.stream_output = req["stream_output"].get<bool>();
+        if (req.contains("auto_memory")) cfg.auto_memory = req["auto_memory"].get<bool>();
+        if (req.contains("default_tool_permission")) cfg.default_tool_permission = req["default_tool_permission"].get<std::string>();
+        if (req.contains("websearch_proxy")) cfg.websearch_proxy = req["websearch_proxy"].get<std::string>();
+        if (req.contains("webfetch_proxy")) cfg.webfetch_proxy = req["webfetch_proxy"].get<std::string>();
+        if (req.contains("webfetch_max_size_mb")) cfg.webfetch_max_size_mb = req["webfetch_max_size_mb"].get<int>();
+        if (req.contains("webfetch_timeout_sec")) cfg.webfetch_timeout_sec = req["webfetch_timeout_sec"].get<int>();
+        cfg.save();
+        return success_response({{"message", "Settings saved"}});
+    }});
+
+    // ── Router/TLS Settings API ──────────────────────────────────
+    add_route({"PUT", "/api/settings/router", [this](const json& req, const auto& headers) -> json {
+        auto& cfg = Config::instance();
+        if (req.contains("router_port")) cfg.router_port = req["router_port"].get<int>();
+        if (req.contains("router_bind")) cfg.router_bind = req["router_bind"].get<std::string>();
+        if (req.contains("router_tls")) cfg.router_tls = req["router_tls"].get<bool>();
+        if (req.contains("router_cert_path")) cfg.router_cert_path = req["router_cert_path"].get<std::string>();
+        if (req.contains("router_key_path")) cfg.router_key_path = req["router_key_path"].get<std::string>();
+        if (req.contains("password")) {
+            std::string pwd = req["password"].get<std::string>();
+            if (!pwd.empty()) {
+                set_password(pwd);
+                cfg.router_password_hash = m_config.password_hash;
+            }
+        }
+        cfg.save();
+        return success_response({{"message", "Router settings saved. Restart required to apply changes."}});
+    }});
+
+    // ── Providers API ────────────────────────────────────────────
+    add_route({"GET", "/api/providers", [this](const json& req, const auto& headers) -> json {
+        auto& cfg = Config::instance();
+        json providers = json::array();
+        for (auto& p : cfg.providers) {
+            providers.push_back({
+                {"name", p.name}, {"type", p.type},
+                {"api_base", p.api_base}, {"model", p.model},
+                {"context_length", p.context_length},
+                {"temperature", p.temperature},
+                {"top_p", p.top_p},
+                {"max_tokens", p.max_tokens},
+                {"thinking_mode", p.thinking_mode},
+                {"thinking_budget", p.thinking_budget},
+                {"supports_vision", p.supports_vision},
+                {"supports_tools", p.supports_tools}
+            });
+        }
+        return success_response(providers);
+    }});
+
+    add_route({"POST", "/api/providers", [this](const json& req, const auto& headers) -> json {
+        auto& cfg = Config::instance();
+        Config::ProviderConfig p;
+        p.name = req.value("name", "");
+        p.type = req.value("type", "openai");
+        p.api_base = req.value("api_base", "");
+        p.api_key = req.value("api_key", "");
+        p.model = req.value("model", "");
+        p.context_length = req.value("context_length", 128000);
+        p.temperature = req.value("temperature", 0.7f);
+        p.top_p = req.value("top_p", 1.0f);
+        p.max_tokens = req.value("max_tokens", 4096);
+        p.thinking_mode = req.value("thinking_mode", "");
+        p.thinking_budget = req.value("thinking_budget", 16000);
+        p.supports_vision = req.value("supports_vision", false);
+        p.supports_tools = req.value("supports_tools", true);
+        if (p.name.empty()) return error_response("name is required");
+        cfg.providers.push_back(p);
+        cfg.save();
+        return success_response({{"message", "Provider added"}, {"name", p.name}});
+    }});
+
+    add_route({"PUT", "/api/providers/:name", [this](const json& req, const auto& headers) -> json {
+        // Note: dynamic params handled via query string or body
+        auto& cfg = Config::instance();
+        std::string name = req.value("name", "");
+        if (name.empty()) return error_response("name is required");
+        for (auto& p : cfg.providers) {
+            if (p.name == name) {
+                if (req.contains("type")) p.type = req["type"].get<std::string>();
+                if (req.contains("api_base")) p.api_base = req["api_base"].get<std::string>();
+                if (req.contains("api_key")) p.api_key = req["api_key"].get<std::string>();
+                if (req.contains("model")) p.model = req["model"].get<std::string>();
+                if (req.contains("context_length")) p.context_length = req["context_length"].get<int>();
+                if (req.contains("temperature")) p.temperature = req["temperature"].get<float>();
+                if (req.contains("top_p")) p.top_p = req["top_p"].get<float>();
+                if (req.contains("max_tokens")) p.max_tokens = req["max_tokens"].get<int>();
+                if (req.contains("supports_vision")) p.supports_vision = req["supports_vision"].get<bool>();
+                if (req.contains("supports_tools")) p.supports_tools = req["supports_tools"].get<bool>();
+                cfg.save();
+                return success_response({{"message", "Provider updated"}});
+            }
+        }
+        return error_response("Provider not found", 404);
+    }});
+
+    add_route({"DELETE", "/api/providers", [this](const json& req, const auto& headers) -> json {
+        auto& cfg = Config::instance();
+        std::string name = req.value("name", "");
+        if (name.empty()) return error_response("name is required");
+        auto it = std::remove_if(cfg.providers.begin(), cfg.providers.end(),
+            [&](const Config::ProviderConfig& p) { return p.name == name; });
+        if (it == cfg.providers.end()) return error_response("Provider not found", 404);
+        cfg.providers.erase(it, cfg.providers.end());
+        cfg.save();
+        return success_response({{"message", "Provider deleted"}});
+    }});
+
+    // ── Preset Models API ────────────────────────────────────────
+    add_route({"GET", "/api/providers/presets", [this](const json& req, const auto& headers) -> json {
+        json presets = json::array();
+        presets.push_back({
+            {"name", "OpenAI"},
+            {"type", "openai"},
+            {"api_base", "https://api.openai.com/v1"},
+            {"models", json::array({"gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo", "o1-preview", "o1-mini"})}
+        });
+        presets.push_back({
+            {"name", "Anthropic"},
+            {"type", "anthropic"},
+            {"api_base", "https://api.anthropic.com"},
+            {"models", json::array({"claude-3-5-sonnet-20241022", "claude-3-opus-20240229", "claude-3-haiku-20240307"})}
+        });
+        presets.push_back({
+            {"name", "Ollama (Local)"},
+            {"type", "ollama"},
+            {"api_base", "http://localhost:11434"},
+            {"models", json::array({"llama3.1", "llama3", "mistral", "codellama", "phi3"})}
+        });
+        presets.push_back({
+            {"name", "LLaMA Server (Local)"},
+            {"type", "llama_server"},
+            {"api_base", "http://localhost:8080"},
+            {"models", json::array({"default"})}
+        });
+        presets.push_back({
+            {"name", "OpenRouter"},
+            {"type", "openai"},
+            {"api_base", "https://openrouter.ai/api/v1"},
+            {"models", json::array({"anthropic/claude-3.5-sonnet", "google/gemini-pro-1.5", "meta-llama/llama-3.1-405b-instruct"})}
+        });
+        presets.push_back({
+            {"name", "Groq"},
+            {"type", "openai"},
+            {"api_base", "https://api.groq.com/openai/v1"},
+            {"models", json::array({"llama-3.1-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"})}
+        });
+        return success_response(presets);
+    }});
+
+    // ── Permissions API ──────────────────────────────────────────
+    add_route({"GET", "/api/permissions", [this](const json& req, const auto& headers) -> json {
+        auto& perm = ModuleRegistry::instance().require<Permission>();
+        auto rules = perm.list_rules();
+        json result = json::array();
+        for (auto& r : rules) {
+            std::string level_str;
+            switch (r.level) {
+                case PermissionLevel::Auto: level_str = "auto"; break;
+                case PermissionLevel::Ask: level_str = "ask"; break;
+                case PermissionLevel::Deny: level_str = "deny"; break;
+            }
+            result.push_back({
+                {"tool_name", r.tool_name},
+                {"level", level_str},
+                {"description", r.description}
+            });
+        }
+        json dangerous = json::array();
+        for (auto& p : perm.list_dangerous_patterns()) {
+            dangerous.push_back(p);
+        }
+        return success_response({
+            {"rules", result},
+            {"dangerous_patterns", dangerous}
+        });
+    }});
+
+    add_route({"PUT", "/api/permissions", [this](const json& req, const auto& headers) -> json {
+        auto& perm = ModuleRegistry::instance().require<Permission>();
+        if (req.contains("tool_name") && req.contains("level")) {
+            std::string tool = req["tool_name"].get<std::string>();
+            std::string level = req["level"].get<std::string>();
+            PermissionLevel pl;
+            if (level == "auto") pl = PermissionLevel::Auto;
+            else if (level == "deny") pl = PermissionLevel::Deny;
+            else pl = PermissionLevel::Ask;
+            perm.set_tool_permission(tool, pl);
+        }
+        if (req.contains("default_level")) {
+            std::string level = req["default_level"].get<std::string>();
+            PermissionLevel pl;
+            if (level == "auto") pl = PermissionLevel::Auto;
+            else if (level == "deny") pl = PermissionLevel::Deny;
+            else pl = PermissionLevel::Ask;
+            perm.set_default_permission(pl);
+        }
+        return success_response({{"message", "Permissions updated"}});
+    }});
+
+    // ── Channels API ─────────────────────────────────────────────
+    add_route({"GET", "/api/channels", [this](const json& req, const auto& headers) -> json {
+        auto& cfg = Config::instance();
+        json channels = json::array();
+        for (auto& ch : cfg.channels) {
+            channels.push_back({
+                {"type", ch.type},
+                {"enabled", ch.enabled},
+                {"has_token", !ch.token.empty()},
+                {"proxy", ch.proxy}
+            });
+        }
+        return success_response(channels);
+    }});
+
+    add_route({"POST", "/api/channels", [this](const json& req, const auto& headers) -> json {
+        auto& cfg = Config::instance();
+        Config::ChannelConfig ch;
+        ch.type = req.value("type", "");
+        ch.token = req.value("token", "");
+        ch.proxy = req.value("proxy", "");
+        ch.enabled = req.value("enabled", false);
+        if (ch.type.empty()) return error_response("type is required");
+        cfg.channels.push_back(ch);
+        cfg.save();
+        return success_response({{"message", "Channel added"}});
+    }});
+
+    add_route({"PUT", "/api/channels", [this](const json& req, const auto& headers) -> json {
+        auto& cfg = Config::instance();
+        std::string type = req.value("type", "");
+        for (auto& ch : cfg.channels) {
+            if (ch.type == type) {
+                if (req.contains("token")) ch.token = req["token"].get<std::string>();
+                if (req.contains("proxy")) ch.proxy = req["proxy"].get<std::string>();
+                if (req.contains("enabled")) ch.enabled = req["enabled"].get<bool>();
+                cfg.save();
+                return success_response({{"message", "Channel updated"}});
+            }
+        }
+        return error_response("Channel not found", 404);
+    }});
+
+    add_route({"DELETE", "/api/channels", [this](const json& req, const auto& headers) -> json {
+        auto& cfg = Config::instance();
+        std::string type = req.value("type", "");
+        auto it = std::remove_if(cfg.channels.begin(), cfg.channels.end(),
+            [&](const Config::ChannelConfig& c) { return c.type == type; });
+        if (it == cfg.channels.end()) return error_response("Channel not found", 404);
+        cfg.channels.erase(it, cfg.channels.end());
+        cfg.save();
+        return success_response({{"message", "Channel deleted"}});
+    }});
+
+    // ── Edit History API ─────────────────────────────────────────
+    add_route({"GET", "/api/edit-history", [this](const json& req, const auto& headers) -> json {
+        auto& history = ModuleRegistry::instance().require<EditHistory>();
+        auto records = history.list_records(req.value("limit", 100));
+        json result = json::array();
+        for (auto& r : records) {
+            result.push_back({
+                {"tool_name", r.tool_name},
+                {"file_path", r.file_path},
+                {"diff", r.diff},
+                {"timestamp", r.timestamp},
+                {"session_id", r.session_id},
+                {"before", r.before},
+                {"after", r.after}
+            });
+        }
+        return success_response(result);
+    }});
+
+    add_route({"GET", "/api/edit-history/session", [this](const json& req, const auto& headers) -> json {
+        auto& history = ModuleRegistry::instance().require<EditHistory>();
+        std::string session_id = req.value("session_id", "");
+        auto records = history.list_by_session(session_id);
+        json result = json::array();
+        for (auto& r : records) {
+            result.push_back({
+                {"tool_name", r.tool_name},
+                {"file_path", r.file_path},
+                {"diff", r.diff},
+                {"timestamp", r.timestamp},
+                {"session_id", r.session_id}
+            });
+        }
+        return success_response(result);
+    }});
+
+    add_route({"GET", "/api/edit-history/file", [this](const json& req, const auto& headers) -> json {
+        auto& history = ModuleRegistry::instance().require<EditHistory>();
+        std::string file_path = req.value("file_path", "");
+        auto records = history.list_by_file(file_path);
+        json result = json::array();
+        for (auto& r : records) {
+            result.push_back({
+                {"tool_name", r.tool_name},
+                {"file_path", r.file_path},
+                {"diff", r.diff},
+                {"timestamp", r.timestamp},
+                {"session_id", r.session_id}
+            });
+        }
+        return success_response(result);
+    }});
+
+    add_route({"POST", "/api/edit-history/rollback", [this](const json& req, const auto& headers) -> json {
+        auto& history = ModuleRegistry::instance().require<EditHistory>();
+        size_t index = req.value("index", 0);
+        if (history.rollback_to_record(index)) {
+            return success_response({{"message", "Rollback successful"}});
+        }
+        return error_response("Rollback failed");
+    }});
+
+    // ── Session Messages API ─────────────────────────────────────
+    add_route({"GET", "/api/session/messages", [this](const json& req, const auto& headers) -> json {
+        auto& session = ModuleRegistry::instance().require<SessionManager>();
+        std::string session_id = req.value("session_id", "");
+        if (session_id.empty()) session_id = session.current_session().id;
+        auto messages = session.get_messages(session_id);
+        json result = json::array();
+        for (auto& m : messages) {
+            json msg = {
+                {"role", m.role},
+                {"content", m.content},
+                {"timestamp", m.timestamp}
+            };
+            if (!m.tool_call_id.empty()) msg["tool_call_id"] = m.tool_call_id;
+            if (!m.tool_name.empty()) msg["tool_name"] = m.tool_name;
+            if (!m.metadata.empty()) msg["metadata"] = m.metadata;
+            result.push_back(msg);
+        }
+        return success_response(result);
+    }});
+
+    add_route({"POST", "/api/session/rename", [this](const json& req, const auto& headers) -> json {
+        auto& session = ModuleRegistry::instance().require<SessionManager>();
+        std::string id = req.value("id", "");
+        std::string name = req.value("name", "");
+        if (id.empty()) return error_response("id is required");
+        session.rename_session(id, name);
+        return success_response({{"message", "Session renamed"}});
+    }});
+
+    // ── Memory CRUD API ──────────────────────────────────────────
+    add_route({"POST", "/api/memory", [this](const json& req, const auto& headers) -> json {
+        auto& mem = ModuleRegistry::instance().require<Memory>();
+        MemoryEntry entry;
+        entry.title = req.value("title", "");
+        entry.content = req.value("content", "");
+        entry.category = req.value("category", "general");
+        entry.importance = req.value("importance", 0.5);
+        if (req.contains("keywords")) {
+            for (auto& k : req["keywords"]) entry.keywords.push_back(k.get<std::string>());
+        }
+        auto saved = mem.save_entry(entry);
+        return success_response({{"id", saved.id}, {"message", "Memory saved"}});
+    }});
+
+    add_route({"PUT", "/api/memory", [this](const json& req, const auto& headers) -> json {
+        auto& mem = ModuleRegistry::instance().require<Memory>();
+        MemoryEntry entry;
+        entry.id = req.value("id", "");
+        entry.title = req.value("title", "");
+        entry.content = req.value("content", "");
+        entry.category = req.value("category", "general");
+        entry.importance = req.value("importance", 0.5);
+        if (req.contains("keywords")) {
+            for (auto& k : req["keywords"]) entry.keywords.push_back(k.get<std::string>());
+        }
+        mem.update_entry(entry);
+        return success_response({{"message", "Memory updated"}});
+    }});
+
+    add_route({"DELETE", "/api/memory", [this](const json& req, const auto& headers) -> json {
+        auto& mem = ModuleRegistry::instance().require<Memory>();
+        std::string id = req.value("id", "");
+        if (id.empty()) return error_response("id is required");
+        mem.delete_entry(id);
+        return success_response({{"message", "Memory deleted"}});
+    }});
+
+    add_route({"GET", "/api/memory/categories", [this](const json& req, const auto& headers) -> json {
+        auto& mem = ModuleRegistry::instance().require<Memory>();
+        auto all = mem.list_all();
+        std::set<std::string> categories;
+        for (auto& m : all) categories.insert(m.category);
+        json result = json::array();
+        for (auto& c : categories) result.push_back(c);
+        return success_response(result);
+    }});
+
+    // ── System Info API ──────────────────────────────────────────
+    add_route({"GET", "/api/system/info", [this](const json& req, const auto& headers) -> json {
+        auto& sys = ModuleRegistry::instance().require<System>();
+        return success_response(sys.system_info());
+    }});
+
+    add_route({"GET", "/api/system/commands", [this](const json& req, const auto& headers) -> json {
+        auto& sys = ModuleRegistry::instance().require<System>();
+        auto commands = sys.list_commands();
+        json result = json::array();
+        for (auto& cmd : commands) {
+            result.push_back({
+                {"name", cmd.name},
+                {"description", cmd.description},
+                {"usage", cmd.usage},
+                {"aliases", cmd.aliases}
+            });
+        }
+        return success_response(result);
+    }});
+
+    add_route({"POST", "/api/system/restart", [this](const json& req, const auto& headers) -> json {
+        auto& sys = ModuleRegistry::instance().require<System>();
+        sys.restart();
+        return success_response({{"message", "System restarting"}});
+    }});
+
+    // ── Notice/Notification API ──────────────────────────────────
+    add_route({"GET", "/api/notices", [this](const json& req, const auto& headers) -> json {
+        auto& notice = ModuleRegistry::instance().require<Notice>();
+        auto events = notice.recent_events(req.value("count", 50));
+        json result = json::array();
+        for (auto& e : events) {
+            std::string type_str;
+            switch (e.type) {
+                case NoticeEvent::Type::Info: type_str = "info"; break;
+                case NoticeEvent::Type::Warning: type_str = "warning"; break;
+                case NoticeEvent::Type::Error: type_str = "error"; break;
+                case NoticeEvent::Type::BackgroundTaskCompleted: type_str = "task_completed"; break;
+                case NoticeEvent::Type::ContextThreshold: type_str = "context_threshold"; break;
+                case NoticeEvent::Type::SystemStatus: type_str = "system_status"; break;
+                case NoticeEvent::Type::PermissionRequest: type_str = "permission_request"; break;
+            }
+            result.push_back({
+                {"type", type_str},
+                {"title", e.title},
+                {"message", e.message},
+                {"source", e.source},
+                {"action_required", e.action_required}
+            });
+        }
+        return success_response(result);
+    }});
+
+    // ── Tools API ────────────────────────────────────────────────
+    add_route({"GET", "/api/tools/categories", [this](const json& req, const auto& headers) -> json {
+        auto& tools = ModuleRegistry::instance().require<Tools>();
+        auto list = tools.list_tools();
+        std::set<std::string> categories;
+        for (auto& t : list) {
+            for (auto& c : t.categories) categories.insert(c);
+        }
+        json result = json::array();
+        for (auto& c : categories) result.push_back(c);
+        return success_response(result);
+    }});
+
+    // ── SSE Notification Stream ──────────────────────────────────
+    add_stream_route({"GET", "/api/events", [this](const json& req, const auto& headers, auto writer) {
+        json init = {{"type", "connected"}, {"message", "SSE stream connected"}};
+        writer(init.dump());
+    }, false});
 }
 
 } // namespace agent

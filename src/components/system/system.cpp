@@ -93,12 +93,8 @@ System::CLIOptions System::parse_args(int argc, char* argv[]) {
     CLIOptions opts;
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        if (arg == "--tui" || arg == "-t") {
-            opts.tui_mode = true;
-        } else if (arg == "--router" || arg == "-r") {
+        if (arg == "--router" || arg == "-r") {
             opts.router_mode = true;
-        } else if (arg == "--daemon" || arg == "-d") {
-            opts.daemon_mode = true;
         } else if (arg == "--project" || arg == "-p") {
             if (i + 1 < argc) opts.project_dir = argv[++i];
         } else if (arg == "--session" || arg == "-s") {

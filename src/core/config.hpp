@@ -41,24 +41,6 @@ public:
     bool stream_output = true;
     bool auto_memory = true;
 
-    // ── TUI ────────────────────────────────────────────────────
-    bool tui_enabled = true;
-    std::string tui_theme = "default";
-    
-    struct ThemeConfig {
-        std::string primary_color = "#268bd2";
-        std::string secondary_color = "#2aa198";
-        std::string success_color = "#859900";
-        std::string warning_color = "#b58900";
-        std::string error_color = "#dc322f";
-        std::string background_color = "#002b36";
-        std::string foreground_color = "#839496";
-        std::string status_bar_color = "#073642";
-        std::string input_color = "#073642";
-        std::string border_color = "#586e75";
-    };
-    std::map<std::string, ThemeConfig> themes;
-
     // ── Router ─────────────────────────────────────────────────
     bool router_enabled = false;
     int router_port = 18080;

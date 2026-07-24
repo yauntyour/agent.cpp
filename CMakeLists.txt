@@ -6,11 +6,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-option(AGENT_ENABLE_TUI "Enable FTXUI TUI interface" ON)
 option(AGENT_ENABLE_ROUTER "Enable servic.cpp HTTP router component" ON)
 option(AGENT_ENABLE_LSP "Enable LSP server support" ON)
 option(AGENT_ENABLE_TESTS "Build tests" OFF)
 option(AGENT_STATIC_LINK "Static link runtime and dependencies" ON)
+option(AGENT_ENABLE_TLS "Enable TLS/HTTPS support" OFF)
 
 # ── Dependencies ──────────────────────────────────────────────────
 find_package(PkgConfig REQUIRED)
@@ -20,16 +20,6 @@ pkg_check_modules(SODIUM REQUIRED libsodium IMPORTED_TARGET)
 pkg_check_modules(NLOHMANN_JSON REQUIRED nlohmann_json IMPORTED_TARGET)
 
 find_package(Threads REQUIRED)
-
-if(AGENT_ENABLE_TUI)
-    include(FetchContent)
-    FetchContent_Declare(ftxui
-        GIT_REPOSITORY https://github.com/ArthurSonzogni/ftxui
-        GIT_TAG v7.0.1
-    )
-    FetchContent_MakeAvailable(ftxui)
-    message(STATUS "TUI enabled (FTXUI-based)")
-endif()
 
 if(AGENT_ENABLE_ROUTER)
     if(EXISTS "${CMAKE_SOURCE_DIR}/src/external/servic/servic.hpp")
@@ -45,6 +35,15 @@ if(AGENT_ENABLE_ROUTER)
         set(AGENT_ENABLE_ROUTER OFF)
     endif()
     pkg_check_modules(OPENSSL QUIET openssl)
+
+    if(AGENT_ENABLE_TLS)
+        if(NOT OPENSSL_FOUND)
+            message(WARNING "OpenSSL not found, TLS disabled")
+            set(AGENT_ENABLE_TLS OFF)
+        else()
+            message(STATUS "TLS support enabled")
+        endif()
+    endif()
 endif()
 
 
@@ -106,10 +105,6 @@ if(AGENT_ENABLE_ROUTER)
     list(APPEND COMPONENT_SOURCES src/components/router/router.cpp)
 endif()
 
-if(AGENT_ENABLE_TUI)
-    list(APPEND COMPONENT_SOURCES src/components/tui/tui.cpp)
-endif()
-
 set(ALL_SOURCES
     src/main.cpp
     ${CORE_SOURCES}
@@ -136,18 +131,15 @@ if(AGENT_ENABLE_ROUTER)
     if(BOOST_INCLUDE_DIRS)
         target_include_directories(agent PRIVATE ${BOOST_INCLUDE_DIRS})
     endif()
-    if(OPENSSL_FOUND)
+    if(AGENT_ENABLE_TLS AND OPENSSL_FOUND)
+        target_compile_definitions(agent PRIVATE AGENT_ENABLE_TLS)
         target_link_libraries(agent PRIVATE ${OPENSSL_LIBRARIES})
+        target_include_directories(agent PRIVATE ${OPENSSL_INCLUDE_DIRS})
     endif()
 endif()
 
 if(AGENT_ENABLE_LSP)
     target_compile_definitions(agent PRIVATE AGENT_ENABLE_LSP)
-endif()
-
-if(AGENT_ENABLE_TUI)
-    target_compile_definitions(agent PRIVATE AGENT_ENABLE_TUI)
-    target_link_libraries(agent PRIVATE ftxui::ftxui)
 endif()
 
 if(AGENT_STATIC_LINK AND MINGW)

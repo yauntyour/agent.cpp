@@ -17,7 +17,7 @@ agent.cpp 是一个基于 C++20 构建的模块化 AI 编程代理，运行在�
 - **MCP 集成** — Model Context Protocol，可动态扩展工具
 - **LSP 集成** — Language Server Protocol，支持悬停、补全、诊断、格式化、跳转定义、重命名、代码动作
 - **HTTP API 服务器** — RESTful 接口，支持流式响应、认证与 CORS
-- **TUI 界面** — ANSI 终端界面，含状态栏、命令补全、编辑展示
+- **WebUI 界面** — 基于浏览器的聊天界面，支持会话管理和流式响应
 - **Telegram 机器人** — 通过 Telegram 与代理交互
 - **加密密钥链** — Argon2id 密钥派生 + XSalsa20-Poly1305 加密存储 API 密钥
 - **跨平台** — 支持 Windows (MinGW)、Linux、macOS
@@ -31,8 +31,8 @@ agent.cpp 是一个基于 C++20 构建的模块化 AI 编程代理，运行在�
 - [libcurl](https://curl.se/libcurl/)
 - [libsodium](https://doc.libsodium.org/)
 - [nlohmann_json](https://github.com/nlohmann/json)（header-only）
-- (可选) [Boost.Asio](https://www.boost.org/) — HTTP Router 模式需要
-- (可选) [OpenSSL](https://www.openssl.org/) — Router TLS 支持需要
+- [Boost.Asio](https://www.boost.org/) — HTTP 服务器需要
+- (可选) [OpenSSL](https://www.openssl.org/) — TLS 支持需要
 
 ### 构建
 
@@ -50,7 +50,6 @@ cmake --build build
 
 | 选项 | 默认值 | 说明 |
 |---|---|---|
-| `AGENT_ENABLE_TUI` | `ON` | ANSI 终端界面 |
 | `AGENT_ENABLE_ROUTER` | `ON` | HTTP API 服务器（需 Boost.Asio） |
 | `AGENT_ENABLE_LSP` | `ON` | LSP 语言服务集成 |
 | `AGENT_ENABLE_TESTS` | `OFF` | 单元测试 |
@@ -58,13 +57,13 @@ cmake --build build
 
 ## 使用方式
 
-### CLI 模式（默认）
+### 默认模式（HTTP 服务器 + WebUI）
 
 ```bash
 ./agent
 ```
 
-进入交互式 REPL，直接输入问题或 `/help` 查看命令列表。
+启动 HTTP API 服务器和 WebUI 界面。默认监听 `127.0.0.1:18080`，访问 http://127.0.0.1:18080 打开 WebUI。
 
 ### 单次执行
 
@@ -72,28 +71,9 @@ cmake --build build
 ./agent --command "找出所有使用 printf 的地方并替换为 std::print"
 ```
 
-### TUI 模式
-
-```bash
-./agent --tui
-```
-
-启动 ANSI 终端界面，提供状态栏、命令自动补全、编辑内容展示等功能。
-
-### HTTP 服务器模式
-
-```bash
-./agent --router
-```
-
-启动 REST API 服务器，支持流式聊天补全、工具调用、会话管理。默认监听 `127.0.0.1:8080`。
-
 ### 选项
 
 ```
---tui, -t          启动 TUI 界面
---router, -r       启动 HTTP API 服务器
---daemon, -d       以守护进程运行
 --project, -p DIR  设置项目目录
 --session, -s ID   使用指定会话
 --command, -c CMD  执行单条命令后退出
@@ -133,7 +113,8 @@ CLI 模式下使用 `/` 前缀执行内置命令：
 - LSP 服务器配置
 - MCP 服务器配置
 - 电报机器人（Channel/Telegram）配置
-- HTTP 服务器端口与绑定地址
+- HTTP 服务器端口与绑定地址（默认启用）
+- WebUI 静态文件目录
 - 最近项目追踪
 
 ## 架构
@@ -153,8 +134,8 @@ CLI 模式下使用 `/` 前缀执行内置命令：
 │ MCP       │ LSP*     │ Service  │ Notice             │
 │ (MCP协议) │ (语言服务)│ (子进程)  │ (事件通知)          │
 ├──────────┼──────────┴──────────┼────────────────────┤
-│ Router*  │     TUI*            │  (可选组件)         │
-│ (HTTP API)│   (终端界面)        │                    │
+│ Router   │     WebUI           │  (默认组件)         │
+│ (HTTP API)│   (浏览器界面)      │                    │
 └──────────┴─────────────────────┴────────────────────┘
 ```
 

@@ -37,9 +37,7 @@ public:
 
     // ── CLI argument parsing ───────────────────────────────────
     struct CLIOptions {
-        bool tui_mode = false;
-        bool router_mode = false;
-        bool daemon_mode = false;
+        bool router_mode = false;   // --router: enable HTTP server
         std::string project_dir;
         std::string session_id;
         std::string command;

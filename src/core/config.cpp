@@ -122,21 +122,6 @@ void Config::reset() {
     request_timeout_sec = 120;
     stream_output = true;
     auto_memory = true;
-    tui_enabled = true;
-    tui_theme = "default";
-    themes.clear();
-    themes["solarized"] = {
-        "#268bd2", "#2aa198", "#859900", "#b58900", "#dc322f",
-        "#002b36", "#839496", "#073642", "#073642", "#586e75"
-    };
-    themes["monokai"] = {
-        "#f92672", "#a6e22e", "#e6db74", "#fd971f", "#f92672",
-        "#272822", "#f8f8f2", "#3e3d32", "#3e3d32", "#75715e"
-    };
-    themes["dracula"] = {
-        "#bd93f9", "#50fa7b", "#f1fa8c", "#ffb86c", "#ff5555",
-        "#282a36", "#f8f8f2", "#44475a", "#44475a", "#6272a4"
-    };
     router_enabled = false;
     router_port = 18080;
     router_bind = "127.0.0.1";
@@ -183,12 +168,12 @@ void to_json(json& j, const Config& c) {
         {"request_timeout_sec", c.request_timeout_sec},
         {"stream_output", c.stream_output},
         {"auto_memory", c.auto_memory},
-        {"tui_enabled", c.tui_enabled},
-        {"tui_theme", c.tui_theme},
         {"router_enabled", c.router_enabled},
         {"router_port", c.router_port},
         {"router_bind", c.router_bind},
         {"router_tls", c.router_tls},
+        {"router_cert_path", c.router_cert_path},
+        {"router_key_path", c.router_key_path},
         {"dangerous_commands", c.dangerous_commands},
         {"default_tool_permission", c.default_tool_permission},
         {"websearch_proxy", c.websearch_proxy},
@@ -199,23 +184,6 @@ void to_json(json& j, const Config& c) {
         {"recent_projects", c.recent_projects},
         {"max_recent_projects", c.max_recent_projects},
     };
-
-    json themes = json::object();
-    for (auto& [name, t] : c.themes) {
-        themes[name] = {
-            {"primary_color", t.primary_color},
-            {"secondary_color", t.secondary_color},
-            {"success_color", t.success_color},
-            {"warning_color", t.warning_color},
-            {"error_color", t.error_color},
-            {"background_color", t.background_color},
-            {"foreground_color", t.foreground_color},
-            {"status_bar_color", t.status_bar_color},
-            {"input_color", t.input_color},
-            {"border_color", t.border_color}
-        };
-    }
-    j["themes"] = themes;
 
     json providers = json::array();
     for (auto& p : c.providers) {
@@ -288,12 +256,12 @@ void from_json(const json& j, Config& c) {
     get("request_timeout_sec", c.request_timeout_sec);
     get("stream_output", c.stream_output);
     get("auto_memory", c.auto_memory);
-    get("tui_enabled", c.tui_enabled);
-    get("tui_theme", c.tui_theme);
     get("router_enabled", c.router_enabled);
     get("router_port", c.router_port);
     get("router_bind", c.router_bind);
     get("router_tls", c.router_tls);
+    get("router_cert_path", c.router_cert_path);
+    get("router_key_path", c.router_key_path);
     get("dangerous_commands", c.dangerous_commands);
     get("default_tool_permission", c.default_tool_permission);
     get("websearch_proxy", c.websearch_proxy);
@@ -303,23 +271,6 @@ void from_json(const json& j, Config& c) {
     get("webfetch_timeout_sec", c.webfetch_timeout_sec);
     get("recent_projects", c.recent_projects);
     get("max_recent_projects", c.max_recent_projects);
-
-    if (j.contains("themes")) {
-        for (auto& [name, tj] : j["themes"].items()) {
-            Config::ThemeConfig t;
-            if (tj.contains("primary_color")) tj.at("primary_color").get_to(t.primary_color);
-            if (tj.contains("secondary_color")) tj.at("secondary_color").get_to(t.secondary_color);
-            if (tj.contains("success_color")) tj.at("success_color").get_to(t.success_color);
-            if (tj.contains("warning_color")) tj.at("warning_color").get_to(t.warning_color);
-            if (tj.contains("error_color")) tj.at("error_color").get_to(t.error_color);
-            if (tj.contains("background_color")) tj.at("background_color").get_to(t.background_color);
-            if (tj.contains("foreground_color")) tj.at("foreground_color").get_to(t.foreground_color);
-            if (tj.contains("status_bar_color")) tj.at("status_bar_color").get_to(t.status_bar_color);
-            if (tj.contains("input_color")) tj.at("input_color").get_to(t.input_color);
-            if (tj.contains("border_color")) tj.at("border_color").get_to(t.border_color);
-            c.themes[name] = t;
-        }
-    }
 
     if (j.contains("providers")) {
         for (auto& pj : j["providers"]) {
