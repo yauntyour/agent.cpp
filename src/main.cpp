@@ -26,6 +26,10 @@
 #include <thread>
 #include <csignal>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 namespace agent {
 
 std::atomic<bool> g_shutdown{false};
@@ -34,6 +38,23 @@ void signal_handler(int signum) {
     g_shutdown.store(true);
     g_is_shutting_down.store(true);
 }
+
+#ifdef _WIN32
+BOOL WINAPI console_ctrl_handler(DWORD ctrl_type) {
+    switch (ctrl_type) {
+        case CTRL_C_EVENT:
+        case CTRL_BREAK_EVENT:
+        case CTRL_CLOSE_EVENT:
+        case CTRL_LOGOFF_EVENT:
+        case CTRL_SHUTDOWN_EVENT:
+            g_shutdown.store(true);
+            g_is_shutting_down.store(true);
+            return TRUE;
+        default:
+            return FALSE;
+    }
+}
+#endif
 
 void register_all_modules() {
     auto& registry = ModuleRegistry::instance();
@@ -83,6 +104,22 @@ void start_background_router() {
 #endif
 }
 
+void graceful_shutdown() {
+    LOG_INFO("Main", "Graceful shutdown initiated");
+
+    try {
+        ModuleRegistry::instance().shutdown_all();
+    } catch (const BaseException& e) {
+        LOG_ERROR("Main", std::string("Shutdown error: ") + e.what());
+    } catch (const std::exception& e) {
+        LOG_ERROR("Main", std::string("Shutdown error: ") + e.what());
+    } catch (...) {
+        LOG_ERROR("Main", "Unknown error during shutdown");
+    }
+
+    LOG_INFO("Main", "Shutdown complete");
+}
+
 } // namespace agent
 
 int main(int argc, char* argv[]) {
@@ -92,6 +129,12 @@ int main(int argc, char* argv[]) {
 
     std::signal(SIGINT, signal_handler);
     std::signal(SIGTERM, signal_handler);
+#ifdef SIGBREAK
+    std::signal(SIGBREAK, signal_handler);
+#endif
+#ifdef _WIN32
+    SetConsoleCtrlHandler(console_ctrl_handler, TRUE);
+#endif
 
     register_all_modules();
 
@@ -137,15 +180,7 @@ int main(int argc, char* argv[]) {
 
     if (opts.version) {
         std::cout << "agent.cpp v" << AGENT_VERSION << std::endl;
-        try {
-            ModuleRegistry::instance().shutdown_all();
-        } catch (const BaseException& e) {
-            LOG_ERROR("Main", std::string("Shutdown error: ") + e.what());
-            std::cerr << "Shutdown error: " << e.what() << std::endl;
-        } catch (const std::exception& e) {
-            LOG_ERROR("Main", std::string("Shutdown error: ") + e.what());
-            std::cerr << "Shutdown error: " << e.what() << std::endl;
-        }
+        graceful_shutdown();
         return 0;
     }
 
@@ -173,6 +208,7 @@ int main(int argc, char* argv[]) {
     }
 
     router.stop();
+    graceful_shutdown();
     return 0;
 #else
     LOG_ERROR("Main", "Router mode not available (compiled without AGENT_ENABLE_ROUTER)");

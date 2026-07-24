@@ -28,7 +28,17 @@ void ModuleRegistry::shutdown_all() {
     std::shared_lock lock(m_mutex);
     for (auto& [type, module] : m_modules) {
         if (module->state() == ModuleState::Active) {
-            module->shutdown();
+            try {
+                module->shutdown();
+            } catch (const std::exception& e) {
+                if (!g_is_shutting_down.load()) {
+                    try { LOG_ERROR("Module", std::string("Shutdown error in ") + module->name().data() + ": " + e.what()); } catch (...) {}
+                }
+            } catch (...) {
+                if (!g_is_shutting_down.load()) {
+                    try { LOG_ERROR("Module", std::string("Unknown shutdown error in ") + module->name().data()); } catch (...) {}
+                }
+            }
         }
     }
 }

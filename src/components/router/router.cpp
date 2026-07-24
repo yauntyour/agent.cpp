@@ -241,7 +241,7 @@ void Router::start() {
 
                 std::string body = extract_json_body(raw_request);
 
-                json req_json;
+                json req_json = json::object();
                 if (!body.empty()) {
                     try {
                         req_json = json::parse(body);
@@ -349,7 +349,7 @@ void Router::start() {
 
                 std::string body = extract_json_body(raw_request);
 
-                json req_json;
+                json req_json = json::object();
                 if (!body.empty()) {
                     try {
                         req_json = json::parse(body);
