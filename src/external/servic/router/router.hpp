@@ -28,7 +28,7 @@ namespace rt
 
     int default_func(std::string &url, std::string &data, const std::map<std::string, std::string> &params)
     {
-        data = "<null>";
+        data = R"({"success":false,"error":"Not found","code":404})";
         return FLAG_DONE;
     }
 

@@ -130,7 +130,8 @@ namespace servic
                 auto [ptr, params] = ros.get(url);
                 if (ptr.expired())
                 {
-                    buf = "HTTP/1.1 404 Not Found\r\n\r\n";
+                    std::string body = R"({"success":false,"error":"Not found","code":404})";
+                    buf = "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body;
                 }
                 else
                 {
@@ -285,7 +286,8 @@ namespace servic
                                     auto [ptr,params] = ros.get(url);
                                     if (ptr.expired())
                                     {
-                                        buf = "HTTP/1.1 404 Not Found\r\n\r\n";
+                                        std::string body = R"({"success":false,"error":"Not found","code":404})";
+                                        buf = "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body;
                                     }else
                                     {
                                         size_t content_length = get_content_length(header);

@@ -140,20 +140,29 @@ void EditHistory::load() {
     auto path = get_storage_path();
     if (!fs::exists(path)) return;
 
-    std::ifstream f(path);
-    json j;
-    f >> j;
+    try {
+        std::ifstream f(path);
+        if (!f.is_open() || f.peek() == std::ifstream::traits_type::eof()) return;
 
-    for (auto& e : j) {
-        EditRecord rec;
-        rec.tool_name = e.value("tool_name", "");
-        rec.file_path = e.value("file_path", "");
-        rec.before = e.value("before", json{});
-        rec.after = e.value("after", json{});
-        rec.diff = e.value("diff", "");
-        rec.timestamp = e.value("timestamp", 0LL);
-        rec.session_id = e.value("session_id", "");
-        m_records.push_back(rec);
+        json j;
+        f >> j;
+
+        if (!j.is_array()) return;
+
+        for (auto& e : j) {
+            EditRecord rec;
+            rec.tool_name = e.value("tool_name", "");
+            rec.file_path = e.value("file_path", "");
+            rec.before = e.value("before", json{});
+            rec.after = e.value("after", json{});
+            rec.diff = e.value("diff", "");
+            rec.timestamp = e.value("timestamp", 0LL);
+            rec.session_id = e.value("session_id", "");
+            m_records.push_back(rec);
+        }
+    } catch (const std::exception& e) {
+        // Corrupted or invalid history file - start fresh
+        m_records.clear();
     }
 }
 
