@@ -1,0 +1,3 @@
+[submodule "external/servic.cpp"]
+	path = external/servic.cpp
+	url = https://github.com/yauntyour/servic.cpp.git
