@@ -5,6 +5,7 @@
 #include "components/agent/agent.hpp"
 #include "components/notice/notice.hpp"
 #include "components/mcp/mcp.hpp"
+#include "core/exception.hpp"
 #include "utils/fs.hpp"
 #include "utils/crypto.hpp"
 #include <nlohmann/json.hpp>
@@ -173,7 +174,7 @@ void Tools::register_builtin_tools() {
 
 // ── Tool: read ────────────────────────────────────────────────────
 ToolResult Tools::tool_read(const ToolCall& call) {
-    try {
+    TOOL_CATCH_BEGIN(call)
         auto file_path = call.arguments.value("filePath", "");
         auto offset = call.arguments.value("offset", 0);
         auto limit = call.arguments.value("limit", 2000);
@@ -198,29 +199,26 @@ ToolResult Tools::tool_read(const ToolCall& call) {
         }
 
         return {call.id, result.empty() ? content : result, false, ""};
-    } catch (const std::exception& e) {
-        return {call.id, "", true, e.what()};
-    }
+    TOOL_CATCH_END(call)
 }
 
 // ── Tool: write ───────────────────────────────────────────────────
 ToolResult Tools::tool_write(const ToolCall& call) {
-    try {
+    TOOL_CATCH_BEGIN(call)
         auto file_path = call.arguments.value("filePath", "");
         auto content = call.arguments.value("content", "");
 
         if (file_path.empty()) return {call.id, "", true, "filePath is required"};
 
         fsutil::write_file(file_path, content);
+        LOG_INFO("Tools", "File written: " + file_path);
         return {call.id, "File written successfully: " + file_path, false, ""};
-    } catch (const std::exception& e) {
-        return {call.id, "", true, e.what()};
-    }
+    TOOL_CATCH_END(call)
 }
 
 // ── Tool: edit ────────────────────────────────────────────────────
 ToolResult Tools::tool_edit(const ToolCall& call) {
-    try {
+    TOOL_CATCH_BEGIN(call)
         auto file_path = call.arguments.value("filePath", "");
         if (file_path.empty()) return {call.id, "", true, "filePath is required"};
 
@@ -233,24 +231,24 @@ ToolResult Tools::tool_edit(const ToolCall& call) {
             auto content = fsutil::read_file(file_path);
             size_t pos = 0;
             while ((pos = content.find(old_str, pos)) != std::string::npos) { count++; pos++; }
+            LOG_INFO("Tools", "Replaced " + std::to_string(count) + " occurrences in " + file_path);
             return {call.id, "Replaced " + std::to_string(count) + " occurrences in " + file_path, false, ""};
         } else if (call.arguments.contains("startLine") && call.arguments.contains("endLine")) {
             auto start_line = call.arguments["startLine"].get<size_t>();
             auto end_line = call.arguments["endLine"].get<size_t>();
             auto new_content = call.arguments.value("content", "");
             fsutil::edit_file(file_path, start_line, end_line, new_content);
+            LOG_INFO("Tools", "Lines " + std::to_string(start_line) + "-" + std::to_string(end_line) + " replaced in " + file_path);
             return {call.id, "Lines " + std::to_string(start_line) + "-" + std::to_string(end_line) + " replaced in " + file_path, false, ""};
         } else {
             return {call.id, "", true, "Use oldString/newString for replacement or startLine/endLine with content for line-range edit"};
         }
-    } catch (const std::exception& e) {
-        return {call.id, "", true, e.what()};
-    }
+    TOOL_CATCH_END(call)
 }
 
 // ── Tool: search ──────────────────────────────────────────────────
 ToolResult Tools::tool_search(const ToolCall& call) {
-    try {
+    TOOL_CATCH_BEGIN(call)
         auto pattern = call.arguments.value("pattern", "");
         auto regex_mode = call.arguments.value("regex", false);
         auto case_sensitive = call.arguments.value("caseSensitive", true);
@@ -287,6 +285,7 @@ ToolResult Tools::tool_search(const ToolCall& call) {
             for (auto& f : files) {
                 result += f.string() + "\n";
             }
+            LOG_DEBUG("Tools", "File search found " + std::to_string(files.size()) + " results");
             return {call.id, result.empty() ? "No files found" : result, false, ""};
         }
 
@@ -295,15 +294,14 @@ ToolResult Tools::tool_search(const ToolCall& call) {
         for (auto& r : results) {
             output += r.file_path.string() + ":" + std::to_string(r.line_number) + ": " + r.line_content + "\n";
         }
+        LOG_DEBUG("Tools", "Content search found " + std::to_string(results.size()) + " matches");
         return {call.id, output.empty() ? "No matches found" : output, false, ""};
-    } catch (const std::exception& e) {
-        return {call.id, "", true, e.what()};
-    }
+    TOOL_CATCH_END(call)
 }
 
 // ── Tool: exec ────────────────────────────────────────────────────
 ToolResult Tools::tool_exec(const ToolCall& call) {
-    try {
+    TOOL_CATCH_BEGIN(call)
         auto command = call.arguments.value("command", "");
         auto workdir = call.arguments.value("workdir", ".");
 
@@ -313,6 +311,7 @@ ToolResult Tools::tool_exec(const ToolCall& call) {
         auto& perm = ModuleRegistry::instance().require<Permission>();
         auto check = perm.check_command(command);
         if (!check.is_safe) {
+            LOG_WARN("Tools", "Command blocked: " + command);
             return {call.id, "", true, "Command blocked: " + check.warning +
                     ". Dangerous patterns: " + [&]() {
                         std::string s;
@@ -320,6 +319,8 @@ ToolResult Tools::tool_exec(const ToolCall& call) {
                         return s;
                     }()};
         }
+
+        LOG_DEBUG("Tools", "Executing command: " + command);
 
         std::string full_cmd;
 #ifdef _WIN32
@@ -338,16 +339,18 @@ ToolResult Tools::tool_exec(const ToolCall& call) {
         }
         int rc = _pclose(pipe);
 
+        if (rc != 0) {
+            LOG_WARN("Tools", "Command exited with code " + std::to_string(rc) + ": " + command);
+        }
+
         return {call.id, output.empty() ? "(no output)" : output, false,
                 rc != 0 ? "Exit code: " + std::to_string(rc) : ""};
-    } catch (const std::exception& e) {
-        return {call.id, "", true, e.what()};
-    }
+    TOOL_CATCH_END(call)
 }
 
 // ── Tool: task ────────────────────────────────────────────────────
 ToolResult Tools::tool_task(const ToolCall& call) {
-    try {
+    TOOL_CATCH_BEGIN(call)
         auto name = call.arguments.value("name", "background-task");
         auto command = call.arguments.value("command", "");
         auto background = call.arguments.value("background", false);
@@ -356,11 +359,11 @@ ToolResult Tools::tool_task(const ToolCall& call) {
 
         auto& svc = ModuleRegistry::instance().require<Service>();
         auto task_id = svc.start_task(name, command, background);
+        LOG_INFO("Tools", "Task started: " + name + " (ID: " + task_id + ") in " +
+                (background ? "background" : "foreground") + " mode");
         return {call.id, "Task started: " + name + " (ID: " + task_id + ") in " +
                 (background ? "background" : "foreground") + " mode", false, ""};
-    } catch (const std::exception& e) {
-        return {call.id, "", true, e.what()};
-    }
+    TOOL_CATCH_END(call)
 }
 
 // ── Tool: question ────────────────────────────────────────────────
@@ -376,7 +379,7 @@ ToolResult Tools::tool_question(const ToolCall& call) {
 
 // ── Tool: websearch ───────────────────────────────────────────────
 ToolResult Tools::tool_websearch(const ToolCall& call) {
-    try {
+    TOOL_CATCH_BEGIN(call)
         auto query = call.arguments.value("query", "");
         auto engine = call.arguments.value("engine", "bing");
         auto count = call.arguments.value("count", 10);
@@ -408,8 +411,11 @@ ToolResult Tools::tool_websearch(const ToolCall& call) {
             client.set_default_proxy(cfg.websearch_proxy);
         }
 
+        LOG_DEBUG("Tools", "Searching: " + query + " (engine: " + engine + ")");
+
         auto resp = client.get(url, headers);
         if (!resp.ok()) {
+            LOG_ERROR("Tools", "Search failed: " + resp.error + " (HTTP " + std::to_string(resp.status_code) + ")");
             return {call.id, "", true, "Search failed: " + resp.error};
         }
 
@@ -443,15 +449,14 @@ ToolResult Tools::tool_websearch(const ToolCall& call) {
             extractResults(j["value"]);
         }
 
+        LOG_INFO("Tools", "Search completed: " + std::to_string(idx - 1) + " results found");
         return {call.id, output, false, ""};
-    } catch (const std::exception& e) {
-        return {call.id, "", true, e.what()};
-    }
+    TOOL_CATCH_END(call)
 }
 
 // ── Tool: webfetch ────────────────────────────────────────────────
 ToolResult Tools::tool_webfetch(const ToolCall& call) {
-    try {
+    TOOL_CATCH_BEGIN(call)
         auto url = call.arguments.value("url", "");
         auto output_file = call.arguments.value("output", "");
         auto resume = call.arguments.value("resume", false);
@@ -463,6 +468,8 @@ ToolResult Tools::tool_webfetch(const ToolCall& call) {
 
         if (!cfg.webfetch_proxy.empty()) client.set_default_proxy(cfg.webfetch_proxy);
 
+        LOG_DEBUG("Tools", "Fetching URL: " + url);
+
         if (!output_file.empty()) {
             // Check for existing partial download
             int64_t resume_from = -1;
@@ -471,23 +478,24 @@ ToolResult Tools::tool_webfetch(const ToolCall& call) {
             }
             client.download(url, output_file, resume_from);
             auto size = fs::file_size(output_file);
+            LOG_INFO("Tools", "Downloaded " + std::to_string(size) + " bytes to " + output_file);
             return {call.id, "Downloaded " + std::to_string(size) + " bytes to " + output_file, false, ""};
         }
 
         auto resp = client.get(url);
         if (!resp.ok()) {
+            LOG_ERROR("Tools", "Failed to fetch URL: " + resp.error + " (HTTP " + std::to_string(resp.status_code) + ")");
             return {call.id, "", true, "Failed to fetch: " + resp.error};
         }
 
+        LOG_INFO("Tools", "Fetched " + std::to_string(resp.body.size()) + " bytes from " + url);
         return {call.id, resp.body, false, ""};
-    } catch (const std::exception& e) {
-        return {call.id, "", true, e.what()};
-    }
+    TOOL_CATCH_END(call)
 }
 
 // ── Tool: mind-map ────────────────────────────────────────────────
 ToolResult Tools::tool_mind_map(const ToolCall& call) {
-    try {
+    TOOL_CATCH_BEGIN(call)
         auto title = call.arguments.value("title", "Mind Map");
 
         json nodes;
@@ -520,14 +528,12 @@ ToolResult Tools::tool_mind_map(const ToolCall& call) {
 
         render(nodes, 0, "");
         return {call.id, result, false, ""};
-    } catch (const std::exception& e) {
-        return {call.id, "", true, e.what()};
-    }
+    TOOL_CATCH_END(call)
 }
 
 // ── Tool: todolist ────────────────────────────────────────────────
 ToolResult Tools::tool_todolist(const ToolCall& call) {
-    try {
+    TOOL_CATCH_BEGIN(call)
         auto action = call.arguments.value("action", "list");
 
         if (action == "list") {
@@ -545,32 +551,34 @@ ToolResult Tools::tool_todolist(const ToolCall& call) {
             item["status"] = "pending";
             item["priority"] = call.arguments.value("priority", "medium");
             m_todos.push_back(item);
+            LOG_INFO("Tools", "Added todo #" + std::to_string(m_todos.size()));
             return {call.id, "Added todo #" + std::to_string(m_todos.size()), false, ""};
         } else if (action == "update") {
             auto idx = call.arguments.value("index", 1) - 1;
             if (idx < 0 || idx >= (int)m_todos.size()) return {call.id, "", true, "Invalid index"};
             if (call.arguments.contains("status")) m_todos[idx]["status"] = call.arguments["status"];
             if (call.arguments.contains("content")) m_todos[idx]["content"] = call.arguments["content"];
+            LOG_INFO("Tools", "Updated todo #" + std::to_string(idx + 1));
             return {call.id, "Updated todo #" + std::to_string(idx + 1), false, ""};
         } else if (action == "delete") {
             auto idx = call.arguments.value("index", 1) - 1;
             if (idx < 0 || idx >= (int)m_todos.size()) return {call.id, "", true, "Invalid index"};
             m_todos.erase(m_todos.begin() + idx);
+            LOG_INFO("Tools", "Deleted todo #" + std::to_string(idx + 1));
             return {call.id, "Deleted todo #" + std::to_string(idx + 1), false, ""};
         } else if (action == "clear") {
             m_todos.clear();
+            LOG_INFO("Tools", "Cleared all todos");
             return {call.id, "Cleared all todos", false, ""};
         }
 
         return {call.id, "", true, "Unknown action: " + action};
-    } catch (const std::exception& e) {
-        return {call.id, "", true, e.what()};
-    }
+    TOOL_CATCH_END(call)
 }
 
 // ── Tool: memory ──────────────────────────────────────────────────
 ToolResult Tools::tool_memory(const ToolCall& call) {
-    try {
+    TOOL_CATCH_BEGIN(call)
         auto action = call.arguments.value("action", "search");
         auto& mem = ModuleRegistry::instance().require<Memory>();
 
@@ -583,6 +591,7 @@ ToolResult Tools::tool_memory(const ToolCall& call) {
             entry.importance = call.arguments.value("importance", 0.5);
             entry.created_at = entry.updated_at = std::chrono::system_clock::now().time_since_epoch().count();
             auto saved = mem.save_entry(entry);
+            LOG_INFO("Tools", "Memory saved: " + saved.title);
             return {call.id, "Memory saved: " + saved.title, false, ""};
         } else if (action == "search") {
             auto text = call.arguments.value("query", call.arguments.value("text", ""));
@@ -599,6 +608,7 @@ ToolResult Tools::tool_memory(const ToolCall& call) {
             for (auto& r : results) {
                 output += "- [" + r.category + "] " + r.title + ": " + r.content + "\n";
             }
+            LOG_DEBUG("Tools", "Memory search returned " + std::to_string(results.size()) + " results");
             return {call.id, output.empty() ? "No memories found" : output, false, ""};
         } else if (action == "list") {
             auto all = mem.list_all();
@@ -610,19 +620,18 @@ ToolResult Tools::tool_memory(const ToolCall& call) {
         }
 
         return {call.id, "", true, "Unknown action: " + action};
-    } catch (const std::exception& e) {
-        return {call.id, "", true, e.what()};
-    }
+    TOOL_CATCH_END(call)
 }
 
 // ── Tool: image ───────────────────────────────────────────────────
 ToolResult Tools::tool_image(const ToolCall& call) {
-    try {
+    TOOL_CATCH_BEGIN(call)
         auto file_path = call.arguments.value("filePath", "");
         if (file_path.empty()) return {call.id, "", true, "filePath is required"};
 
         auto& provider = ModuleRegistry::instance().require<Provider>();
         if (!provider.supports_vision()) {
+            LOG_WARN("Tools", "Vision not supported by current model");
             return {call.id, "", true, "Current model does not support vision. Configure a vision-capable model or a vision-to-text bridge."};
         }
 
@@ -641,15 +650,14 @@ ToolResult Tools::tool_image(const ToolCall& call) {
         else if (ext == ".webp") mime = "image/webp";
         else if (ext == ".bmp") mime = "image/bmp";
 
+        LOG_DEBUG("Tools", "Loaded image: " + file_path + " (" + std::to_string(data.size()) + " bytes)");
         return {call.id, "data:" + mime + ";base64," + b64, false, ""};
-    } catch (const std::exception& e) {
-        return {call.id, "", true, e.what()};
-    }
+    TOOL_CATCH_END(call)
 }
 
 // ── Tool: fs ──────────────────────────────────────────────────────
 ToolResult Tools::tool_fs(const ToolCall& call) {
-    try {
+    TOOL_CATCH_BEGIN(call)
         auto action = call.arguments.value("action", "list");
         auto path = call.arguments.value("path", ".");
 
@@ -664,6 +672,7 @@ ToolResult Tools::tool_fs(const ToolCall& call) {
             return {call.id, output.empty() ? "Empty directory" : output, false, ""};
         } else if (action == "mkdir") {
             fsutil::create_directories(path);
+            LOG_INFO("Tools", "Created directory: " + path);
             return {call.id, "Created directory: " + path, false, ""};
         } else if (action == "remove") {
             auto recursive = call.arguments.value("recursive", false);
@@ -672,16 +681,19 @@ ToolResult Tools::tool_fs(const ToolCall& call) {
             } else {
                 fsutil::remove_file(path);
             }
+            LOG_INFO("Tools", "Removed: " + path);
             return {call.id, "Removed: " + path, false, ""};
         } else if (action == "copy") {
             auto dest = call.arguments.value("dest", "");
             if (dest.empty()) return {call.id, "", true, "dest is required"};
             fs::copy(path, dest, fs::copy_options::recursive);
+            LOG_INFO("Tools", "Copied: " + path + " -> " + dest);
             return {call.id, "Copied: " + path + " -> " + dest, false, ""};
         } else if (action == "move") {
             auto dest = call.arguments.value("dest", "");
             if (dest.empty()) return {call.id, "", true, "dest is required"};
             fs::rename(path, dest);
+            LOG_INFO("Tools", "Moved: " + path + " -> " + dest);
             return {call.id, "Moved: " + path + " -> " + dest, false, ""};
         } else if (action == "exists") {
             return {call.id, std::string(fs::exists(path) ? "true" : "false"), false, ""};
@@ -691,14 +703,12 @@ ToolResult Tools::tool_fs(const ToolCall& call) {
         }
 
         return {call.id, "", true, "Unknown action: " + action};
-    } catch (const std::exception& e) {
-        return {call.id, "", true, e.what()};
-    }
+    TOOL_CATCH_END(call)
 }
 
 // ── Tool: subagent ────────────────────────────────────────────────
 ToolResult Tools::tool_subagent(const ToolCall& call) {
-    try {
+    TOOL_CATCH_BEGIN(call)
         auto agent_type = call.arguments.value("type", "explorer");
         auto task = call.arguments.value("task", "");
         auto mode = call.arguments.value("mode", "foreground");
@@ -706,6 +716,8 @@ ToolResult Tools::tool_subagent(const ToolCall& call) {
         if (task.empty()) return {call.id, "", true, "task is required"};
 
         auto& agent = ModuleRegistry::instance().require<Agent>();
+
+        LOG_INFO("Tools", "Launching sub-agent: type=" + agent_type + ", mode=" + mode);
 
         if (agent_type == "explorer") {
             auto result = agent.execute_explorer(task);
@@ -717,6 +729,7 @@ ToolResult Tools::tool_subagent(const ToolCall& call) {
             cfg.system_prompt = call.arguments.value("systemPrompt", "");
             cfg.mode = SubAgentMode::Background;
             auto agent_id = agent.launch_background_sub_agent(cfg, task);
+            LOG_INFO("Tools", "Background sub-agent started: " + agent_id);
             return {call.id, "Background sub-agent started: " + agent_id, false, ""};
         } else {
             AgentConfig cfg;
@@ -727,31 +740,28 @@ ToolResult Tools::tool_subagent(const ToolCall& call) {
             auto result = agent.execute_sub_agent(cfg, task);
             return {call.id, result.output, result.success, result.error};
         }
-    } catch (const std::exception& e) {
-        return {call.id, "", true, e.what()};
-    }
+    TOOL_CATCH_END(call)
 }
 
 // ── Tool: git-saved ───────────────────────────────────────────────
 ToolResult Tools::tool_git_saved(const ToolCall& call) {
-    try {
+    TOOL_CATCH_BEGIN(call)
         auto message = call.arguments.value("message", "agent save point");
+        LOG_INFO("Tools", "Creating git save point: " + message);
         auto result = tool_exec({"git-save", "exec", {{"command", "git add -A && git commit -m \"" + message + "\""}, {"workdir", "."}}});
         return {call.id, result.content, result.is_error, result.error_message};
-    } catch (const std::exception& e) {
-        return {call.id, "", true, e.what()};
-    }
+    TOOL_CATCH_END(call)
 }
 
 // ── Tool: git-restore ─────────────────────────────────────────────
 ToolResult Tools::tool_git_restore(const ToolCall& call) {
-    try {
+    TOOL_CATCH_BEGIN(call)
         auto target = call.arguments.value("target", "HEAD~1");
+        LOG_INFO("Tools", "Restoring git to: " + target);
         auto result = tool_exec({"git-restore", "exec", {{"command", "git reset --hard " + target}, {"workdir", "."}}});
         return {call.id, result.content, result.is_error, result.error_message};
-    } catch (const std::exception& e) {
-        return {call.id, "", true, e.what()};
-    }
+    TOOL_CATCH_END(call)
 }
 
 } // namespace agent
+

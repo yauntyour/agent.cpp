@@ -1,4 +1,5 @@
 #include "utils/crypto.hpp"
+#include "core/exception.hpp"
 #include <cstring>
 #include <random>
 #include <sodium.h>
@@ -62,7 +63,8 @@ DerivedKey derive_key(std::string_view password, const unsigned char* salt) {
             crypto_pwhash_OPSLIMIT_MODERATE,
             crypto_pwhash_MEMLIMIT_MODERATE,
             crypto_pwhash_ALG_ARGON2ID13) != 0) {
-        throw std::runtime_error("crypto_pwhash: out of memory");
+        LOG_ERROR("Crypto", "Key derivation failed: out of memory");
+        throw CryptoException(ErrorCode::KeyDerivationFailed, "crypto_pwhash: out of memory");
     }
 
     return dk;
@@ -137,7 +139,8 @@ std::string hash_password(std::string_view password) {
             password.data(), password.size(),
             crypto_pwhash_OPSLIMIT_MODERATE,
             crypto_pwhash_MEMLIMIT_MODERATE) != 0) {
-        throw std::runtime_error("crypto_pwhash_str: out of memory");
+        LOG_ERROR("Crypto", "Password hashing failed: out of memory");
+        throw CryptoException(ErrorCode::HashFailed, "crypto_pwhash_str: out of memory");
     }
     return std::string(hash_out);
 }

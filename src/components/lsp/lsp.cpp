@@ -1,6 +1,7 @@
 #ifdef AGENT_ENABLE_LSP
 #include "components/lsp/lsp.hpp"
 #include "core/config.hpp"
+#include "core/logger.hpp"
 #include <sstream>
 #include <iostream>
 #include <cstring>
@@ -74,12 +75,12 @@ void LSP::start_server(std::string_view id) {
     if (conn.process.is_running()) return;
 
     if (!conn.process.spawn(conn.config.command, conn.config.args)) {
-        std::cerr << "LSP: Failed to spawn server " << id << std::endl;
+        LOG_ERROR("LSP", "Failed to spawn server: " + std::string(id));
         return;
     }
 
     if (!initialize_server(conn)) {
-        std::cerr << "LSP: Failed to initialize server " << id << std::endl;
+        LOG_ERROR("LSP", "Failed to initialize server: " + std::string(id));
         conn.process.terminate();
         return;
     }
@@ -148,7 +149,15 @@ json LSP::read_lsp_message(ServerConnection& conn, int timeout_ms) {
             std::string val = hline.substr(hline.find(':') + 1);
             while (!val.empty() && (val.front() == ' ' || val.front() == '\r')) val.erase(0, 1);
             while (!val.empty() && (val.back() == '\r' || val.back() == '\n')) val.pop_back();
-            try { content_length = std::stoul(val); } catch (...) { return nullptr; }
+            try {
+                content_length = std::stoul(val);
+            } catch (const std::invalid_argument& e) {
+                LOG_DEBUG("LSP", "Invalid Content-Length value: " + val);
+                return nullptr;
+            } catch (const std::out_of_range& e) {
+                LOG_DEBUG("LSP", "Content-Length value out of range: " + val);
+                return nullptr;
+            }
         }
     }
 
@@ -262,7 +271,9 @@ bool LSP::initialize_server(ServerConnection& conn) {
     if (!conn.config.initialization_options.empty()) {
         try {
             init_params["initializationOptions"] = json::parse(conn.config.initialization_options);
-        } catch (...) {}
+        } catch (const json::parse_error& e) {
+            LOG_WARN("LSP", "Failed to parse initialization options: " + std::string(e.what()));
+        }
     }
 
     auto response = send_request(conn, "initialize", init_params);

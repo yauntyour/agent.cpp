@@ -4,6 +4,7 @@
 #include "components/notice/notice.hpp"
 #include "components/memory/memory.hpp"
 #include "components/permission/permission.hpp"
+#include "core/exception.hpp"
 #include <sstream>
 #include <regex>
 
@@ -231,7 +232,13 @@ AgentResult Agent::run_mpc_loop(const AgentConfig& config,
             } else {
                 response = provider.generate(messages, available_tools);
             }
+        } catch (const ProviderException& e) {
+            LOG_ERROR("Agent", std::string("Provider error in MPC loop: ") + e.what());
+            result.success = false;
+            result.error = std::string("[") + std::string(e.error_code_name()) + "] " + e.message();
+            return result;
         } catch (const std::exception& e) {
+            LOG_ERROR("Agent", std::string("Unexpected error in MPC loop: ") + e.what());
             result.success = false;
             result.error = e.what();
             return result;
@@ -349,7 +356,11 @@ ChatMessage Agent::parse_tool_call(std::string_view response) {
                 if (j.contains("tool_calls")) {
                     msg.tool_calls = j["tool_calls"];
                 }
-            } catch (...) {}
+            } catch (const json::parse_error& e) {
+                LOG_DEBUG("Agent", std::string("Failed to parse tool calls JSON: ") + e.what());
+            } catch (const std::exception& e) {
+                LOG_DEBUG("Agent", std::string("Error processing tool calls: ") + e.what());
+            }
         }
     }
 
@@ -387,7 +398,14 @@ std::string Agent::launch_background_sub_agent(const AgentConfig& config, std::s
                 auto& notice = ModuleRegistry::instance().require<Notice>();
                 notice.background_completed(bg->id, result.output);
             }
+        } catch (const BaseException& e) {
+            LOG_ERROR("Agent", std::string("Background sub-agent failed: ") + e.what());
+            AgentResult err;
+            err.success = false;
+            err.error = std::string("[") + std::string(e.error_code_name()) + "] " + e.message();
+            promise->set_value(err);
         } catch (const std::exception& e) {
+            LOG_ERROR("Agent", std::string("Background sub-agent unexpected error: ") + e.what());
             AgentResult err;
             err.success = false;
             err.error = e.what();

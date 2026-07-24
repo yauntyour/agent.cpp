@@ -1,5 +1,7 @@
 #include "core/module.hpp"
 #include "core/config.hpp"
+#include "core/logger.hpp"
+#include "core/exception.hpp"
 #include "components/provider/provider.hpp"
 #include "components/tools/tools.hpp"
 #include "components/session/session.hpp"
@@ -101,6 +103,7 @@ int run_cli_mode(const System::CLIOptions& opts) {
             }, true);
         std::cout << std::endl;
         if (!result.success) {
+            LOG_ERROR("Main", "Command execution failed: " + result.error);
             std::cerr << "Error: " << result.error << std::endl;
             return 1;
         }
@@ -123,6 +126,7 @@ int run_cli_mode(const System::CLIOptions& opts) {
                 }, true);
             std::cout << std::endl;
             if (!result.success) {
+                LOG_ERROR("Main", "Execution failed: " + result.error);
                 std::cerr << "Error: " << result.error << std::endl;
             }
         }
@@ -138,6 +142,7 @@ int run_tui_mode(const System::CLIOptions& opts) {
     auto& sys = registry.require<System>();
     auto& agent = registry.require<Agent>();
     auto& sessions = registry.require<SessionManager>();
+    auto& config = Config::instance();
 
     if (!opts.session_id.empty()) {
         sessions.set_current(opts.session_id);
@@ -155,6 +160,19 @@ int run_tui_mode(const System::CLIOptions& opts) {
     tui.set_lsp_status("idle");
     tui.set_mcp_status("idle");
 
+    Theme theme;
+    if (config.tui_theme != "default" && config.themes.count(config.tui_theme)) {
+        auto& tc = config.themes[config.tui_theme];
+        theme = Theme::from_config(
+            config.tui_theme,
+            tc.primary_color, tc.secondary_color, tc.success_color,
+            tc.warning_color, tc.error_color,
+            tc.background_color, tc.foreground_color,
+            tc.status_bar_color, tc.input_color, tc.border_color
+        );
+    }
+    tui.set_theme(theme);
+
     {
         auto cmds = sys.list_commands();
         std::vector<std::string> completions;
@@ -166,10 +184,18 @@ int run_tui_mode(const System::CLIOptions& opts) {
     }
 
     tui.on_input_submit([&](std::string_view text) {
-        auto result = agent.execute(text,
-            [&](std::string_view type, std::string_view content) {
-                if (type == "thinking") tui.append_content(content);
-            }, true);
+        try {
+            agent.execute(text,
+                [&](std::string_view type, std::string_view content) {
+                    if (type == "thinking") tui.append_content(content);
+                }, true);
+        } catch (const BaseException& e) {
+            LOG_ERROR("Main", std::string("TUI execution error: ") + e.what());
+            tui.append_content("\n[ERROR] " + std::string(e.error_code_name()) + ": " + e.message());
+        } catch (const std::exception& e) {
+            LOG_ERROR("Main", std::string("TUI execution error: ") + e.what());
+            tui.append_content("\n[ERROR] " + std::string(e.what()));
+        }
     });
 
     tui.on_command([&](std::string_view cmd) {
@@ -179,6 +205,7 @@ int run_tui_mode(const System::CLIOptions& opts) {
     tui.run();
     return 0;
 #else
+    LOG_ERROR("Main", "TUI mode not available (compiled without AGENT_ENABLE_TUI)");
     std::cerr << "TUI not available" << std::endl;
     return 1;
 #endif
@@ -205,6 +232,7 @@ int run_router_mode(const System::CLIOptions& opts) {
     router.stop();
     return 0;
 #else
+    LOG_ERROR("Main", "Router mode not available (compiled without AGENT_ENABLE_ROUTER)");
     std::cerr << "Router not available" << std::endl;
     return 1;
 #endif
@@ -251,7 +279,11 @@ int main(int argc, char* argv[]) {
         } else {
             system_component.init(System::InitMode::Normal);
         }
+    } catch (const BaseException& e) {
+        LOG_ERROR("Main", std::string("Initialization failed: ") + e.what());
+        std::cerr << "Init error: " << e.what() << std::endl;
     } catch (const std::exception& e) {
+        LOG_ERROR("Main", std::string("Initialization failed: ") + e.what());
         std::cerr << "Init error: " << e.what() << std::endl;
     }
 
@@ -264,7 +296,11 @@ int main(int argc, char* argv[]) {
         std::cout << "agent.cpp v" << AGENT_VERSION << std::endl;
         try {
             ModuleRegistry::instance().shutdown_all();
+        } catch (const BaseException& e) {
+            LOG_ERROR("Main", std::string("Shutdown error: ") + e.what());
+            std::cerr << "Shutdown error: " << e.what() << std::endl;
         } catch (const std::exception& e) {
+            LOG_ERROR("Main", std::string("Shutdown error: ") + e.what());
             std::cerr << "Shutdown error: " << e.what() << std::endl;
         }
         return 0;

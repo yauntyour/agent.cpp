@@ -1,5 +1,6 @@
 #include "components/session/session.hpp"
 #include "core/config.hpp"
+#include "core/logger.hpp"
 #include <fstream>
 #include <chrono>
 #include <nlohmann/json.hpp>
@@ -84,7 +85,11 @@ std::vector<SessionInfo> SessionManager::list_sessions(std::string_view project_
             info.message_count = j.value("message_count", 0);
             info.total_tokens = j.value("total_tokens", 0LL);
             sessions.push_back(info);
-        } catch (...) {}
+        } catch (const json::parse_error& e) {
+            LOG_WARN("Session", "Corrupted session file: " + entry.path().string() + " - " + e.what());
+        } catch (const std::exception& e) {
+            LOG_WARN("Session", "Failed to load session: " + entry.path().string() + " - " + e.what());
+        }
     }
 
     // Sort by updated_at descending
@@ -226,7 +231,11 @@ std::string SessionManager::get_asset(std::string_view asset_ref) {
         auto& assets = m_assets[m_current_id];
         if (idx < 0 || idx >= static_cast<int>(assets.size())) return "";
         return assets[idx];
-    } catch (...) {
+    } catch (const std::invalid_argument& e) {
+        LOG_DEBUG("Session", "Invalid asset reference format: " + ref);
+        return "";
+    } catch (const std::out_of_range& e) {
+        LOG_DEBUG("Session", "Asset reference out of range: " + ref);
         return "";
     }
 }

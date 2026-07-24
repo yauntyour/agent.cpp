@@ -1,4 +1,5 @@
 #pragma once
+#include "logger.hpp"
 #include <string>
 #include <string_view>
 #include <memory>
@@ -50,7 +51,11 @@ public:
     Module() = default;
     ~Module() override {
         if (m_state != ModuleState::Terminated) {
-            try { shutdown(); } catch (...) {}
+            try { shutdown(); } catch (const std::exception& e) {
+                LOG_WARN(static_name(), std::string("Exception during shutdown: ") + e.what());
+            } catch (...) {
+                LOG_WARN(static_name(), "Unknown exception during shutdown");
+            }
         }
     }
 
@@ -104,8 +109,12 @@ public:
     template<typename T>
     T& require() {
         auto* ptr = get<T>();
-        if (!ptr) throw std::runtime_error("Required module not registered: " + std::string(typeid(T).name()));
+        if (!ptr) {
+            LOG_ERROR("Module", std::string("Required module not registered: ") + typeid(T).name());
+            throw std::runtime_error("Required module not registered: " + std::string(typeid(T).name()));
+        }
         if (ptr->state() == ModuleState::Uninitialized) {
+            LOG_DEBUG("Module", std::string("Auto-initializing module: ") + ptr->name().data());
             ptr->initialize();
         }
         return *ptr;

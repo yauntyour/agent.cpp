@@ -1,5 +1,6 @@
 #include "components/edit_history/edit_history.hpp"
 #include "core/config.hpp"
+#include "core/logger.hpp"
 #include "utils/fs.hpp"
 #include <fstream>
 #include <sstream>
@@ -99,8 +100,10 @@ bool EditHistory::rollback_to_record(size_t record_index) {
     if (rec.before.contains("content")) {
         try {
             fsutil::write_file(rec.file_path, rec.before["content"].get<std::string>());
+            LOG_INFO("EditHistory", "Rolled back file: " + rec.file_path);
             return true;
-        } catch (...) {
+        } catch (const std::exception& e) {
+            LOG_ERROR("EditHistory", "Failed to rollback file: " + rec.file_path + " - " + e.what());
             return false;
         }
     }

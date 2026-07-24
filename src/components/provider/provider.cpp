@@ -1,5 +1,6 @@
 #include "components/provider/provider.hpp"
 #include "utils/http.hpp"
+#include "core/exception.hpp"
 #include <nlohmann/json.hpp>
 
 namespace agent {
@@ -113,7 +114,10 @@ std::string Provider::generate(const std::vector<ChatMessage>& messages,
                                 const std::vector<ToolDefinition>& tools,
                                 const json& extra) {
     auto* cfg = Config::instance().current_provider();
-    if (!cfg) throw std::runtime_error("No provider configured");
+    if (!cfg) {
+        LOG_ERROR("Provider", "No provider configured");
+        throw ProviderException(ErrorCode::NoProviderConfig, "No provider configured");
+    }
 
     std::string type = cfg->type;
     if (type.empty()) {
@@ -123,6 +127,8 @@ std::string Provider::generate(const std::vector<ChatMessage>& messages,
         else if (cfg->api_base.find("8080") != std::string::npos) type = "llama_server";
         else type = "openai";
     }
+
+    LOG_DEBUG("Provider", "Generating with provider type: " + type + ", model: " + cfg->model);
 
     if (type == "anthropic") return generate_anthropic(messages, tools, extra, *cfg);
     if (type == "ollama") return generate_ollama(messages, tools, extra, *cfg);
@@ -135,7 +141,10 @@ void Provider::generate_stream(const std::vector<ChatMessage>& messages,
                                const std::vector<ToolDefinition>& tools,
                                const json& extra) {
     auto* cfg = Config::instance().current_provider();
-    if (!cfg) throw std::runtime_error("No provider configured");
+    if (!cfg) {
+        LOG_ERROR("Provider", "No provider configured for streaming");
+        throw ProviderException(ErrorCode::NoProviderConfig, "No provider configured");
+    }
 
     std::string type = cfg->type;
     if (type.empty()) {
@@ -144,6 +153,8 @@ void Provider::generate_stream(const std::vector<ChatMessage>& messages,
         else if (cfg->api_base.find("8080") != std::string::npos) type = "llama_server";
         else type = "openai";
     }
+
+    LOG_DEBUG("Provider", "Streaming with provider type: " + type + ", model: " + cfg->model);
 
     if (type == "anthropic") generate_anthropic_stream(messages, callback, tools, extra, *cfg);
     else if (type == "ollama") generate_ollama_stream(messages, callback, tools, extra, *cfg);
@@ -210,11 +221,20 @@ std::string Provider::generate_openai(const std::vector<ChatMessage>& messages,
     });
 
     if (!resp.ok()) {
-        throw std::runtime_error("OpenAI API error: " + resp.error + " body: " + resp.body);
+        LOG_ERROR("Provider", "OpenAI API error: " + resp.error + " (HTTP " + std::to_string(resp.status_code) + ")");
+        throw ApiException("OpenAI API error: " + resp.error + " body: " + resp.body, resp.status_code);
     }
 
-    auto j = json::parse(resp.body);
-    return j["choices"][0]["message"]["content"].get<std::string>();
+    try {
+        auto j = json::parse(resp.body);
+        return j["choices"][0]["message"]["content"].get<std::string>();
+    } catch (const json::parse_error& e) {
+        LOG_ERROR("Provider", std::string("Failed to parse OpenAI response: ") + e.what());
+        throw ProviderException(ErrorCode::InvalidApiResponse, "Failed to parse OpenAI response: " + std::string(e.what()));
+    } catch (const json::out_of_range& e) {
+        LOG_ERROR("Provider", std::string("Unexpected OpenAI response structure: ") + e.what());
+        throw ProviderException(ErrorCode::InvalidApiResponse, "Unexpected OpenAI response structure: " + std::string(e.what()));
+    }
 }
 
 void Provider::generate_openai_stream(const std::vector<ChatMessage>& messages,
@@ -337,8 +357,12 @@ void Provider::generate_openai_stream(const std::vector<ChatMessage>& messages,
                 !chunk.tool_call_name.empty() || chunk.finished) {
                 callback(chunk);
             }
-        } catch (const std::exception&) {
-            // Skip malformed chunks
+        } catch (const json::parse_error& e) {
+            LOG_DEBUG("Provider", std::string("Skipping malformed SSE chunk: ") + e.what());
+        } catch (const json::out_of_range& e) {
+            LOG_DEBUG("Provider", std::string("Skipping SSE chunk with missing fields: ") + e.what());
+        } catch (const std::exception& e) {
+            LOG_DEBUG("Provider", std::string("Error processing SSE chunk: ") + e.what());
         }
     });
 }
@@ -409,16 +433,25 @@ std::string Provider::generate_anthropic(const std::vector<ChatMessage>& message
     });
 
     if (!resp.ok()) {
-        throw std::runtime_error("Anthropic API error: " + resp.error + " body: " + resp.body);
+        LOG_ERROR("Provider", "Anthropic API error: " + resp.error + " (HTTP " + std::to_string(resp.status_code) + ")");
+        throw ApiException("Anthropic API error: " + resp.error + " body: " + resp.body, resp.status_code);
     }
 
-    auto j = json::parse(resp.body);
-    for (auto& c : j["content"]) {
-        if (c["type"] == "text") {
-            return c["text"].get<std::string>();
+    try {
+        auto j = json::parse(resp.body);
+        for (auto& c : j["content"]) {
+            if (c["type"] == "text") {
+                return c["text"].get<std::string>();
+            }
         }
+        return "";
+    } catch (const json::parse_error& e) {
+        LOG_ERROR("Provider", std::string("Failed to parse Anthropic response: ") + e.what());
+        throw ProviderException(ErrorCode::InvalidApiResponse, "Failed to parse Anthropic response: " + std::string(e.what()));
+    } catch (const json::out_of_range& e) {
+        LOG_ERROR("Provider", std::string("Unexpected Anthropic response structure: ") + e.what());
+        throw ProviderException(ErrorCode::InvalidApiResponse, "Unexpected Anthropic response structure: " + std::string(e.what()));
     }
-    return "";
 }
 
 void Provider::generate_anthropic_stream(const std::vector<ChatMessage>& messages,
@@ -523,7 +556,13 @@ void Provider::generate_anthropic_stream(const std::vector<ChatMessage>& message
             if (!chunk.content.empty() || !chunk.reasoning_content.empty() || chunk.finished) {
                 callback(chunk);
             }
-        } catch (...) {}
+        } catch (const json::parse_error& e) {
+            LOG_DEBUG("Provider", std::string("Skipping malformed Anthropic SSE chunk: ") + e.what());
+        } catch (const json::out_of_range& e) {
+            LOG_DEBUG("Provider", std::string("Skipping Anthropic SSE chunk with missing fields: ") + e.what());
+        } catch (const std::exception& e) {
+            LOG_DEBUG("Provider", std::string("Error processing Anthropic SSE chunk: ") + e.what());
+        }
     });
 }
 
@@ -564,11 +603,20 @@ std::string Provider::generate_ollama(const std::vector<ChatMessage>& messages,
     });
 
     if (!resp.ok()) {
-        throw std::runtime_error("Ollama API error: " + resp.error + " body: " + resp.body);
+        LOG_ERROR("Provider", "Ollama API error: " + resp.error + " (HTTP " + std::to_string(resp.status_code) + ")");
+        throw ApiException("Ollama API error: " + resp.error + " body: " + resp.body, resp.status_code);
     }
 
-    auto j = json::parse(resp.body);
-    return j["message"]["content"].get<std::string>();
+    try {
+        auto j = json::parse(resp.body);
+        return j["message"]["content"].get<std::string>();
+    } catch (const json::parse_error& e) {
+        LOG_ERROR("Provider", std::string("Failed to parse Ollama response: ") + e.what());
+        throw ProviderException(ErrorCode::InvalidApiResponse, "Failed to parse Ollama response: " + std::string(e.what()));
+    } catch (const json::out_of_range& e) {
+        LOG_ERROR("Provider", std::string("Unexpected Ollama response structure: ") + e.what());
+        throw ProviderException(ErrorCode::InvalidApiResponse, "Unexpected Ollama response structure: " + std::string(e.what()));
+    }
 }
 
 void Provider::generate_ollama_stream(const std::vector<ChatMessage>& messages,
@@ -631,7 +679,13 @@ void Provider::generate_ollama_stream(const std::vector<ChatMessage>& messages,
                 chunk.finish_reason = "stop";
             }
             callback(chunk);
-        } catch (...) {}
+        } catch (const json::parse_error& e) {
+            LOG_DEBUG("Provider", std::string("Skipping malformed Ollama NDJSON line: ") + e.what());
+        } catch (const json::out_of_range& e) {
+            LOG_DEBUG("Provider", std::string("Skipping Ollama NDJSON with missing fields: ") + e.what());
+        } catch (const std::exception& e) {
+            LOG_DEBUG("Provider", std::string("Error processing Ollama NDJSON line: ") + e.what());
+        }
     }
 }
 

@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-option(AGENT_ENABLE_TUI "Enable Notcurses TUI interface" ON)
+option(AGENT_ENABLE_TUI "Enable FTXUI TUI interface" ON)
 option(AGENT_ENABLE_ROUTER "Enable servic.cpp HTTP router component" ON)
 option(AGENT_ENABLE_LSP "Enable LSP server support" ON)
 option(AGENT_ENABLE_TESTS "Build tests" OFF)
@@ -22,7 +22,13 @@ pkg_check_modules(NLOHMANN_JSON REQUIRED nlohmann_json IMPORTED_TARGET)
 find_package(Threads REQUIRED)
 
 if(AGENT_ENABLE_TUI)
-    message(STATUS "TUI enabled (ANSI-based, no external dependencies)")
+    include(FetchContent)
+    FetchContent_Declare(ftxui
+        GIT_REPOSITORY https://github.com/ArthurSonzogni/ftxui
+        GIT_TAG v7.0.1
+    )
+    FetchContent_MakeAvailable(ftxui)
+    message(STATUS "TUI enabled (FTXUI-based)")
 endif()
 
 if(AGENT_ENABLE_ROUTER)
@@ -141,6 +147,7 @@ endif()
 
 if(AGENT_ENABLE_TUI)
     target_compile_definitions(agent PRIVATE AGENT_ENABLE_TUI)
+    target_link_libraries(agent PRIVATE ftxui::ftxui)
 endif()
 
 if(AGENT_STATIC_LINK AND MINGW)

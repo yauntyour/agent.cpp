@@ -1,4 +1,5 @@
 #include "utils/http.hpp"
+#include "core/logger.hpp"
 #include <fstream>
 #include <iostream>
 #include <cstring>
@@ -123,12 +124,17 @@ HttpResponse HttpClient::request(const HttpRequest& req) {
 
     if (res != CURLE_OK) {
         resp.error = curl_easy_strerror(res);
+        LOG_ERROR("HTTP", "Request failed: " + req.url + " - " + resp.error);
     } else {
         long status = 0;
         curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, &status);
         resp.status_code = status;
         resp.body = std::move(body);
         resp.headers = std::move(headers);
+
+        if (status >= 400) {
+            LOG_WARN("HTTP", "HTTP " + std::to_string(status) + " for " + req.url);
+        }
     }
 
     curl_easy_cleanup(handle);

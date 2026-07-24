@@ -1,5 +1,6 @@
 #include "components/mcp/mcp.hpp"
 #include "components/tools/tools.hpp"
+#include "core/logger.hpp"
 #include <sstream>
 #include <iostream>
 
@@ -59,12 +60,12 @@ void MCP::start_server(std::string_view id) {
     if (conn.process.is_running()) return;
 
     if (!conn.process.spawn(conn.config.command, conn.config.args, ".", conn.config.env)) {
-        std::cerr << "MCP: Failed to spawn server " << id << std::endl;
+        LOG_ERROR("MCP", "Failed to spawn server: " + std::string(id));
         return;
     }
 
     if (!initialize_server(conn)) {
-        std::cerr << "MCP: Failed to initialize server " << id << std::endl;
+        LOG_ERROR("MCP", "Failed to initialize server: " + std::string(id));
         conn.process.terminate();
         return;
     }

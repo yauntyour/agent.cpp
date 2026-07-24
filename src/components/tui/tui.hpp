@@ -9,13 +9,65 @@
 #include <mutex>
 #include <atomic>
 #include <deque>
+#include <memory>
 #include <nlohmann/json.hpp>
 
+namespace ftxui {
+class ComponentBase;
+using Component = std::shared_ptr<ComponentBase>;
+} // namespace ftxui
+
 namespace agent {
+
+struct Theme {
+    std::string name = "default";
+    
+    struct {
+        std::string primary = "#268bd2";
+        std::string secondary = "#2aa198";
+        std::string success = "#859900";
+        std::string warning = "#b58900";
+        std::string error = "#dc322f";
+        std::string info = "#6c71c4";
+        std::string muted = "#586e75";
+    } colors;
+    
+    struct {
+        std::string background = "#002b36";
+        std::string foreground = "#839496";
+        std::string status_bar = "#073642";
+        std::string input = "#073642";
+        std::string border = "#586e75";
+    } background;
+    
+    static Theme from_config(const std::string& name, const std::string& primary, 
+                            const std::string& secondary, const std::string& success,
+                            const std::string& warning, const std::string& error,
+                            const std::string& bg, const std::string& fg,
+                            const std::string& status, const std::string& input,
+                            const std::string& border) {
+        Theme t;
+        t.name = name;
+        t.colors.primary = primary;
+        t.colors.secondary = secondary;
+        t.colors.success = success;
+        t.colors.warning = warning;
+        t.colors.error = error;
+        t.background.background = bg;
+        t.background.foreground = fg;
+        t.background.status_bar = status;
+        t.background.input = input;
+        t.background.border = border;
+        return t;
+    }
+};
 
 class TUI : public Module<TUI> {
 public:
     static constexpr std::string_view static_name() { return "tui"; }
+    
+    TUI();
+    ~TUI();
 
     void on_initialize();
     void on_shutdown();
@@ -53,15 +105,20 @@ public:
     void show_help();
 
     void set_command_completions(const std::vector<std::string>& commands);
+    
+    void set_theme(const Theme& theme);
+    Theme get_theme() const;
 
 private:
     void main_loop();
-    void render();
-    void render_status_bar();
-    void render_content();
-    void render_input_prompt();
-    std::string read_line();
-    void handle_tab_completion(std::string& buffer, int& cursor);
+    void create_components();
+    ftxui::Component create_status_bar();
+    ftxui::Component create_content_area();
+    ftxui::Component create_input_area();
+    ftxui::Component create_edit_panel();
+    
+    void handle_input(std::string_view input);
+    void handle_tab_completion(std::string& buffer);
     std::string find_common_prefix(const std::vector<std::string>& matches) const;
 
     std::string m_main_content;
@@ -90,6 +147,11 @@ private:
 
     int m_term_w = 80;
     int m_term_h = 24;
+    
+    Theme m_theme;
+    
+    struct Impl;
+    std::unique_ptr<Impl> m_impl;
 };
 
 } // namespace agent

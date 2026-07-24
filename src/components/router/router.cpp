@@ -3,6 +3,8 @@
 #include "components/session/session.hpp"
 #include "components/agent/agent.hpp"
 #include "components/system/system.hpp"
+#include "core/logger.hpp"
+#include "core/exception.hpp"
 #include "utils/crypto.hpp"
 
 #include "external/servic/servic.hpp"
@@ -153,10 +155,11 @@ void Router::start() {
     for (const auto& route : m_routes) {
         auto handler = route.handler;
         bool auth = route.requires_auth;
+        std::string route_path = route.path;
 
         m_impl->ros.on(route.path,
-            [handler, auth, this](std::string& raw_request, std::string& raw_response,
-                                   const std::map<std::string, std::string>& params) -> int {
+            [handler, auth, route_path, this](std::string& raw_request, std::string& raw_response,
+                                    const std::map<std::string, std::string>& params) -> int {
                 auto headers = extract_all_headers(raw_request);
 
                 std::string method;
@@ -176,7 +179,8 @@ void Router::start() {
                 if (!body.empty()) {
                     try {
                         req_json = json::parse(body);
-                    } catch (const std::exception&) {
+                    } catch (const json::parse_error& e) {
+                        LOG_WARN("Router", std::string("Invalid JSON in request body: ") + e.what());
                         raw_response = make_http_response(
                             error_response("Invalid JSON in request body").dump(), 400);
                         return rt::FLAG_DONE;
@@ -192,6 +196,7 @@ void Router::start() {
                     }
 
                     if (token.empty() || !verify_auth_token(token)) {
+                        LOG_WARN("Router", "Authentication failed for request to " + route_path);
                         raw_response = make_http_response(
                             error_response("Authentication required. Use POST /api/login to get a token.", 401).dump(), 401);
                         return rt::FLAG_DONE;
@@ -201,7 +206,12 @@ void Router::start() {
                 try {
                     json result = handler(req_json, headers);
                     raw_response = make_http_response(result.dump());
+                } catch (const agent::BaseException& e) {
+                    LOG_ERROR("Router", std::string("Handler error: ") + e.what());
+                    raw_response = make_http_response(
+                        error_response(std::string("[") + std::string(e.error_code_name()) + "] " + e.message()).dump(), 500);
                 } catch (const std::exception& e) {
+                    LOG_ERROR("Router", std::string("Handler exception: ") + e.what());
                     raw_response = make_http_response(
                         error_response(e.what()).dump(), 500);
                 }
@@ -239,7 +249,8 @@ void Router::start() {
                 if (!body.empty()) {
                     try {
                         req_json = json::parse(body);
-                    } catch (const std::exception&) {
+                    } catch (const json::parse_error& e) {
+                        LOG_WARN("Router", std::string("Invalid JSON in stream request: ") + e.what());
                         write(make_http_response(
                             error_response("Invalid JSON").dump(), 400));
                         return;
@@ -253,6 +264,7 @@ void Router::start() {
                         token = auth_header.substr(7);
                     }
                     if (token.empty() || !verify_auth_token(token)) {
+                        LOG_WARN("Router", "Authentication failed for stream request");
                         write(make_http_response(
                             error_response("Authentication required", 401).dump(), 401));
                         return;
@@ -272,7 +284,11 @@ void Router::start() {
                         write(sse);
                     });
                     write("data: [DONE]\n\n");
+                } catch (const agent::BaseException& e) {
+                    LOG_ERROR("Router", std::string("Stream handler error: ") + e.what());
+                    write("data: [ERROR] " + std::string(e.error_code_name()) + ": " + e.message() + "\n\n");
                 } catch (const std::exception& e) {
+                    LOG_ERROR("Router", std::string("Stream handler exception: ") + e.what());
                     write("data: [ERROR] " + std::string(e.what()) + "\n\n");
                 }
             });
@@ -282,12 +298,12 @@ void Router::start() {
         try {
             m_impl->server->run(m_impl->ros);
         } catch (const std::exception& e) {
-            std::cerr << "Router server exception: " << e.what() << std::endl;
+            LOG_ERROR("Router", std::string("Server exception: ") + e.what());
         }
     });
 
     m_running.store(true);
-    std::cout << "Router listening on " << m_config.bind_address << ":" << m_config.port << std::endl;
+    LOG_INFO("Router", "Listening on " + m_config.bind_address + ":" + std::to_string(m_config.port));
 }
 
 void Router::stop() {

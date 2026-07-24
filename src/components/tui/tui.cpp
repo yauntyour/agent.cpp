@@ -1,126 +1,61 @@
 #ifdef AGENT_ENABLE_TUI
 #include "components/tui/tui.hpp"
+#include <ftxui/dom/elements.hpp>
+#include <ftxui/screen/screen.hpp>
+#include <ftxui/component/component.hpp>
+#include <ftxui/component/screen_interactive.hpp>
+#include <ftxui/component/event.hpp>
 #include <iostream>
 #include <sstream>
 #include <algorithm>
 #include <cstring>
 
-#ifdef _WIN32
-#include <windows.h>
-#include <conio.h>
-#else
-#include <termios.h>
-#include <unistd.h>
-#include <sys/ioctl.h>
-#endif
-
 namespace agent {
 
+using namespace ftxui;
+
 namespace {
-
-#ifdef _WIN32
-void enable_vt_mode() {
-    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
-    DWORD mode = 0;
-    GetConsoleMode(hOut, &mode);
-    mode |= 0x0004;
-    SetConsoleMode(hOut, mode);
-
-    HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
-    GetConsoleMode(hIn, &mode);
-    mode |= 0x0200;
-    mode &= ~0x0040;
-    SetConsoleMode(hIn, mode);
-}
-
-void get_term_size(int& w, int& h) {
-    CONSOLE_SCREEN_BUFFER_INFO csbi;
-    if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi)) {
-        w = csbi.srWindow.Right - csbi.srWindow.Left + 1;
-        h = csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
+Color hex_to_color(const std::string& hex) {
+    if (hex.empty() || hex[0] != '#') return Color::Default;
+    
+    auto hex_to_int = [](const std::string& s) -> uint8_t {
+        return static_cast<uint8_t>(std::stoul(s, nullptr, 16));
+    };
+    
+    if (hex.size() == 7) {
+        uint8_t r = hex_to_int(hex.substr(1, 2));
+        uint8_t g = hex_to_int(hex.substr(3, 2));
+        uint8_t b = hex_to_int(hex.substr(5, 2));
+        return Color::RGB(r, g, b);
     }
+    return Color::Default;
 }
-#else
-void enable_vt_mode() {}
-
-void get_term_size(int& w, int& h) {
-    struct winsize ws;
-    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0) {
-        w = ws.ws_col;
-        h = ws.ws_row;
-    }
-}
-
-struct RawMode {
-    termios orig;
-    RawMode() {
-        tcgetattr(STDIN_FILENO, &orig);
-        termios raw = orig;
-        raw.c_lflag &= ~(ECHO | ICANON);
-        raw.c_cc[VMIN] = 1;
-        raw.c_cc[VTIME] = 0;
-        tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
-    }
-    ~RawMode() { tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig); }
-};
-#endif
-
-constexpr const char* ESC = "\033";
-constexpr const char* CSI = "\033[";
-constexpr const char* RESET = "\033[0m";
-constexpr const char* BOLD = "\033[1m";
-constexpr const char* DIM = "\033[2m";
-
-constexpr const char* FG_CYAN = "\033[36m";
-constexpr const char* FG_GREEN = "\033[32m";
-constexpr const char* FG_YELLOW = "\033[33m";
-constexpr const char* FG_RED = "\033[31m";
-constexpr const char* FG_WHITE = "\033[37m";
-constexpr const char* FG_GRAY = "\033[90m";
-
-constexpr const char* BG_DARK = "\033[48;2;0;43;54m";
-constexpr const char* BG_INPUT = "\033[48;2;7;54;66m";
-constexpr const char* BG_STATUS = "\033[48;2;238;232;213m";
-constexpr const char* FG_STATUS = "\033[38;2;0;43;54m";
-
-inline std::string operator+(const char* a, const std::string& b) {
-    return std::string(a) + b;
-}
-
-void move_to(int row, int col) {
-    std::cout << CSI << row << ";" << col << "H" << std::flush;
-}
-
-void clear_screen() {
-    std::cout << CSI << "2J" << CSI << "H" << std::flush;
-}
-
-void clear_line() {
-    std::cout << CSI << "2K\r" << std::flush;
-}
-
-void hide_cursor() { std::cout << CSI << "25l" << std::flush; }
-void show_cursor() { std::cout << CSI << "25h" << std::flush; }
-
-std::string truncate(const std::string& s, int max_w) {
-    if ((int)s.size() <= max_w) return s;
-    if (max_w <= 3) return s.substr(0, max_w);
-    return s.substr(0, max_w - 3) + "...";
-}
-
 } // anonymous namespace
 
+struct TUI::Impl {
+    ScreenInteractive screen = ScreenInteractive::Fullscreen();
+    Component main_container;
+    Component status_bar;
+    Component content_area;
+    Component input_area;
+    Component edit_panel;
+    
+    std::string input_buffer;
+    int scroll_offset = 0;
+    bool show_edits_panel = false;
+};
+
+TUI::TUI() : m_impl(std::make_unique<Impl>()) {}
+
+TUI::~TUI() = default;
+
 void TUI::on_initialize() {
-#ifdef _WIN32
-    enable_vt_mode();
-#endif
+    create_components();
 }
 
 void TUI::on_shutdown() {
     if (m_running.load()) {
         quit();
-        show_cursor();
-        std::cout << RESET << std::endl;
     }
 }
 
@@ -131,6 +66,7 @@ void TUI::run() {
 
 void TUI::quit() {
     m_running.store(false);
+    m_impl->screen.Exit();
 }
 
 void TUI::set_main_content(std::string_view content) {
@@ -187,11 +123,13 @@ void TUI::show_edit(const EditDisplay& edit) {
     std::lock_guard lock(m_mutex);
     m_edits.push_back(edit);
     if (m_edits.size() > 50) m_edits.erase(m_edits.begin());
+    m_impl->show_edits_panel = true;
 }
 
 void TUI::show_edits(const std::vector<EditDisplay>& edits) {
     std::lock_guard lock(m_mutex);
     m_edits = edits;
+    m_impl->show_edits_panel = !edits.empty();
 }
 
 void TUI::display_mind_map(std::string_view ascii_map) {
@@ -203,16 +141,16 @@ void TUI::display_mind_map(std::string_view ascii_map) {
 
 void TUI::display_todo_list(const nlohmann::json& todos) {
     std::lock_guard lock(m_mutex);
-    std::string output = std::string("\n") + FG_CYAN + "=== Todo List ===" + RESET + "\n";
+    std::string output = "\n\x1b[36m=== Todo List ===\x1b[0m\n";
     for (size_t i = 0; i < todos.size(); ++i) {
         auto status = todos[i].value("status", "pending");
         auto content = todos[i].value("content", "");
         if (status == "completed")
-            output += std::string(FG_GREEN) + "[x]" + RESET + " " + content + "\n";
+            output += "\x1b[32m[x]\x1b[0m " + content + "\n";
         else if (status == "in_progress")
-            output += std::string(FG_YELLOW) + "[>]" + RESET + " " + content + "\n";
+            output += "\x1b[33m[>]\x1b[0m " + content + "\n";
         else
-            output += std::string(FG_GRAY) + "[ ]" + RESET + " " + content + "\n";
+            output += "\x1b[90m[ ]\x1b[0m " + content + "\n";
     }
     m_main_content += output + "\n";
 }
@@ -220,6 +158,14 @@ void TUI::display_todo_list(const nlohmann::json& todos) {
 void TUI::set_command_completions(const std::vector<std::string>& commands) {
     m_command_completions = commands;
     std::sort(m_command_completions.begin(), m_command_completions.end());
+}
+
+void TUI::set_theme(const Theme& theme) {
+    m_theme = theme;
+}
+
+Theme TUI::get_theme() const {
+    return m_theme;
 }
 
 std::string TUI::find_common_prefix(const std::vector<std::string>& matches) const {
@@ -235,45 +181,39 @@ std::string TUI::find_common_prefix(const std::vector<std::string>& matches) con
     return prefix;
 }
 
-void TUI::handle_tab_completion(std::string& buffer, int& cursor) {
+void TUI::handle_tab_completion(std::string& buffer) {
     if (buffer.empty() || m_command_completions.empty()) return;
 
-    if (!buffer.empty() && cursor != (int)buffer.size()) return;
-
     bool is_command = !buffer.empty() && buffer[0] == '/';
+    if (!is_command) return;
 
-    if (is_command) {
-        std::string prefix = buffer;
+    std::string prefix = buffer;
 
-        if (m_completion_matches.empty() || prefix != m_last_completion_prefix) {
-            m_completion_matches.clear();
-            for (const auto& cmd : m_command_completions) {
-                if (cmd.size() >= prefix.size() &&
-                    cmd.compare(0, prefix.size(), prefix) == 0) {
-                    m_completion_matches.push_back(cmd);
-                }
+    if (m_completion_matches.empty() || prefix != m_last_completion_prefix) {
+        m_completion_matches.clear();
+        for (const auto& cmd : m_command_completions) {
+            if (cmd.size() >= prefix.size() &&
+                cmd.compare(0, prefix.size(), prefix) == 0) {
+                m_completion_matches.push_back(cmd);
             }
-            m_last_completion_prefix = prefix;
-            m_completion_idx = 0;
         }
+        m_last_completion_prefix = prefix;
+        m_completion_idx = 0;
+    }
 
-        if (m_completion_matches.empty()) return;
+    if (m_completion_matches.empty()) return;
 
-        if (m_completion_matches.size() == 1) {
-            buffer = m_completion_matches[0];
-            cursor = (int)buffer.size();
-            m_completion_matches.clear();
+    if (m_completion_matches.size() == 1) {
+        buffer = m_completion_matches[0];
+        m_completion_matches.clear();
+    } else {
+        std::string common = find_common_prefix(m_completion_matches);
+        if (common.size() > prefix.size()) {
+            buffer = common;
         } else {
-            std::string common = find_common_prefix(m_completion_matches);
-            if (common.size() > prefix.size()) {
-                buffer = common;
-                cursor = (int)buffer.size();
-            } else {
-                if (m_completion_idx < m_completion_matches.size()) {
-                    buffer = m_completion_matches[m_completion_idx];
-                    cursor = (int)buffer.size();
-                    m_completion_idx = (m_completion_idx + 1) % m_completion_matches.size();
-                }
+            if (m_completion_idx < m_completion_matches.size()) {
+                buffer = m_completion_matches[m_completion_idx];
+                m_completion_idx = (m_completion_idx + 1) % m_completion_matches.size();
             }
         }
     }
@@ -281,7 +221,7 @@ void TUI::handle_tab_completion(std::string& buffer, int& cursor) {
 
 void TUI::show_help() {
     std::lock_guard lock(m_mutex);
-    m_main_content += std::string(FG_CYAN) + "\n=== Help ===" + RESET + "\n";
+    m_main_content += "\x1b[36m\n=== Help ===\x1b[0m\n";
     m_main_content += "  /help     - Show this help\n";
     m_main_content += "  /new      - Create new session\n";
     m_main_content += "  /model    - Switch model\n";
@@ -292,292 +232,217 @@ void TUI::show_help() {
     m_main_content += "  Ctrl+C    - Interrupt/Exit\n\n";
 }
 
-void TUI::render_status_bar() {
-    move_to(1, 1);
-    std::cout << BG_STATUS << FG_STATUS << BOLD;
-
-    std::string left = " ";
-    if (!m_model_provider.empty()) {
-        left += m_model_provider + ":" + m_model_name;
+void TUI::create_components() {
+    m_impl->status_bar = create_status_bar();
+    m_impl->content_area = create_content_area();
+    m_impl->input_area = create_input_area();
+    m_impl->edit_panel = create_edit_panel();
+    
+    auto main_layout = Container::Vertical({
+        m_impl->status_bar,
+        m_impl->content_area,
+        m_impl->input_area,
+    });
+    
+    if (m_impl->show_edits_panel) {
+        m_impl->main_container = ResizableSplitLeft(
+            m_impl->edit_panel,
+            main_layout,
+            &m_term_w
+        );
+    } else {
+        m_impl->main_container = main_layout;
     }
-
-    std::string center = "agent.cpp v" AGENT_VERSION;
-
-    std::string right;
-    if (m_context_pct > 0) {
-        char buf[32];
-        snprintf(buf, sizeof(buf), "ctx:%.0f%% ", m_context_pct);
-        right += buf;
-    }
-    if (!m_lsp_status.empty()) right += "LSP:" + m_lsp_status + " ";
-    if (!m_mcp_status.empty()) right += "MCP:" + m_mcp_status + " ";
-
-    int left_w = (int)left.size();
-    int center_w = (int)center.size();
-    int right_w = (int)right.size();
-    int pad_left = (m_term_w - center_w) / 2 - left_w;
-    int pad_right = m_term_w - left_w - center_w - std::max(0, pad_left) - right_w;
-
-    std::cout << left;
-    for (int i = 0; i < std::max(0, pad_left); ++i) std::cout << ' ';
-    std::cout << center;
-    for (int i = 0; i < std::max(0, pad_right); ++i) std::cout << ' ';
-    std::cout << right;
-
-    std::cout << RESET;
 }
 
-void TUI::render_content() {
-    std::lock_guard lock(m_mutex);
-
-    int content_start = 2;
-    int content_end = m_term_h - 2;
-    int visible_rows = content_end - content_start;
-
-    std::vector<std::string> lines;
-    std::istringstream stream(m_main_content);
-    std::string line;
-    while (std::getline(stream, line)) {
-        lines.push_back(line);
-    }
-
-    int total = (int)lines.size();
-    int start = std::max(0, total - visible_rows);
-
-    for (int i = 0; i < visible_rows; ++i) {
-        move_to(content_start + i, 1);
-        clear_line();
-        int idx = start + i;
-        if (idx < total) {
-            std::cout << truncate(lines[idx], m_term_w);
+Component TUI::create_status_bar() {
+    return Renderer([this] {
+        std::lock_guard lock(m_mutex);
+        
+        std::string left = " ";
+        if (!m_model_provider.empty()) {
+            left += m_model_provider + ":" + m_model_name;
         }
-    }
+        
+        std::string center = "agent.cpp v" AGENT_VERSION;
+        
+        std::string right;
+        if (m_context_pct > 0) {
+            char buf[32];
+            snprintf(buf, sizeof(buf), "ctx:%.0f%% ", m_context_pct);
+            right += buf;
+        }
+        if (!m_lsp_status.empty()) right += "LSP:" + m_lsp_status + " ";
+        if (!m_mcp_status.empty()) right += "MCP:" + m_mcp_status + " ";
+        
+        auto left_elem = text(left) | color(hex_to_color(m_theme.colors.primary));
+        auto center_elem = text(center) | bold | color(hex_to_color(m_theme.background.foreground));
+        auto right_elem = text(right) | color(hex_to_color(m_theme.colors.muted));
+        
+        auto status_bar = hbox({
+            left_elem,
+            filler(),
+            center_elem,
+            filler(),
+            right_elem,
+        }) | bgcolor(hex_to_color(m_theme.background.status_bar));
+        
+        return status_bar;
+    });
 }
 
-void TUI::render_input_prompt() {
-    move_to(m_term_h - 1, 1);
-    std::cout << BG_INPUT << FG_CYAN << " > " << RESET << BG_INPUT << " " << std::flush;
+Component TUI::create_content_area() {
+    return Renderer([this] {
+        std::lock_guard lock(m_mutex);
+        
+        std::vector<Element> lines;
+        std::istringstream stream(m_main_content);
+        std::string line;
+        
+        while (std::getline(stream, line)) {
+            lines.push_back(text(line));
+        }
+        
+        if (lines.empty()) {
+            lines.push_back(text("Welcome to agent.cpp!") | color(hex_to_color(m_theme.colors.primary)));
+        }
+        
+        auto content = vbox(std::move(lines));
+        
+        return content | vscroll_indicator | yframe | flex;
+    });
 }
 
-void TUI::render() {
-    get_term_size(m_term_w, m_term_h);
-    hide_cursor();
-    render_status_bar();
-    render_content();
-    render_input_prompt();
-    show_cursor();
-    move_to(m_term_h - 1, 5);
-    std::cout << std::flush;
-}
-
-std::string TUI::read_line() {
-    std::string buffer;
-    int cursor = 0;
-
-    auto refresh_input = [&]() {
-        move_to(m_term_h - 1, 1);
-        clear_line();
-        std::cout << BG_INPUT << FG_CYAN << " > " << RESET << BG_INPUT << FG_WHITE;
-        int max_w = m_term_w - 5;
-        int start = std::max(0, cursor - max_w + 1);
-        std::string visible = buffer.substr(start, max_w);
-        std::cout << visible;
-        for (int i = (int)visible.size(); i < max_w; ++i) std::cout << ' ';
-        move_to(m_term_h - 1, 5 + cursor - start);
-        std::cout << std::flush;
+Component TUI::create_input_area() {
+    auto input_option = InputOption();
+    input_option.on_enter = [this] {
+        if (m_impl->input_buffer.empty()) return;
+        
+        std::string input = m_impl->input_buffer;
+        m_impl->input_buffer.clear();
+        
+        m_history.push_back(input);
+        m_history_idx = m_history.size();
+        
+        {
+            std::lock_guard lock(m_mutex);
+            m_main_content += "\x1b[32m> \x1b[0m\x1b[37m" + input + "\x1b[0m\n";
+        }
+        
+        handle_input(input);
     };
+    
+    auto input = Input(&m_impl->input_buffer, "Type a command...", input_option);
+    
+    return Renderer(input, [this, input] {
+        auto prompt = text(" > ") | color(hex_to_color(m_theme.colors.primary));
+        auto input_elem = input->Render() | color(hex_to_color(m_theme.background.foreground));
+        
+        return hbox({
+            prompt,
+            input_elem,
+        }) | bgcolor(hex_to_color(m_theme.background.input));
+    });
+}
 
-    while (m_running.load()) {
-#ifdef _WIN32
-        if (!_kbhit()) {
-            Sleep(10);
-            continue;
+Component TUI::create_edit_panel() {
+    return Renderer([this] {
+        std::lock_guard lock(m_mutex);
+        
+        if (m_edits.empty()) {
+            return text("No edits") | color(hex_to_color(m_theme.colors.muted));
         }
-        int ch = _getch();
-        if (ch == EOF) {
-            Sleep(10);
-            continue;
+        
+        std::vector<Element> edit_elements;
+        for (const auto& edit : m_edits) {
+            auto file_path = text(edit.file_path) | bold | color(hex_to_color(m_theme.colors.info));
+            auto summary = text(edit.summary) | color(hex_to_color(m_theme.colors.secondary));
+            
+            edit_elements.push_back(vbox({
+                file_path,
+                summary,
+                separator(),
+            }));
         }
-        if (ch == 0 || ch == 0xE0) {
-            int ext = _getch();
-            switch (ext) {
-            case 72:
-                if (!m_history.empty() && m_history_idx > 0) {
-                    m_history_idx--;
-                    buffer = m_history[m_history_idx];
-                    cursor = (int)buffer.size();
-                    m_last_completion_prefix.clear();
-                    m_completion_matches.clear();
-                }
-                break;
-            case 80:
-                if (m_history_idx < m_history.size() - 1) {
-                    m_history_idx++;
-                    buffer = m_history[m_history_idx];
-                    cursor = (int)buffer.size();
-                } else if (m_history_idx == m_history.size() - 1) {
-                    m_history_idx = m_history.size();
-                    buffer.clear();
-                    cursor = 0;
-                }
-                m_last_completion_prefix.clear();
-                m_completion_matches.clear();
-                break;
-            case 75: if (cursor > 0) cursor--; break;
-            case 77: if (cursor < (int)buffer.size()) cursor++; break;
-            case 83:
-                if (cursor < (int)buffer.size()) {
-                    buffer.erase(cursor, 1);
-                    m_last_completion_prefix.clear();
-                    m_completion_matches.clear();
-                }
-                break;
-            }
-            refresh_input();
-            continue;
-        }
-#else
-        char c;
-        if (read(STDIN_FILENO, &c, 1) <= 0) continue;
-        int ch = (unsigned char)c;
+        
+        return vbox(std::move(edit_elements)) | vscroll_indicator | yframe;
+    });
+}
 
-        if (ch == 27) {
-            char seq[2];
-            if (read(STDIN_FILENO, &seq[0], 1) <= 0) continue;
-            if (read(STDIN_FILENO, &seq[1], 1) <= 0) continue;
-            if (seq[0] == '[') {
-                switch (seq[1]) {
-                case 'A':
-                    if (!m_history.empty() && m_history_idx > 0) {
-                        m_history_idx--;
-                        buffer = m_history[m_history_idx];
-                        cursor = (int)buffer.size();
-                        m_last_completion_prefix.clear();
-                        m_completion_matches.clear();
-                    }
-                    break;
-                case 'B':
-                    if (m_history_idx < m_history.size() - 1) {
-                        m_history_idx++;
-                        buffer = m_history[m_history_idx];
-                        cursor = (int)buffer.size();
-                    } else {
-                        m_history_idx = m_history.size();
-                        buffer.clear();
-                        cursor = 0;
-                    }
-                    m_last_completion_prefix.clear();
-                    m_completion_matches.clear();
-                    break;
-                case 'C': if (cursor < (int)buffer.size()) cursor++; break;
-                case 'D': if (cursor > 0) cursor--; break;
-                case '3':
-                    { char extra; read(STDIN_FILENO, &extra, 1);
-                      if (cursor < (int)buffer.size()) {
-                          buffer.erase(cursor, 1);
-                          m_last_completion_prefix.clear();
-                          m_completion_matches.clear();
-                      } }
-                    break;
-                }
-                refresh_input();
-                continue;
-            }
-            continue;
+void TUI::handle_input(std::string_view input) {
+    if (input[0] == '/') {
+        if (input == "/quit" || input == "/exit" || input == "/q") {
+            quit();
+            return;
         }
-#endif
-
-        if (ch == '\r' || ch == '\n') {
-            std::cout << RESET << std::endl;
-            return buffer;
-        } else if (ch == 3) {
-            return "\x03";
-        } else if (ch == 8 || ch == 127) {
-            if (cursor > 0) {
-                buffer.erase(cursor - 1, 1);
-                cursor--;
-                m_last_completion_prefix.clear();
-                m_completion_matches.clear();
-            }
-        } else if (ch == 9) {
-            handle_tab_completion(buffer, cursor);
-        } else if (ch >= 32 && ch <= 126) {
-            buffer.insert(cursor, 1, (char)ch);
-            cursor++;
-            m_last_completion_prefix.clear();
-            m_completion_matches.clear();
+        if (input == "/help" || input == "/h") {
+            show_help();
+        } else if (m_command_callback) {
+            m_command_callback(input);
         }
-        refresh_input();
+    } else {
+        if (m_input_callback) {
+            m_input_callback(input);
+        }
     }
-    return "";
 }
 
 void TUI::main_loop() {
-#ifndef _WIN32
-    RawMode raw;
-#endif
-
-    clear_screen();
-
-    {
-        std::lock_guard lock(m_mutex);
-        m_main_content = std::string(FG_CYAN) + R"(
+    std::string logo = R"(
    __ _  ___ _ __   ___ _ __   ___ _ __    ___ _ __  _ __
   / _` |/ _ \ '_ \ / _ \ '_ \ / _ \ '_ \  / __| '_ \| '_ \
  | (_| |  __/ | | |  __/ | | |  __/ |_) | \__ \ |_) | |_) |
   \__,_|\___|_| |_|\___|_| |_|\___| .__/  |___/ .__/| .__/
                                   |_|         |_|   |_|
-)" + RESET + "\n";
-        m_main_content += std::string("  ") + FG_WHITE + "agent.cpp v" + AGENT_VERSION + RESET + " " + DIM + "— Modular AI Coding Agent" + RESET + "\n";
-        m_main_content += std::string("  ") + FG_GRAY + "Type /help for commands, Ctrl+C to exit" + RESET + "\n\n";
+)";
+    
+    {
+        std::lock_guard lock(m_mutex);
+        m_main_content = "\x1b[36m" + logo + "\x1b[0m\n";
+        m_main_content += "  \x1b[37magent.cpp v" AGENT_VERSION "\x1b[0m \x1b[2m— Modular AI Coding Agent\x1b[0m\n";
+        m_main_content += "  \x1b[90mType /help for commands, Ctrl+C to exit\x1b[0m\n\n";
     }
-
-    render();
-
-    while (m_running.load()) {
-        std::string input = read_line();
-
-        if (input == "\x03") {
-            m_running.store(false);
-            break;
+    
+    auto component = m_impl->main_container;
+    
+    auto event_handler = CatchEvent(component, [this](Event event) {
+        if (event == Event::CtrlC) {
+            quit();
+            return true;
         }
-
-        if (input.empty()) {
-            render();
-            continue;
+        
+        if (event == Event::Tab) {
+            handle_tab_completion(m_impl->input_buffer);
+            return true;
         }
-
-        m_history.push_back(input);
-        m_history_idx = m_history.size();
-
-        {
-            std::lock_guard lock(m_mutex);
-            m_main_content += std::string(FG_GREEN) + "> " + RESET + FG_WHITE + input + RESET + "\n";
-        }
-
-        if (input[0] == '/') {
-            if (input == "/quit" || input == "/exit" || input == "/q") {
-                m_running.store(false);
-                break;
+        
+        if (event == Event::ArrowUp) {
+            if (!m_history.empty() && m_history_idx > 0) {
+                m_history_idx--;
+                m_impl->input_buffer = m_history[m_history_idx];
+                m_last_completion_prefix.clear();
+                m_completion_matches.clear();
             }
-            if (input == "/help" || input == "/h") {
-                show_help();
-            } else if (m_command_callback) {
-                m_command_callback(input);
-            }
-        } else {
-            if (m_input_callback) {
-                m_input_callback(input);
-            }
+            return true;
         }
-
-        render();
-    }
-
-    clear_screen();
-    move_to(1, 1);
-    show_cursor();
-    std::cout << RESET;
+        
+        if (event == Event::ArrowDown) {
+            if (m_history_idx < m_history.size() - 1) {
+                m_history_idx++;
+                m_impl->input_buffer = m_history[m_history_idx];
+            } else if (m_history_idx == m_history.size() - 1) {
+                m_history_idx = m_history.size();
+                m_impl->input_buffer.clear();
+            }
+            m_last_completion_prefix.clear();
+            m_completion_matches.clear();
+            return true;
+        }
+        
+        return false;
+    });
+    
+    m_impl->screen.Loop(event_handler);
 }
 
 } // namespace agent

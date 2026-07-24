@@ -1,4 +1,5 @@
 #include "utils/fs.hpp"
+#include "core/exception.hpp"
 #include <fstream>
 #include <algorithm>
 #include <cctype>
@@ -11,7 +12,10 @@ namespace agent::fsutil {
 // ── File Operations ───────────────────────────────────────────────
 std::string read_file(const fs::path& path) {
     std::ifstream f(path, std::ios::binary);
-    if (!f) throw std::runtime_error("Cannot open file: " + path.string());
+    if (!f) {
+        LOG_ERROR("FileSystem", "Cannot open file: " + path.string());
+        throw FileSystemException(ErrorCode::FileReadFailed, "Cannot open file: " + path.string());
+    }
     std::stringstream buffer;
     buffer << f.rdbuf();
     return buffer.str();
@@ -37,13 +41,19 @@ void write_file(const fs::path& path, std::string_view content) {
         fs::create_directories(parent);
     }
     std::ofstream f(path, std::ios::binary | std::ios::trunc);
-    if (!f) throw std::runtime_error("Cannot write file: " + path.string());
+    if (!f) {
+        LOG_ERROR("FileSystem", "Cannot write file: " + path.string());
+        throw FileSystemException(ErrorCode::FileWriteFailed, "Cannot write file: " + path.string());
+    }
     f.write(content.data(), content.size());
 }
 
 void append_file(const fs::path& path, std::string_view content) {
     std::ofstream f(path, std::ios::binary | std::ios::app);
-    if (!f) throw std::runtime_error("Cannot append to file: " + path.string());
+    if (!f) {
+        LOG_ERROR("FileSystem", "Cannot append to file: " + path.string());
+        throw FileSystemException(ErrorCode::FileWriteFailed, "Cannot append to file: " + path.string());
+    }
     f.write(content.data(), content.size());
 }
 
@@ -86,7 +96,8 @@ void edit_file_replace(const fs::path& path, std::string_view old_str, std::stri
     std::string content = read_file(path);
     size_t pos = content.find(std::string(old_str));
     if (pos == std::string::npos) {
-        throw std::runtime_error("Pattern not found in file: " + path.string());
+        LOG_ERROR("FileSystem", "Pattern not found in file: " + path.string());
+        throw FileSystemException(ErrorCode::FileEditFailed, "Pattern not found in file: " + path.string());
     }
     content.replace(pos, old_str.size(), new_str);
     write_file(path, content);
@@ -329,7 +340,8 @@ fs::path resolve_sandbox(const fs::path& workspace, const fs::path& relative_pat
     auto resolved = fs::weakly_canonical(workspace / relative_path);
     auto canonical_ws = fs::weakly_canonical(workspace);
     if (!is_path_safe(workspace, resolved)) {
-        throw std::runtime_error("Path escapes workspace sandbox: " + resolved.string());
+        LOG_ERROR("FileSystem", "Path escapes workspace sandbox: " + resolved.string());
+        throw FileSystemException(ErrorCode::PathSandboxEscape, "Path escapes workspace sandbox: " + resolved.string());
     }
     return resolved;
 }
