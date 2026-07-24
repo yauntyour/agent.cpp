@@ -68,7 +68,7 @@ public:
 
     ModuleState state() const override { return m_state.load(); }
 
-    static constexpr std::string_view static_name();
+    static constexpr std::string_view static_name() { return T::static_name(); }
 
 protected:
     void on_initialize() {}
@@ -98,10 +98,10 @@ public:
     }
 
     template<typename T>
-    T* require() {
+    T& require() {
         auto* ptr = get<T>();
         if (!ptr) throw std::runtime_error("Required module not registered: " + std::string(typeid(T).name()));
-        return ptr;
+        return *ptr;
     }
 
     IModule* get_by_name(std::string_view name);

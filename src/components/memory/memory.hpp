@@ -1,5 +1,6 @@
 #pragma once
 #include "core/module.hpp"
+#include "components/provider/provider.hpp"
 #include <string>
 #include <string_view>
 #include <vector>
@@ -32,8 +33,8 @@ class Memory : public Module<Memory> {
 public:
     static constexpr std::string_view static_name() { return "memory"; }
 
-    void on_initialize() override;
-    void on_shutdown() override;
+    void on_initialize();
+    void on_shutdown();
 
     // ── CRUD ───────────────────────────────────────────────────
     MemoryEntry save_entry(const MemoryEntry& entry);
@@ -61,8 +62,6 @@ private:
 
     double calculate_similarity(std::string_view a, std::string_view b);
 
-    struct Impl;
-    std::unique_ptr<Impl> m_impl;
 };
 
 } // namespace agent

@@ -43,8 +43,8 @@ class LSP : public Module<LSP> {
 public:
     static constexpr std::string_view static_name() { return "lsp"; }
 
-    void on_initialize() override;
-    void on_shutdown() override;
+    void on_initialize();
+    void on_shutdown();
 
     // ── Server management ──────────────────────────────────────
     void add_server(const LSPServerConfig& config);
@@ -67,8 +67,6 @@ private:
     std::map<std::string, LSPServerConfig> m_servers;
     std::map<std::string, std::string> m_server_for_language;  // language -> server_id
 
-    struct Impl;
-    std::unique_ptr<Impl> m_impl;
 };
 
 } // namespace agent

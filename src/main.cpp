@@ -38,11 +38,11 @@ void signal_handler(int signum) {
 
 void print_banner() {
     std::cout << R"(
-   __ _  ___ _ __   ___ _ __   ___ _ __    ___ _ __  _ __  
-  / _` |/ _ \ '_ \ / _ \ '_ \ / _ \ '_ \  / __| '_ \| '_ \ 
+   __ _  ___ _ __   ___ _ __   ___ _ __    ___ _ __  _ __
+  / _` |/ _ \ '_ \ / _ \ '_ \ / _ \ '_ \  / __| '_ \| '_ \
  | (_| |  __/ | | |  __/ | | |  __/ |_) | \__ \ |_) | |_) |
-  \__,_|\___|_| |_|\___|_| |_|\___| .__/  |___/ .__/| .__/ 
-                                  |_|         |_|   |_|    
+  \__,_|\___|_| |_|\___|_| |_|\___| .__/  |___/ .__/| .__/
+                                  |_|         |_|   |_|
 )" << std::endl;
     std::cout << "  agent.cpp v" << AGENT_VERSION << " — Modular AI Coding Agent" << std::endl;
     std::cout << "  Type /help for commands, Ctrl+C to exit\n" << std::endl;
@@ -78,9 +78,9 @@ void register_all_modules() {
 
 int run_cli_mode(const System::CLIOptions& opts) {
     auto& registry = ModuleRegistry::instance();
-    auto& system = *registry.require<System>();
-    auto& agent = *registry.require<Agent>();
-    auto& sessions = *registry.require<SessionManager>();
+    auto& system = registry.require<System>();
+    auto& agent = registry.require<Agent>();
+    auto& sessions = registry.require<SessionManager>();
 
     // Setup session
     if (!opts.session_id.empty()) {
@@ -93,7 +93,7 @@ int run_cli_mode(const System::CLIOptions& opts) {
     }
 
     std::cout << "Session: " << current.name << " (" << current.id << ")" << std::endl;
-    std::cout << "Model: " << registry.require<Provider>()->current_model().name << std::endl;
+    std::cout << "Model: " << registry.require<Provider>().current_model().name << std::endl;
 
     // Process --command if provided
     if (!opts.command.empty()) {
@@ -137,10 +137,10 @@ int run_cli_mode(const System::CLIOptions& opts) {
 int run_tui_mode(const System::CLIOptions& opts) {
 #ifdef AGENT_ENABLE_TUI
     auto& registry = ModuleRegistry::instance();
-    auto& tui = *registry.require<TUI>();
-    auto& sys = *registry.require<System>();
-    auto& agent = *registry.require<Agent>();
-    auto& sessions = *registry.require<SessionManager>();
+    auto& tui = registry.require<TUI>();
+    auto& sys = registry.require<System>();
+    auto& agent = registry.require<Agent>();
+    auto& sessions = registry.require<SessionManager>();
 
     if (!opts.session_id.empty()) {
         sessions.set_current(opts.session_id);
@@ -151,7 +151,7 @@ int run_tui_mode(const System::CLIOptions& opts) {
         current = sessions.new_session(opts.project_dir.empty() ? "." : opts.project_dir);
     }
 
-    auto& provider = *registry.require<Provider>();
+    auto& provider = registry.require<Provider>();
     auto model = provider.current_model();
 
     tui.set_model_info("default", model.name, "auto");
@@ -179,7 +179,7 @@ int run_tui_mode(const System::CLIOptions& opts) {
 
 int run_router_mode(const System::CLIOptions& opts) {
 #ifdef AGENT_ENABLE_ROUTER
-    auto& router = *ModuleRegistry::instance().require<Router>();
+    auto& router = ModuleRegistry::instance().require<Router>();
     auto& cfg = Config::instance();
 
     RouterConfig router_cfg;
@@ -218,8 +218,8 @@ int main(int argc, char* argv[]) {
     // Parse arguments
     System::CLIOptions opts;
     {
-        auto& system_component = *ModuleRegistry::instance().get<System>();
-        opts = system_component.parse_args(argc, argv);
+        auto* system_component = ModuleRegistry::instance().get<System>();
+        opts = system_component->parse_args(argc, argv);
     }
 
     if (opts.help) {
@@ -243,7 +243,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Initialize system
-    auto& system_component = *ModuleRegistry::instance().require<System>();
+    auto& system_component = ModuleRegistry::instance().require<System>();
 
     if (opts.reset_config) {
         system_component.init(System::InitMode::Reset);

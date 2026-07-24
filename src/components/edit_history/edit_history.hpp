@@ -25,8 +25,8 @@ class EditHistory : public Module<EditHistory> {
 public:
     static constexpr std::string_view static_name() { return "edit_history"; }
 
-    void on_initialize() override;
-    void on_shutdown() override;
+    void on_initialize();
+    void on_shutdown();
 
     // ── Record operations ──────────────────────────────────────
     void record(const EditRecord& record);
@@ -52,8 +52,6 @@ private:
     fs::path m_project_dir;
     fs::path get_storage_path() const;
 
-    struct Impl;
-    std::unique_ptr<Impl> m_impl;
 };
 
 } // namespace agent

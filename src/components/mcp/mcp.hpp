@@ -38,8 +38,8 @@ class MCP : public Module<MCP> {
 public:
     static constexpr std::string_view static_name() { return "mcp"; }
 
-    void on_initialize() override;
-    void on_shutdown() override;
+    void on_initialize();
+    void on_shutdown();
 
     // ── Server management ──────────────────────────────────────
     void add_server(const MCPServerConfig& config);
@@ -67,8 +67,6 @@ public:
 private:
     std::map<std::string, MCPServerConfig> m_servers;
 
-    struct Impl;
-    std::unique_ptr<Impl> m_impl;
 };
 
 } // namespace agent

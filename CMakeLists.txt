@@ -6,9 +6,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -O0 -fsanitize=address,undefined")
-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -DNDEBUG")
-
 option(AGENT_ENABLE_TUI "Enable Notcurses TUI interface" ON)
 option(AGENT_ENABLE_ROUTER "Enable servic.cpp HTTP router component" ON)
 option(AGENT_ENABLE_LSP "Enable LSP server support" ON)
@@ -16,39 +13,42 @@ option(AGENT_ENABLE_TESTS "Build tests" OFF)
 option(AGENT_STATIC_LINK "Static link runtime and dependencies" ON)
 
 # ── Dependencies ──────────────────────────────────────────────────
-find_package(CURL REQUIRED)
-find_package(libsodium REQUIRED)
-find_package(nlohmann_json REQUIRED)
+find_package(PkgConfig REQUIRED)
+
+pkg_check_modules(CURL_REQUIRED REQUIRED libcurl IMPORTED_TARGET)
+pkg_check_modules(SODIUM REQUIRED libsodium IMPORTED_TARGET)
+pkg_check_modules(NLOHMANN_JSON REQUIRED nlohmann_json IMPORTED_TARGET)
+
 find_package(Threads REQUIRED)
 
 if(AGENT_ENABLE_TUI)
-    find_package(Notcurses QUIET)
+    pkg_check_modules(NOTCURSES QUIET notcurses)
+    if(NOTCURSES_FOUND)
+        message(STATUS "Notcurses found: ${NOTCURSES_VERSION}")
+    else()
+        message(WARNING "Notcurses not found, TUI disabled")
+        set(AGENT_ENABLE_TUI OFF)
+    endif()
 endif()
 
 if(AGENT_ENABLE_ROUTER)
-    if(NOT EXISTS "${CMAKE_SOURCE_DIR}/external/servic.cpp/CMakeLists.txt")
-        execute_process(
-            COMMAND git submodule update --init --recursive
-            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-            RESULT_VARIABLE GIT_SUBMODULE_RESULT
-        )
-        if(NOT GIT_SUBMODULE_RESULT EQUAL 0)
-            message(WARNING "Failed to init servic.cpp submodule. Router disabled.")
+    if(EXISTS "${CMAKE_SOURCE_DIR}/external/servic.cpp/servic.hpp")
+        find_path(BOOST_INCLUDE_DIRS boost/asio.hpp PATHS ${MINGW_PREFIX}/include $ENV{MINGW_PREFIX}/include)
+        if(BOOST_INCLUDE_DIRS)
+            message(STATUS "Boost headers found: ${BOOST_INCLUDE_DIRS}")
+        else()
+            message(WARNING "Boost.Asio headers not found, Router disabled")
             set(AGENT_ENABLE_ROUTER OFF)
         endif()
+    else()
+        message(WARNING "servic.cpp not found (run: git submodule update --init), Router disabled")
+        set(AGENT_ENABLE_ROUTER OFF)
     endif()
-    if(AGENT_ENABLE_ROUTER AND EXISTS "${CMAKE_SOURCE_DIR}/external/servic.cpp/CMakeLists.txt")
-        add_subdirectory(external/servic.cpp EXCLUDE_FROM_ALL)
-        find_package(OpenSSL QUIET)
-        find_package(Boost REQUIRED COMPONENTS system)
-    endif()
+    pkg_check_modules(OPENSSL QUIET openssl)
 endif()
 
-find_package(PkgConfig QUIET)
-if(PkgConfig_FOUND)
-    pkg_check_modules(FFMPEG QUIET libavcodec libavformat libavutil libswscale)
-    pkg_check_modules(OPENIMAGEIO QUIET OpenImageIO)
-endif()
+pkg_check_modules(FFMPEG QUIET libavcodec libavformat libavutil libswscale)
+pkg_check_modules(OPENIMAGEIO QUIET OpenImageIO)
 
 # ── Source Files ───────────────────────────────────────────────────
 set(CORE_SOURCES
@@ -93,6 +93,7 @@ set(COMPONENT_SOURCES
     src/components/notice/notice.cpp
     src/components/edit_history/edit_history.cpp
     src/components/service/service.cpp
+    src/components/mcp/mcp.cpp
     src/components/system/system.cpp
     src/components/system/channel.cpp
     src/components/agent/agent.cpp
@@ -106,11 +107,8 @@ if(AGENT_ENABLE_ROUTER)
     list(APPEND COMPONENT_SOURCES src/components/router/router.cpp)
 endif()
 
-if(Notcurses_FOUND)
-    set(AGENT_ENABLE_TUI ON)
+if(AGENT_ENABLE_TUI)
     list(APPEND COMPONENT_SOURCES src/components/tui/tui.cpp)
-else()
-    set(AGENT_ENABLE_TUI OFF)
 endif()
 
 set(ALL_SOURCES
@@ -125,23 +123,25 @@ add_executable(agent ${ALL_SOURCES})
 
 target_include_directories(agent PRIVATE
     ${CMAKE_SOURCE_DIR}/src
+    ${NLOHMANN_JSON_INCLUDE_DIRS}
 )
 
 target_link_libraries(agent PRIVATE
-    CURL::libcurl
-    sodium
-    nlohmann_json::nlohmann_json
+    PkgConfig::CURL_REQUIRED
+    PkgConfig::SODIUM
     Threads::Threads
 )
 
 if(AGENT_ENABLE_ROUTER)
     target_compile_definitions(agent PRIVATE AGENT_ENABLE_ROUTER)
-    target_link_libraries(agent PRIVATE
-        servic
-        Boost::system
+    target_include_directories(agent PRIVATE
+        ${CMAKE_SOURCE_DIR}/external/servic.cpp
     )
+    if(BOOST_INCLUDE_DIRS)
+        target_include_directories(agent PRIVATE ${BOOST_INCLUDE_DIRS})
+    endif()
     if(OPENSSL_FOUND)
-        target_link_libraries(agent PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+        target_link_libraries(agent PRIVATE ${OPENSSL_LIBRARIES})
     endif()
 endif()
 
@@ -151,25 +151,22 @@ endif()
 
 if(AGENT_ENABLE_TUI)
     target_compile_definitions(agent PRIVATE AGENT_ENABLE_TUI)
-    target_link_libraries(agent PRIVATE Notcurses::Notcurses)
+    target_include_directories(agent PRIVATE ${NOTCURSES_INCLUDE_DIRS})
+    target_link_libraries(agent PRIVATE ${NOTCURSES_LIBRARIES})
     if(FFMPEG_FOUND)
         target_compile_definitions(agent PRIVATE AGENT_HAS_FFMPEG)
+        target_include_directories(agent PRIVATE ${FFMPEG_INCLUDE_DIRS})
         target_link_libraries(agent PRIVATE ${FFMPEG_LIBRARIES})
     endif()
     if(OPENIMAGEIO_FOUND)
         target_compile_definitions(agent PRIVATE AGENT_HAS_OIIO)
+        target_include_directories(agent PRIVATE ${OPENIMAGEIO_INCLUDE_DIRS})
         target_link_libraries(agent PRIVATE ${OPENIMAGEIO_LIBRARIES})
     endif()
 endif()
 
-if(AGENT_STATIC_LINK)
-    if(MSVC)
-        set_target_properties(agent PROPERTIES
-            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
-        )
-    elseif(MINGW)
-        target_link_options(agent PRIVATE -static -static-libgcc -static-libstdc++)
-    endif()
+if(AGENT_STATIC_LINK AND MINGW)
+    target_link_options(agent PRIVATE -static -static-libgcc -static-libstdc++)
 endif()
 
 target_compile_definitions(agent PRIVATE
@@ -178,7 +175,7 @@ target_compile_definitions(agent PRIVATE
 
 if(WIN32)
     target_compile_definitions(agent PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
-    target_link_libraries(agent PRIVATE ws2_32)
+    target_link_libraries(agent PRIVATE ws2_32 mswsock)
 endif()
 
 # ── Install ────────────────────────────────────────────────────────

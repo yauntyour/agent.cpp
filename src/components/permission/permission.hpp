@@ -24,8 +24,8 @@ class Permission : public Module<Permission> {
 public:
     static constexpr std::string_view static_name() { return "permission"; }
 
-    void on_initialize() override;
-    void on_shutdown() override;
+    void on_initialize();
+    void on_shutdown();
 
     // ── Tool permissions ───────────────────────────────────────
     void set_tool_permission(std::string_view tool_name, PermissionLevel level);
@@ -54,8 +54,6 @@ private:
     std::map<std::string, PermissionLevel> m_rules;
     std::vector<std::string> m_dangerous_patterns;
 
-    struct Impl;
-    std::unique_ptr<Impl> m_impl;
 };
 
 } // namespace agent

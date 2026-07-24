@@ -1,5 +1,6 @@
 #ifdef AGENT_ENABLE_LSP
 #include "components/lsp/lsp.hpp"
+#include "components/service/service.hpp"
 
 namespace agent {
 

@@ -32,8 +32,8 @@ class Service : public Module<Service> {
 public:
     static constexpr std::string_view static_name() { return "service"; }
 
-    void on_initialize() override;
-    void on_shutdown() override;
+    void on_initialize();
+    void on_shutdown();
 
     // ── Process management ─────────────────────────────────────
     std::string spawn(const ServiceProcess& proc);
@@ -59,8 +59,6 @@ private:
     std::atomic<int> m_next_id{1};
     std::mutex m_mutex;
 
-    struct Impl;
-    std::unique_ptr<Impl> m_impl;
 };
 
 } // namespace agent

@@ -1,4 +1,6 @@
 #pragma once
+#include <atomic>
+#include <thread>
 #include <string>
 #include <string_view>
 #include <vector>

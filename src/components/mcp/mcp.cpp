@@ -1,4 +1,6 @@
 #include "components/mcp/mcp.hpp"
+#include "components/service/service.hpp"
+#include <sstream>
 
 namespace agent {
 

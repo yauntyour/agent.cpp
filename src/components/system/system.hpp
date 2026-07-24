@@ -25,8 +25,8 @@ class System : public Module<System> {
 public:
     static constexpr std::string_view static_name() { return "system"; }
 
-    void on_initialize() override;
-    void on_shutdown() override;
+    void on_initialize();
+    void on_shutdown();
 
     // ── Initialization ─────────────────────────────────────────
     enum class InitMode { Normal, Reset, Recovery };
@@ -91,8 +91,6 @@ private:
     std::map<std::string, SystemCommand> m_commands;
     std::vector<ChannelDriver> m_channels;
 
-    struct Impl;
-    std::unique_ptr<Impl> m_impl;
 };
 
 } // namespace agent

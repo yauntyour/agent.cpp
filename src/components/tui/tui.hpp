@@ -7,7 +7,8 @@
 #include <vector>
 #include <functional>
 #include <mutex>
-#include <ncurses.h>
+#include <nlohmann/json.hpp>
+#include <notcurses/notcurses.h>
 
 namespace agent {
 
@@ -15,31 +16,27 @@ struct TUIRect {
     int x, y, w, h;
 };
 
-enum class TUIColor : int {
-    Default = 1,
-    Primary,
-    Secondary,
-    Success,
-    Warning,
-    Error,
-    Info,
-    Dim,
-    Accent,
-    Highlight
-};
+// Notcurses channel pair indices
+static constexpr int NC_SOLARIZED_BG = 0x002b36;
+static constexpr int NC_SOLARIZED_FG = 0x839496;
+static constexpr int NC_SOLARIZED_CYAN = 0x2aa198;
+static constexpr int NC_SOLARIZED_BLUE = 0x268bd2;
+static constexpr int NC_SOLARIZED_GREEN = 0x859900;
+static constexpr int NC_SOLARIZED_YELLOW = 0xb58900;
+static constexpr int NC_SOLARIZED_RED = 0xdc322f;
+static constexpr int NC_SOLARIZED_MAGENTA = 0xd33682;
+static constexpr int NC_SOLARIZED_VIOLET = 0x6c71c4;
 
 class TUI : public Module<TUI> {
 public:
     static constexpr std::string_view static_name() { return "tui"; }
 
-    void on_initialize() override;
-    void on_shutdown() override;
+    void on_initialize();
+    void on_shutdown();
 
-    // ── Lifecycle ──────────────────────────────────────────────
     void run();
     void quit();
 
-    // ── Content areas ──────────────────────────────────────────
     struct RenderContext {
         int screen_w;
         int screen_h;
@@ -53,21 +50,18 @@ public:
     void set_main_content(std::string_view content);
     void append_content(std::string_view content);
 
-    // ── Status bar ─────────────────────────────────────────────
     void set_status(std::string_view status_line);
     void set_context_usage(double percent);
     void set_model_info(std::string_view provider, std::string_view model, std::string_view thinking);
     void set_lsp_status(std::string_view status);
     void set_mcp_status(std::string_view status);
 
-    // ── Input handling ─────────────────────────────────────────
     using InputCallback = std::function<void(std::string_view text)>;
     void on_input_submit(InputCallback callback);
 
     using CommandCallback = std::function<void(std::string_view command)>;
     void on_command(CommandCallback callback);
 
-    // ── Edits display ──────────────────────────────────────────
     struct EditDisplay {
         std::string file_path;
         std::string diff;
@@ -77,20 +71,15 @@ public:
     void show_edit(const EditDisplay& edit);
     void show_edits(const std::vector<EditDisplay>& edits);
 
-    // ── History browsing ───────────────────────────────────────
     void set_history_content(std::string_view history);
 
-    // ── Media display ──────────────────────────────────────────
     void display_image(std::string_view path_or_base64);
     void display_video_frame(std::string_view file_path, int frame_number);
 
-    // ── Mind map display ───────────────────────────────────────
     void display_mind_map(std::string_view ascii_map);
 
-    // ── Todo list display ──────────────────────────────────────
     void display_todo_list(const nlohmann::json& todos);
 
-    // ── System ─────────────────────────────────────────────────
     void show_help();
     void show_command_palette();
 
@@ -99,17 +88,10 @@ private:
     void render_frame();
     void handle_input(int ch);
     void setup_colors();
-    void render_status_bar(int y, int w);
-    void render_main_content(int x, int y, int w, int h);
-    void render_input_area(int y, int w);
-    void render_side_panel(int x, int y, int w, int h);
-
-    struct Area {
-        TUIRect rect;
-        std::string title;
-        std::string content;
-        int scroll_offset = 0;
-    };
+    void render_status_bar();
+    void render_main_content();
+    void render_input_area();
+    void render_side_panel();
 
     std::string m_main_content;
     std::string m_status_line;
@@ -135,7 +117,15 @@ private:
     std::atomic<bool> m_running{false};
     bool m_quitting = false;
 
-    std::unique_ptr<struct TUIData> m_data;
+    struct notcurses* m_nc = nullptr;
+    struct ncplane* m_status_plane = nullptr;
+    struct ncplane* m_content_plane = nullptr;
+    struct ncplane* m_input_plane = nullptr;
+    struct ncplane* m_side_plane = nullptr;
+
+    unsigned m_term_w = 80;
+    unsigned m_term_h = 24;
+    unsigned m_side_width = 24;
 };
 
 } // namespace agent

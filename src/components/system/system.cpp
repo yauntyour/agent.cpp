@@ -1,6 +1,9 @@
 #include "components/system/system.hpp"
+#include "components/edit_history/edit_history.hpp"
 #include "utils/fs.hpp"
 #include <iostream>
+#include <fstream>
+#include <sstream>
 #include <nlohmann/json.hpp>
 
 #ifdef _WIN32
@@ -29,7 +32,6 @@ void System::init(InitMode mode) {
 
     if (mode == InitMode::Reset) {
         cfg.reset();
-        cfg = Config{};
         cfg.save();
     } else if (mode == InitMode::Recovery) {
     }

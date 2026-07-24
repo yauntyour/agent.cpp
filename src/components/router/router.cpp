@@ -3,11 +3,48 @@
 #include "components/session/session.hpp"
 #include "components/agent/agent.hpp"
 #include "components/system/system.hpp"
+
+#include <servic.hpp>
+#include <router/router.hpp>
+
 #include <nlohmann/json.hpp>
+#include <boost/asio.hpp>
+#include <iostream>
+#include <sstream>
 
 namespace agent {
 
 using json = nlohmann::json;
+namespace asio = boost::asio;
+
+static std::string extract_json_body(const std::string& raw_request) {
+    size_t pos = raw_request.find("\r\n\r\n");
+    if (pos == std::string::npos) return "";
+    return raw_request.substr(pos + 4);
+}
+
+static std::string make_http_response(const std::string& body, int code = 200) {
+    std::string status = (code == 200) ? "200 OK" :
+                         (code == 401) ? "401 Unauthorized" :
+                         (code == 400) ? "400 Bad Request" :
+                         (code == 404) ? "404 Not Found" : "500 Internal Server Error";
+    return "HTTP/1.1 " + status + "\r\n"
+           "Content-Type: application/json\r\n"
+           "Content-Length: " + std::to_string(body.size()) + "\r\n"
+           "Connection: close\r\n"
+           "Access-Control-Allow-Origin: *\r\n"
+           "\r\n" + body;
+}
+
+struct RouterImpl {
+    std::unique_ptr<asio::io_context> io_ctx;
+    std::unique_ptr<servic::Server> server;
+    rt::router ros;
+    std::thread worker;
+};
+
+Router::Router() : m_impl(std::make_unique<RouterImpl>()) {}
+Router::~Router() = default;
 
 void Router::on_initialize() {
     register_default_routes();
@@ -40,12 +77,112 @@ void Router::clear_routes() {
 
 void Router::start() {
     if (m_running.load()) return;
+
+    m_impl->io_ctx = std::make_unique<asio::io_context>();
+    m_impl->server = std::make_unique<servic::Server>(*m_impl->io_ctx,
+        static_cast<short>(m_config.port), 300000);
+
+    for (const auto& route : m_routes) {
+        auto handler = route.handler;
+        bool auth = route.requires_auth;
+
+        m_impl->ros.on(route.path,
+            [handler, auth, this](std::string& raw_request, std::string& raw_response,
+                                  const std::map<std::string, std::string>& params) -> int {
+                std::string body = extract_json_body(raw_request);
+
+                json req_json;
+                if (!body.empty()) {
+                    try {
+                        req_json = json::parse(body);
+                    } catch (const std::exception&) {
+                        auto err = error_response("Invalid JSON in request body");
+                        raw_response = make_http_response(err.dump());
+                        return rt::FLAG_DONE;
+                    }
+                }
+
+                if (auth && !m_config.password_hash.empty()) {
+                    raw_response = make_http_response(
+                        error_response("Authentication required", 401).dump(), 401);
+                    return rt::FLAG_DONE;
+                }
+
+                try {
+                    json result = handler(req_json);
+                    raw_response = make_http_response(result.dump());
+                } catch (const std::exception& e) {
+                    raw_response = make_http_response(
+                        error_response(e.what()).dump(), 500);
+                }
+                return rt::FLAG_DONE;
+            });
+    }
+
+    for (const auto& sroute : m_stream_routes) {
+        auto handler = sroute.handler;
+        bool auth = sroute.requires_auth;
+
+        m_impl->ros.on_stream(sroute.path,
+            [handler, auth, this](std::string& raw_request, rt::WriteCallback write,
+                                  const std::map<std::string, std::string>& params) {
+                std::string body = extract_json_body(raw_request);
+
+                json req_json;
+                if (!body.empty()) {
+                    try {
+                        req_json = json::parse(body);
+                    } catch (const std::exception&) {
+                        write("HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\n\r\nInvalid JSON\n");
+                        return;
+                    }
+                }
+
+                if (auth && !m_config.password_hash.empty()) {
+                    write("HTTP/1.1 401 Unauthorized\r\nContent-Type: text/plain\r\n\r\nAuth required\n");
+                    return;
+                }
+
+                write("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n");
+
+                try {
+                    handler(req_json, [&write](std::string_view chunk) {
+                        std::string data(chunk);
+                        std::string sse = "data: " + data + "\n\n";
+                        write(sse);
+                    });
+                    write("data: [DONE]\n\n");
+                } catch (const std::exception& e) {
+                    write("data: [ERROR] " + std::string(e.what()) + "\n\n");
+                }
+            });
+    }
+
+    m_impl->worker = std::thread([this]() {
+        try {
+            m_impl->server->run(m_impl->ros);
+        } catch (const std::exception& e) {
+            std::cerr << "Router server exception: " << e.what() << std::endl;
+        }
+    });
+
     m_running.store(true);
-    // servic.cpp integration: start HTTP server on m_config.port
 }
 
 void Router::stop() {
+    if (!m_running.load()) return;
     m_running.store(false);
+
+    if (m_impl->io_ctx) {
+        m_impl->io_ctx->stop();
+    }
+
+    if (m_impl->worker.joinable()) {
+        m_impl->worker.join();
+    }
+
+    m_impl->io_ctx.reset();
+    m_impl->server.reset();
 }
 
 void Router::restart() {
@@ -67,7 +204,6 @@ void Router::set_password(std::string_view password) {
 }
 
 bool Router::verify_auth_token(std::string_view token) const {
-    // Simple token verification — full implementation uses JWT or session tokens
     return !m_config.password_hash.empty();
 }
 

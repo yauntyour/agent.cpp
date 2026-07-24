@@ -1,6 +1,7 @@
 #pragma once
 #include "core/module.hpp"
 #include "core/config.hpp"
+#include "components/provider/provider.hpp"
 #include <string>
 #include <string_view>
 #include <vector>
@@ -38,8 +39,8 @@ class Tools : public Module<Tools> {
 public:
     static constexpr std::string_view static_name() { return "tools"; }
 
-    void on_initialize() override;
-    void on_shutdown() override;
+    void on_initialize();
+    void on_shutdown();
 
     // ── Tool registration ──────────────────────────────────────
     void register_tool(const ToolInfo& info, ToolExecutor executor);
@@ -84,8 +85,6 @@ private:
     std::map<std::string, ToolExecutor> m_executors;
     std::map<std::string, std::vector<std::string>> m_mcp_tools;  // server_id -> tool names
 
-    struct Impl;
-    std::unique_ptr<Impl> m_impl;
 };
 
 } // namespace agent

@@ -1,7 +1,16 @@
 #include "components/tools/tools.hpp"
-#include "components/tools/tools.hpp"
+#include "components/permission/permission.hpp"
+#include "components/service/service.hpp"
+#include "components/memory/memory.hpp"
+#include "components/agent/agent.hpp"
+#include "components/notice/notice.hpp"
 #include "utils/fs.hpp"
+#include "utils/crypto.hpp"
 #include <nlohmann/json.hpp>
+#include <cstdio>
+#include <fstream>
+#include <sstream>
+#include <algorithm>
 
 namespace agent {
 
@@ -461,11 +470,15 @@ ToolResult Tools::tool_webfetch(const ToolCall& call) {
 ToolResult Tools::tool_mind_map(const ToolCall& call) {
     try {
         auto title = call.arguments.value("title", "Mind Map");
-        auto nodes_json = call.arguments.value("nodes", "[]");
 
         json nodes;
-        if (nodes_json.is_string()) nodes = json::parse(nodes_json.get<std::string>());
-        else nodes = nodes_json;
+        if (call.arguments.contains("nodes") && call.arguments["nodes"].is_string()) {
+            nodes = json::parse(call.arguments["nodes"].get<std::string>());
+        } else if (call.arguments.contains("nodes")) {
+            nodes = call.arguments["nodes"];
+        } else {
+            nodes = json::array();
+        }
 
         std::string result;
         result += title + "\n";
@@ -473,9 +486,9 @@ ToolResult Tools::tool_mind_map(const ToolCall& call) {
 
         std::function<void(const json&, int, std::string)> render = [&](const json& n, int depth, std::string prefix) {
             if (n.is_object()) {
-                auto name = n.value("name", n.value("title", ""));
+                std::string name = n.value("name", n.value("title", ""));
                 auto children = n.value("children", json::array());
-                result += prefix + (depth > 0 ? "├── " : "") + name.get<std::string>() + "\n";
+                result += prefix + (depth > 0 ? "├── " : "") + name + "\n";
                 for (size_t i = 0; i < children.size(); ++i) {
                     std::string child_prefix = prefix + (depth > 0 ? "│   " : "    ");
                     if (i == children.size() - 1) {

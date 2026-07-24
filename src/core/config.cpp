@@ -2,6 +2,9 @@
 #include "utils/crypto.hpp"
 #include <filesystem>
 #include <fstream>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #include <nlohmann/json.hpp>
 
 namespace fs = std::filesystem;

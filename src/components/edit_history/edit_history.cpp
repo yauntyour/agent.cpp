@@ -1,6 +1,8 @@
 #include "components/edit_history/edit_history.hpp"
 #include "core/config.hpp"
+#include "utils/fs.hpp"
 #include <fstream>
+#include <sstream>
 #include <nlohmann/json.hpp>
 
 namespace agent {
@@ -33,7 +35,7 @@ void EditHistory::record_edit(std::string_view tool_name, const fs::path& file_p
     std::string diff;
     auto lines_before = [](std::string_view s) {
         std::vector<std::string> lines;
-        std::stringstream ss(std::string(s));
+        std::stringstream ss{std::string(s)};
         std::string line;
         while (std::getline(ss, line)) lines.push_back(line);
         return lines;

@@ -63,7 +63,7 @@ void edit_file(const fs::path& path, size_t start_line, size_t end_line, std::st
 
     // Split new_content into lines
     std::vector<std::string> new_lines;
-    std::stringstream nss(std::string(new_content));
+    std::stringstream nss{std::string(new_content)};
     std::string new_line;
     while (std::getline(nss, new_line)) {
         new_lines.push_back(new_line);

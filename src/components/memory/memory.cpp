@@ -1,7 +1,10 @@
 #include "components/memory/memory.hpp"
+#include "components/provider/provider.hpp"
 #include "core/config.hpp"
 #include <fstream>
+#include <sstream>
 #include <algorithm>
+#include <set>
 #include <nlohmann/json.hpp>
 
 namespace agent {

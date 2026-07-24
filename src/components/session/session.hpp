@@ -33,8 +33,8 @@ class SessionManager : public Module<SessionManager> {
 public:
     static constexpr std::string_view static_name() { return "session"; }
 
-    void on_initialize() override;
-    void on_shutdown() override;
+    void on_initialize();
+    void on_shutdown();
 
     // ── Session CRUD ───────────────────────────────────────────
     SessionInfo new_session(std::string_view project_dir, std::string_view name = "");
@@ -76,8 +76,6 @@ private:
     std::map<std::string, std::vector<SessionMessage>> m_messages;  // session_id -> messages
     std::map<std::string, std::vector<std::string>> m_assets;       // session_id -> [#N -> base64]
 
-    struct Impl;
-    std::unique_ptr<Impl> m_impl;
 };
 
 } // namespace agent

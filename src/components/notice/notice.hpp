@@ -33,8 +33,8 @@ class Notice : public Module<Notice> {
 public:
     static constexpr std::string_view static_name() { return "notice"; }
 
-    void on_initialize() override;
-    void on_shutdown() override;
+    void on_initialize();
+    void on_shutdown();
 
     // ── Send notices ───────────────────────────────────────────
     void send(const NoticeEvent& event);
@@ -58,8 +58,6 @@ private:
     std::vector<NoticeEvent> m_history;
     static constexpr size_t MAX_HISTORY = 500;
 
-    struct Impl;
-    std::unique_ptr<Impl> m_impl;
 };
 
 } // namespace agent

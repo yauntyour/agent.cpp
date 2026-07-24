@@ -49,8 +49,8 @@ class Agent : public Module<Agent> {
 public:
     static constexpr std::string_view static_name() { return "agent"; }
 
-    void on_initialize() override;
-    void on_shutdown() override;
+    void on_initialize();
+    void on_shutdown();
 
     // ── Agent configuration ────────────────────────────────────
     void set_system_prompt(AgentType type, std::string_view prompt);
@@ -101,8 +101,6 @@ private:
     std::map<AgentType, std::vector<std::string>> m_tool_restrictions;
     MPCState m_state;
 
-    struct Impl;
-    std::unique_ptr<Impl> m_impl;
 };
 
 } // namespace agent

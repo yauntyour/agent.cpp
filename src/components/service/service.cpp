@@ -1,5 +1,6 @@
 #include "components/service/service.hpp"
 #include <chrono>
+#include <thread>
 
 #ifdef _WIN32
 #include <windows.h>

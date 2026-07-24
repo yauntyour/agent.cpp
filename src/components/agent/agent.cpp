@@ -3,6 +3,7 @@
 #include "components/session/session.hpp"
 #include "components/notice/notice.hpp"
 #include "components/memory/memory.hpp"
+#include "components/permission/permission.hpp"
 #include <sstream>
 #include <regex>
 
@@ -318,10 +319,10 @@ ChatMessage Agent::parse_tool_call(std::string_view response) {
     std::string resp(response);
 
     // Try to parse XML-style tool calls: <tool>name:params</tool>
-    std::regex xml_regex(R"(<tool\s+name="([^"]+)"\s*>(.*?)</tool>)",
-                          std::regex::multiline | std::regex::dotall);
-    std::regex xml_attr_regex(R"(<tool\s+(\w+)="([^"]+)"(?:\s+(\w+)="([^"]+)")*\s*/>)",
-                               std::regex::multiline);
+    std::regex xml_regex("<tool\\s+name=\"([^\"]+)\"\\s*>([\\s\\S]*?)</tool>",
+                          std::regex::ECMAScript);
+    std::regex xml_attr_regex("<tool\\s+(\\w+)=\"([^\"]+)\"(?:\\s+(\\w+)=\"([^\"]+)\")*\\s*/>",
+                               std::regex::ECMAScript);
 
     std::smatch match;
     if (std::regex_search(resp, match, xml_regex) ||

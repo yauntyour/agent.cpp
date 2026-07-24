@@ -44,8 +44,8 @@ class Provider : public Module<Provider> {
 public:
     static constexpr std::string_view static_name() { return "provider"; }
 
-    void on_initialize() override;
-    void on_shutdown() override;
+    void on_initialize();
+    void on_shutdown();
 
     // ── Provider management ────────────────────────────────────
     struct ProviderInfo {
@@ -135,8 +135,6 @@ private:
     std::string m_current_model;
     std::vector<ProviderInfo> m_providers;
 
-    struct Impl;
-    std::unique_ptr<Impl> m_impl;
 };
 
 } // namespace agent
