@@ -115,17 +115,19 @@ std::string Provider::generate(const std::vector<ChatMessage>& messages,
     auto* cfg = Config::instance().current_provider();
     if (!cfg) throw std::runtime_error("No provider configured");
 
-    // Detect provider type from base URL
-    if (cfg->api_base.find("anthropic") != std::string::npos) {
-        return generate_anthropic(messages, tools, extra, *cfg);
-    } else if (cfg->api_base.find("ollama") != std::string::npos ||
-               cfg->api_base.find("11434") != std::string::npos) {
-        return generate_ollama(messages, tools, extra, *cfg);
-    } else if (cfg->api_base.find("8080") != std::string::npos) {
-        return generate_llama_server(messages, tools, extra, *cfg);
-    } else {
-        return generate_openai(messages, tools, extra, *cfg);
+    std::string type = cfg->type;
+    if (type.empty()) {
+        if (cfg->api_base.find("anthropic") != std::string::npos) type = "anthropic";
+        else if (cfg->api_base.find("ollama") != std::string::npos ||
+                 cfg->api_base.find("11434") != std::string::npos) type = "ollama";
+        else if (cfg->api_base.find("8080") != std::string::npos) type = "llama_server";
+        else type = "openai";
     }
+
+    if (type == "anthropic") return generate_anthropic(messages, tools, extra, *cfg);
+    if (type == "ollama") return generate_ollama(messages, tools, extra, *cfg);
+    if (type == "llama_server") return generate_llama_server(messages, tools, extra, *cfg);
+    return generate_openai(messages, tools, extra, *cfg);
 }
 
 void Provider::generate_stream(const std::vector<ChatMessage>& messages,
@@ -135,15 +137,18 @@ void Provider::generate_stream(const std::vector<ChatMessage>& messages,
     auto* cfg = Config::instance().current_provider();
     if (!cfg) throw std::runtime_error("No provider configured");
 
-    if (cfg->api_base.find("anthropic") != std::string::npos) {
-        generate_anthropic_stream(messages, callback, tools, extra, *cfg);
-    } else if (cfg->api_base.find("ollama") != std::string::npos) {
-        generate_ollama_stream(messages, callback, tools, extra, *cfg);
-    } else if (cfg->api_base.find("8080") != std::string::npos) {
-        generate_llama_server_stream(messages, callback, tools, extra, *cfg);
-    } else {
-        generate_openai_stream(messages, callback, tools, extra, *cfg);
+    std::string type = cfg->type;
+    if (type.empty()) {
+        if (cfg->api_base.find("anthropic") != std::string::npos) type = "anthropic";
+        else if (cfg->api_base.find("ollama") != std::string::npos) type = "ollama";
+        else if (cfg->api_base.find("8080") != std::string::npos) type = "llama_server";
+        else type = "openai";
     }
+
+    if (type == "anthropic") generate_anthropic_stream(messages, callback, tools, extra, *cfg);
+    else if (type == "ollama") generate_ollama_stream(messages, callback, tools, extra, *cfg);
+    else if (type == "llama_server") generate_llama_server_stream(messages, callback, tools, extra, *cfg);
+    else generate_openai_stream(messages, callback, tools, extra, *cfg);
 }
 
 // ── OpenAI provider ───────────────────────────────────────────────

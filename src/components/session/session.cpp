@@ -9,8 +9,8 @@ namespace agent {
 using json = nlohmann::json;
 
 void SessionManager::on_initialize() {
-    auto dir = Config::instance().session_dir();
-    if (!fs::exists(dir)) fs::create_directories(dir);
+    Config::instance().session_dir();
+    Config::instance().assets_dir();
 }
 
 void SessionManager::on_shutdown() {

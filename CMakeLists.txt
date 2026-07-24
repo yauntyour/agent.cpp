@@ -22,13 +22,7 @@ pkg_check_modules(NLOHMANN_JSON REQUIRED nlohmann_json IMPORTED_TARGET)
 find_package(Threads REQUIRED)
 
 if(AGENT_ENABLE_TUI)
-    pkg_check_modules(NOTCURSES QUIET notcurses)
-    if(NOTCURSES_FOUND)
-        message(STATUS "Notcurses found: ${NOTCURSES_VERSION}")
-    else()
-        message(WARNING "Notcurses not found, TUI disabled")
-        set(AGENT_ENABLE_TUI OFF)
-    endif()
+    message(STATUS "TUI enabled (ANSI-based, no external dependencies)")
 endif()
 
 if(AGENT_ENABLE_ROUTER)
@@ -47,8 +41,7 @@ if(AGENT_ENABLE_ROUTER)
     pkg_check_modules(OPENSSL QUIET openssl)
 endif()
 
-pkg_check_modules(FFMPEG QUIET libavcodec libavformat libavutil libswscale)
-pkg_check_modules(OPENIMAGEIO QUIET OpenImageIO)
+
 
 # ── Source Files ───────────────────────────────────────────────────
 set(CORE_SOURCES
@@ -151,18 +144,6 @@ endif()
 
 if(AGENT_ENABLE_TUI)
     target_compile_definitions(agent PRIVATE AGENT_ENABLE_TUI)
-    target_include_directories(agent PRIVATE ${NOTCURSES_INCLUDE_DIRS})
-    target_link_libraries(agent PRIVATE ${NOTCURSES_LIBRARIES})
-    if(FFMPEG_FOUND)
-        target_compile_definitions(agent PRIVATE AGENT_HAS_FFMPEG)
-        target_include_directories(agent PRIVATE ${FFMPEG_INCLUDE_DIRS})
-        target_link_libraries(agent PRIVATE ${FFMPEG_LIBRARIES})
-    endif()
-    if(OPENIMAGEIO_FOUND)
-        target_compile_definitions(agent PRIVATE AGENT_HAS_OIIO)
-        target_include_directories(agent PRIVATE ${OPENIMAGEIO_INCLUDE_DIRS})
-        target_link_libraries(agent PRIVATE ${OPENIMAGEIO_LIBRARIES})
-    endif()
 endif()
 
 if(AGENT_STATIC_LINK AND MINGW)

@@ -83,7 +83,9 @@ private:
 
     std::map<std::string, ToolInfo> m_tool_info;
     std::map<std::string, ToolExecutor> m_executors;
-    std::map<std::string, std::vector<std::string>> m_mcp_tools;  // server_id -> tool names
+    std::map<std::string, std::vector<std::string>> m_mcp_tools;
+
+    nlohmann::json m_todos = nlohmann::json::array();
 
 };
 

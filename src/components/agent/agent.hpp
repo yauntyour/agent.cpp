@@ -8,6 +8,8 @@
 #include <map>
 #include <functional>
 #include <future>
+#include <mutex>
+#include <atomic>
 #include <nlohmann/json.hpp>
 
 namespace agent {
@@ -85,7 +87,7 @@ public:
 
     // ── Background sub-agents ──────────────────────────────────
     std::string launch_background_sub_agent(const AgentConfig& config, std::string_view task);
-    std::future<AgentResult> get_background_result(std::string_view agent_id);
+    std::shared_future<AgentResult> get_background_result(std::string_view agent_id);
     void cancel_background_agent(std::string_view agent_id);
 
 private:
@@ -100,6 +102,16 @@ private:
     std::map<AgentType, std::string> m_system_prompts;
     std::map<AgentType, std::vector<std::string>> m_tool_restrictions;
     MPCState m_state;
+
+    struct BackgroundAgent {
+        std::string id;
+        AgentConfig config;
+        std::string task;
+        std::shared_future<AgentResult> future;
+        std::atomic<bool> cancelled{false};
+    };
+    std::map<std::string, std::shared_ptr<BackgroundAgent>> m_bg_agents;
+    std::mutex m_bg_mutex;
 
 };
 

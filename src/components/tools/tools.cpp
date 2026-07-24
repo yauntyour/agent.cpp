@@ -4,6 +4,7 @@
 #include "components/memory/memory.hpp"
 #include "components/agent/agent.hpp"
 #include "components/notice/notice.hpp"
+#include "components/mcp/mcp.hpp"
 #include "utils/fs.hpp"
 #include "utils/crypto.hpp"
 #include <nlohmann/json.hpp>
@@ -79,9 +80,27 @@ ToolResult Tools::execute_async(const ToolCall& call) {
 void Tools::add_mcp_tools(std::string_view server_id, const std::vector<ToolInfo>& tools) {
     std::vector<std::string> names;
     for (auto& t : tools) {
-        register_tool(t, [this, server_id = std::string(server_id), tool_name = t.name](const ToolCall& call) -> ToolResult {
-            // MCP tool execution is handled by the MCP component
-            return {call.id, "MCP tool " + tool_name + " called on server " + server_id, false, ""};
+        register_tool(t, [server_id = std::string(server_id), tool_name = t.name](const ToolCall& call) -> ToolResult {
+            auto* mcp = ModuleRegistry::instance().get<MCP>();
+            if (!mcp) return {call.id, "", true, "MCP component not available"};
+
+            auto result = mcp->call_tool(server_id, tool_name, call.arguments);
+            if (result.contains("error")) {
+                std::string err = result["error"].is_string()
+                    ? result["error"].get<std::string>()
+                    : result["error"].dump();
+                return {call.id, "", true, err};
+            }
+
+            std::string content;
+            if (result.contains("content")) {
+                for (auto& c : result["content"]) {
+                    if (c.contains("text")) content += c["text"].get<std::string>();
+                }
+            } else {
+                content = result.dump(2);
+            }
+            return {call.id, content, false, ""};
         });
         names.push_back(t.name);
     }
@@ -510,13 +529,12 @@ ToolResult Tools::tool_mind_map(const ToolCall& call) {
 ToolResult Tools::tool_todolist(const ToolCall& call) {
     try {
         auto action = call.arguments.value("action", "list");
-        static json todos = json::array();
 
         if (action == "list") {
             std::string output = "Todo List:\n";
-            for (size_t i = 0; i < todos.size(); ++i) {
-                auto status = todos[i].value("status", "pending");
-                auto content = todos[i].value("content", "");
+            for (size_t i = 0; i < m_todos.size(); ++i) {
+                auto status = m_todos[i].value("status", "pending");
+                auto content = m_todos[i].value("content", "");
                 std::string marker = (status == "completed") ? "[x]" : (status == "in_progress") ? "[>]" : "[ ]";
                 output += std::to_string(i + 1) + ". " + marker + " " + content + "\n";
             }
@@ -526,21 +544,21 @@ ToolResult Tools::tool_todolist(const ToolCall& call) {
             item["content"] = call.arguments.value("content", "");
             item["status"] = "pending";
             item["priority"] = call.arguments.value("priority", "medium");
-            todos.push_back(item);
-            return {call.id, "Added todo #" + std::to_string(todos.size()), false, ""};
+            m_todos.push_back(item);
+            return {call.id, "Added todo #" + std::to_string(m_todos.size()), false, ""};
         } else if (action == "update") {
             auto idx = call.arguments.value("index", 1) - 1;
-            if (idx < 0 || idx >= (int)todos.size()) return {call.id, "", true, "Invalid index"};
-            if (call.arguments.contains("status")) todos[idx]["status"] = call.arguments["status"];
-            if (call.arguments.contains("content")) todos[idx]["content"] = call.arguments["content"];
+            if (idx < 0 || idx >= (int)m_todos.size()) return {call.id, "", true, "Invalid index"};
+            if (call.arguments.contains("status")) m_todos[idx]["status"] = call.arguments["status"];
+            if (call.arguments.contains("content")) m_todos[idx]["content"] = call.arguments["content"];
             return {call.id, "Updated todo #" + std::to_string(idx + 1), false, ""};
         } else if (action == "delete") {
             auto idx = call.arguments.value("index", 1) - 1;
-            if (idx < 0 || idx >= (int)todos.size()) return {call.id, "", true, "Invalid index"};
-            todos.erase(todos.begin() + idx);
+            if (idx < 0 || idx >= (int)m_todos.size()) return {call.id, "", true, "Invalid index"};
+            m_todos.erase(m_todos.begin() + idx);
             return {call.id, "Deleted todo #" + std::to_string(idx + 1), false, ""};
         } else if (action == "clear") {
-            todos.clear();
+            m_todos.clear();
             return {call.id, "Cleared all todos", false, ""};
         }
 

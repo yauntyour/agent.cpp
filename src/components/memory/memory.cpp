@@ -225,6 +225,7 @@ double Memory::calculate_similarity(std::string_view a, std::string_view b) {
 
 void Memory::save() {
     auto path = Config::instance().memory_dir() / "memory.json";
+    if (!fs::exists(path.parent_path())) fs::create_directories(path.parent_path());
 
     json j = json::array();
     for (auto& [id, entry] : m_entries) {

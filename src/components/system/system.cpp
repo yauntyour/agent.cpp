@@ -1,5 +1,9 @@
 #include "components/system/system.hpp"
 #include "components/edit_history/edit_history.hpp"
+#include "components/mcp/mcp.hpp"
+#ifdef AGENT_ENABLE_LSP
+#include "components/lsp/lsp.hpp"
+#endif
 #include "utils/fs.hpp"
 #include <iostream>
 #include <fstream>
@@ -23,7 +27,7 @@ void System::on_initialize() {
 
 void System::on_shutdown() {
     stop_channels();
-    save_keychain();
+    try { save_keychain(); } catch (...) {}
 }
 
 void System::init(InitMode mode) {
@@ -32,18 +36,39 @@ void System::init(InitMode mode) {
 
     if (mode == InitMode::Reset) {
         cfg.reset();
-        cfg.save();
-    } else if (mode == InitMode::Recovery) {
     }
 
-    // Ensure cache directory structure
-    auto cache = cfg.cache_dir();
-    fsutil::create_directories(cache);
-    fsutil::create_directories(cache / "sessions");
-    fsutil::create_directories(cache / "sessions" / "assets");
-    fsutil::create_directories(cache / "memorys");
-    fsutil::create_directories(cache / "tools");
-    fsutil::create_directories(cache / "tokens");
+    if (cfg.providers.empty()) {
+        Config::ProviderConfig local;
+        local.name = "llama-server";
+        local.type = "llama_server";
+        local.api_base = "http://localhost:11434/v1";
+        local.model = "default";
+        local.context_length = 8192;
+        local.max_tokens = 4096;
+        local.temperature = 0.7f;
+        local.supports_tools = true;
+        cfg.providers.push_back(local);
+
+        Config::ProviderConfig ollama;
+        ollama.name = "ollama";
+        ollama.type = "ollama";
+        ollama.api_base = "http://localhost:11434";
+        ollama.model = "llama3";
+        ollama.context_length = 8192;
+        ollama.max_tokens = 4096;
+        cfg.providers.push_back(ollama);
+
+        cfg.default_provider = "llama-server";
+    }
+
+    cfg.save();
+
+    cfg.agent_dir();
+    cfg.session_dir();
+    cfg.memory_dir();
+    cfg.edit_history_dir();
+    cfg.assets_dir();
 }
 
 void System::hot_reload() {
@@ -218,6 +243,93 @@ void System::setup_commands() {
             std::cout << "System reset to defaults." << std::endl;
         }});
 
+    register_command({"/mcp", "Manage MCP servers", "/mcp [list|start|stop] [server_id]", {},
+        [this](const std::vector<std::string>& args) {
+            auto* mcp = ModuleRegistry::instance().get<MCP>();
+            if (!mcp) { std::cerr << "MCP component not available" << std::endl; return; }
+
+            if (args.empty() || args[0] == "list") {
+                auto servers = mcp->list_servers();
+                if (servers.empty()) { std::cout << "No MCP servers configured." << std::endl; return; }
+                for (auto& s : servers) {
+                    std::string status = mcp->is_server_running(s.id) ? "running" : "stopped";
+                    std::cout << "  " << s.id << " (" << s.name << ") [" << status << "] - " << s.command << std::endl;
+                    auto tools = mcp->list_tools(s.id);
+                    for (auto& t : tools) {
+                        std::cout << "    tool: " << t.tool_name << " - " << t.description << std::endl;
+                    }
+                }
+            } else if (args[0] == "start" && args.size() > 1) {
+                mcp->start_server(args[1]);
+                std::cout << "Started MCP server: " << args[1] << std::endl;
+            } else if (args[0] == "stop" && args.size() > 1) {
+                mcp->stop_server(args[1]);
+                std::cout << "Stopped MCP server: " << args[1] << std::endl;
+            }
+        }});
+
+    register_command({"/lsp", "Manage LSP servers", "/lsp [list|start|stop] [server_id]", {},
+        [this](const std::vector<std::string>& args) {
+#ifdef AGENT_ENABLE_LSP
+            auto* lsp = ModuleRegistry::instance().get<LSP>();
+            if (!lsp) { std::cerr << "LSP component not available" << std::endl; return; }
+
+            if (args.empty() || args[0] == "list") {
+                auto servers = lsp->list_servers();
+                if (servers.empty()) { std::cout << "No LSP servers configured." << std::endl; return; }
+                for (auto& s : servers) {
+                    std::string status = lsp->is_server_running(s.id) ? "running" : "stopped";
+                    std::cout << "  " << s.id << " [" << s.language << "] [" << status << "] - " << s.command << std::endl;
+                }
+            } else if (args[0] == "start" && args.size() > 1) {
+                lsp->start_server(args[1]);
+                std::cout << "Started LSP server: " << args[1] << std::endl;
+            } else if (args[0] == "stop" && args.size() > 1) {
+                lsp->stop_server(args[1]);
+                std::cout << "Stopped LSP server: " << args[1] << std::endl;
+            }
+#else
+            std::cerr << "LSP not enabled (build with AGENT_ENABLE_LSP=ON)" << std::endl;
+#endif
+        }});
+
+    register_command({"/provider", "Manage model providers", "/provider [list|add|switch] ...", {"/p"},
+        [this](const std::vector<std::string>& args) {
+            auto& cfg = Config::instance();
+            auto& provider = ModuleRegistry::instance().require<Provider>();
+
+            if (args.empty() || args[0] == "list") {
+                std::cout << "Providers:" << std::endl;
+                for (auto& p : cfg.providers) {
+                    std::string current = (p.name == cfg.default_provider) ? " *" : "";
+                    std::cout << "  " << p.name << current << " [" << p.type << "] "
+                              << p.api_base << " model:" << p.model << std::endl;
+                }
+            } else if (args[0] == "switch" && args.size() > 1) {
+                cfg.default_provider = args[1];
+                provider.set_current(args[1]);
+                if (args.size() > 2) {
+                    cfg.default_model = args[2];
+                    provider.set_model(args[2]);
+                }
+                cfg.save();
+                std::cout << "Switched to provider: " << args[1] << std::endl;
+            }
+        }});
+
+    register_command({"/config", "View or set configuration", "/config [key] [value]", {},
+        [this](const std::vector<std::string>& args) {
+            auto& cfg = Config::instance();
+            if (args.empty()) {
+                std::cout << "Config file: " << cfg.agent_dir().string() << "/config.json" << std::endl;
+                std::cout << "  default_provider: " << cfg.default_provider << std::endl;
+                std::cout << "  default_model: " << cfg.default_model << std::endl;
+                std::cout << "  max_context_tokens: " << cfg.max_context_tokens << std::endl;
+                std::cout << "  max_mpc_rounds: " << cfg.max_mpc_rounds << std::endl;
+                std::cout << "  stream_output: " << (cfg.stream_output ? "true" : "false") << std::endl;
+            }
+        }});
+
     register_command({"/quit", "Exit agent", "/quit", {"/q", "/exit", "/bye"},
         [this](const std::vector<std::string>&) {
             std::cout << "Shutting down..." << std::endl;
@@ -244,27 +356,27 @@ void System::setup_commands() {
 
 // ── Keychain ──────────────────────────────────────────────────────
 void System::load_keychain() {
-    // Keychain stored as encrypted JSON in cache dir
-    auto path = Config::instance().cache_dir() / "keychain.enc";
+    auto path = Config::instance().keychain_path();
     if (!fs::exists(path)) return;
 }
 
 void System::save_keychain() {
-    auto path = Config::instance().cache_dir() / "keychain.enc";
+    auto path = Config::instance().keychain_path();
 }
 
 void System::store_key(std::string_view key_id, std::string_view value, std::string_view password) {
     auto dk = crypto::derive_key(password);
     auto encrypted = crypto::encrypt_string(value, dk.key);
 
-    auto path = Config::instance().cache_dir() / (std::string(key_id) + ".enc");
+    auto path = Config::instance().keychain_path() / (std::string(key_id) + ".enc");
+    if (!fs::exists(path.parent_path())) fs::create_directories(path.parent_path());
     std::ofstream f(path, std::ios::binary);
     f.write(reinterpret_cast<const char*>(dk.salt.data()), dk.salt.size());
     f << encrypted;
 }
 
 std::optional<std::string> System::retrieve_key(std::string_view key_id, std::string_view password) {
-    auto path = Config::instance().cache_dir() / (std::string(key_id) + ".enc");
+    auto path = Config::instance().keychain_path() / (std::string(key_id) + ".enc");
     if (!fs::exists(path)) return std::nullopt;
 
     std::ifstream f(path, std::ios::binary);
@@ -279,7 +391,7 @@ std::optional<std::string> System::retrieve_key(std::string_view key_id, std::st
 }
 
 void System::delete_key(std::string_view key_id) {
-    auto path = Config::instance().cache_dir() / (std::string(key_id) + ".enc");
+    auto path = Config::instance().keychain_path() / (std::string(key_id) + ".enc");
     if (fs::exists(path)) fs::remove(path);
 }
 
@@ -288,25 +400,14 @@ void System::register_channel(const ChannelDriver& driver) {
     m_channels.push_back(driver);
 }
 
-void System::start_channels() {
-    for (auto& ch : m_channels) {
-        // Channel drivers are external Python scripts or library integrations
-        // For now, just log
-    }
-}
-
-void System::stop_channels() {
-    for (auto& ch : m_channels) {
-        ch.send_message = nullptr;
-    }
-}
+// start_channels() and stop_channels() are implemented in channel.cpp
 
 // ── Project management ────────────────────────────────────────────
 void System::set_project_dir(const fs::path& project_dir) {
     auto& cfg = Config::instance();
+    cfg.set_project_dir(project_dir);
     auto proj_path = fs::absolute(project_dir).string();
 
-    // Add to recent projects
     auto& recent = cfg.recent_projects;
     recent.erase(std::remove(recent.begin(), recent.end(), proj_path), recent.end());
     recent.insert(recent.begin(), proj_path);
@@ -328,7 +429,7 @@ std::vector<std::string> System::recent_projects() {
 nlohmann::json System::system_info() const {
     json info;
     info["version"] = AGENT_VERSION;
-    info["cache_dir"] = Config::instance().cache_dir().string();
+    info["agent_dir"] = Config::instance().agent_dir().string();
 
     auto& registry = ModuleRegistry::instance();
     json modules = json::array();

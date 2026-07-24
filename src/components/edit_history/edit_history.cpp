@@ -15,7 +15,7 @@ void EditHistory::on_shutdown() {
 }
 
 fs::path EditHistory::get_storage_path() const {
-    return Config::instance().cache_dir() / "edit_history.json";
+    return Config::instance().edit_history_dir() / "history.json";
 }
 
 void EditHistory::record(const EditRecord& record) {

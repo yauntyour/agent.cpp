@@ -82,7 +82,6 @@ int run_cli_mode(const System::CLIOptions& opts) {
     auto& agent = registry.require<Agent>();
     auto& sessions = registry.require<SessionManager>();
 
-    // Setup session
     if (!opts.session_id.empty()) {
         sessions.set_current(opts.session_id);
     }
@@ -95,7 +94,6 @@ int run_cli_mode(const System::CLIOptions& opts) {
     std::cout << "Session: " << current.name << " (" << current.id << ")" << std::endl;
     std::cout << "Model: " << registry.require<Provider>().current_model().name << std::endl;
 
-    // Process --command if provided
     if (!opts.command.empty()) {
         auto result = agent.execute(opts.command,
             [](std::string_view type, std::string_view content) {
@@ -109,7 +107,6 @@ int run_cli_mode(const System::CLIOptions& opts) {
         return 0;
     }
 
-    // Interactive REPL
     std::string line;
     while (!g_shutdown.load()) {
         std::cout << "\n> ";
@@ -172,7 +169,7 @@ int run_tui_mode(const System::CLIOptions& opts) {
     tui.run();
     return 0;
 #else
-    std::cerr << "TUI not available (Notcurses not found at build time)" << std::endl;
+    std::cerr << "TUI not available" << std::endl;
     return 1;
 #endif
 }
@@ -198,7 +195,7 @@ int run_router_mode(const System::CLIOptions& opts) {
     router.stop();
     return 0;
 #else
-    std::cerr << "Router not available (servic.cpp not found at build time)" << std::endl;
+    std::cerr << "Router not available" << std::endl;
     return 1;
 #endif
 }
@@ -208,14 +205,13 @@ int run_router_mode(const System::CLIOptions& opts) {
 int main(int argc, char* argv[]) {
     using namespace agent;
 
-    // Setup signal handlers
+    Config::instance();
+
     std::signal(SIGINT, signal_handler);
     std::signal(SIGTERM, signal_handler);
 
-    // Register all modules
     register_all_modules();
 
-    // Parse arguments
     System::CLIOptions opts;
     {
         auto* system_component = ModuleRegistry::instance().get<System>();
@@ -237,30 +233,34 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    if (opts.version) {
-        std::cout << "agent.cpp v" << AGENT_VERSION << std::endl;
-        return 0;
-    }
-
-    // Initialize system
     auto& system_component = ModuleRegistry::instance().require<System>();
 
-    if (opts.reset_config) {
-        system_component.init(System::InitMode::Reset);
-    } else {
-        system_component.init(System::InitMode::Normal);
+    try {
+        if (opts.reset_config) {
+            system_component.init(System::InitMode::Reset);
+        } else {
+            system_component.init(System::InitMode::Normal);
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Init error: " << e.what() << std::endl;
     }
 
     if (!opts.project_dir.empty()) {
         system_component.set_project_dir(opts.project_dir);
+        Config::instance().set_project_dir(opts.project_dir);
     }
 
-    // Initialize all modules
-    ModuleRegistry::instance().initialize_all();
+    if (opts.version) {
+        std::cout << "agent.cpp v" << AGENT_VERSION << std::endl;
+        try {
+            ModuleRegistry::instance().shutdown_all();
+        } catch (const std::exception& e) {
+            std::cerr << "Shutdown error: " << e.what() << std::endl;
+        }
+        return 0;
+    }
 
-    // Route to appropriate mode
     if (opts.tui_mode) {
-        print_banner();
         return run_tui_mode(opts);
     } else if (opts.router_mode) {
         return run_router_mode(opts);

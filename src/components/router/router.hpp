@@ -7,16 +7,23 @@
 #include <functional>
 #include <vector>
 #include <map>
+#include <set>
 #include <memory>
 #include <thread>
 #include <atomic>
+#include <mutex>
 #include <nlohmann/json.hpp>
 
 namespace agent {
 
-using RouteHandler = std::function<nlohmann::json(const nlohmann::json& request)>;
-using StreamHandler = std::function<void(const nlohmann::json& request,
-                                          std::function<void(std::string_view chunk)> writer)>;
+using RouteHandler = std::function<nlohmann::json(
+    const nlohmann::json& request,
+    const std::map<std::string, std::string>& headers)>;
+
+using StreamHandler = std::function<void(
+    const nlohmann::json& request,
+    const std::map<std::string, std::string>& headers,
+    std::function<void(std::string_view chunk)> writer)>;
 
 struct Route {
     std::string method;
@@ -76,15 +83,21 @@ public:
 
 private:
     void register_default_routes();
+    std::string generate_session_token();
+    std::string extract_header(const std::string& raw_request, std::string_view header_name);
+    std::map<std::string, std::string> extract_all_headers(const std::string& raw_request);
 
     RouterConfig m_config;
     std::vector<Route> m_routes;
     std::vector<StreamRoute> m_stream_routes;
     std::atomic<bool> m_running{false};
 
+    std::set<std::string> m_active_tokens;
+    std::mutex m_token_mutex;
+
     std::unique_ptr<RouterImpl> m_impl;
 };
 
 } // namespace agent
 
-#endif // AGENT_ENABLE_ROUTER
+#endif

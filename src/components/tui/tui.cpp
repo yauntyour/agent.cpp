@@ -1,17 +1,127 @@
 #ifdef AGENT_ENABLE_TUI
 #include "components/tui/tui.hpp"
-#include <notcurses/notcurses.h>
-#include <algorithm>
+#include <iostream>
 #include <sstream>
+#include <algorithm>
 #include <cstring>
+
+#ifdef _WIN32
+#include <windows.h>
+#include <conio.h>
+#else
+#include <termios.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#endif
 
 namespace agent {
 
+namespace {
+
+#ifdef _WIN32
+void enable_vt_mode() {
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD mode = 0;
+    GetConsoleMode(hOut, &mode);
+    mode |= 0x0004;
+    SetConsoleMode(hOut, mode);
+
+    HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
+    GetConsoleMode(hIn, &mode);
+    mode |= 0x0200;
+    mode &= ~0x0040;
+    SetConsoleMode(hIn, mode);
+}
+
+void get_term_size(int& w, int& h) {
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi)) {
+        w = csbi.srWindow.Right - csbi.srWindow.Left + 1;
+        h = csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
+    }
+}
+#else
+void enable_vt_mode() {}
+
+void get_term_size(int& w, int& h) {
+    struct winsize ws;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0) {
+        w = ws.ws_col;
+        h = ws.ws_row;
+    }
+}
+
+struct RawMode {
+    termios orig;
+    RawMode() {
+        tcgetattr(STDIN_FILENO, &orig);
+        termios raw = orig;
+        raw.c_lflag &= ~(ECHO | ICANON);
+        raw.c_cc[VMIN] = 1;
+        raw.c_cc[VTIME] = 0;
+        tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+    }
+    ~RawMode() { tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig); }
+};
+#endif
+
+constexpr const char* ESC = "\033";
+constexpr const char* CSI = "\033[";
+constexpr const char* RESET = "\033[0m";
+constexpr const char* BOLD = "\033[1m";
+constexpr const char* DIM = "\033[2m";
+
+constexpr const char* FG_CYAN = "\033[36m";
+constexpr const char* FG_GREEN = "\033[32m";
+constexpr const char* FG_YELLOW = "\033[33m";
+constexpr const char* FG_RED = "\033[31m";
+constexpr const char* FG_WHITE = "\033[37m";
+constexpr const char* FG_GRAY = "\033[90m";
+
+constexpr const char* BG_DARK = "\033[48;2;0;43;54m";
+constexpr const char* BG_INPUT = "\033[48;2;7;54;66m";
+constexpr const char* BG_STATUS = "\033[48;2;238;232;213m";
+constexpr const char* FG_STATUS = "\033[38;2;0;43;54m";
+
+inline std::string operator+(const char* a, const std::string& b) {
+    return std::string(a) + b;
+}
+
+void move_to(int row, int col) {
+    std::cout << CSI << row << ";" << col << "H" << std::flush;
+}
+
+void clear_screen() {
+    std::cout << CSI << "2J" << CSI << "H" << std::flush;
+}
+
+void clear_line() {
+    std::cout << CSI << "2K\r" << std::flush;
+}
+
+void hide_cursor() { std::cout << CSI << "25l" << std::flush; }
+void show_cursor() { std::cout << CSI << "25h" << std::flush; }
+
+std::string truncate(const std::string& s, int max_w) {
+    if ((int)s.size() <= max_w) return s;
+    if (max_w <= 3) return s.substr(0, max_w);
+    return s.substr(0, max_w - 3) + "...";
+}
+
+} // anonymous namespace
+
 void TUI::on_initialize() {
+#ifdef _WIN32
+    enable_vt_mode();
+#endif
 }
 
 void TUI::on_shutdown() {
-    quit();
+    if (m_running.load()) {
+        quit();
+        show_cursor();
+        std::cout << RESET << std::endl;
+    }
 }
 
 void TUI::run() {
@@ -20,46 +130,48 @@ void TUI::run() {
 }
 
 void TUI::quit() {
-    m_quitting = true;
     m_running.store(false);
 }
 
 void TUI::set_main_content(std::string_view content) {
-    std::lock_guard lock(m_render_mutex);
+    std::lock_guard lock(m_mutex);
     m_main_content = content;
-    m_max_scroll = static_cast<int>(std::count(m_main_content.begin(), m_main_content.end(), '\n'));
 }
 
 void TUI::append_content(std::string_view content) {
-    std::lock_guard lock(m_render_mutex);
+    std::lock_guard lock(m_mutex);
     m_main_content += content;
-    m_max_scroll = static_cast<int>(std::count(m_main_content.begin(), m_main_content.end(), '\n'));
+}
+
+void TUI::clear_content() {
+    std::lock_guard lock(m_mutex);
+    m_main_content.clear();
 }
 
 void TUI::set_status(std::string_view status_line) {
-    std::lock_guard lock(m_render_mutex);
+    std::lock_guard lock(m_mutex);
     m_status_line = status_line;
 }
 
 void TUI::set_context_usage(double percent) {
-    std::lock_guard lock(m_render_mutex);
-    m_context_usage = std::to_string(static_cast<int>(percent)) + "%";
+    std::lock_guard lock(m_mutex);
+    m_context_pct = percent;
 }
 
 void TUI::set_model_info(std::string_view provider, std::string_view model, std::string_view thinking) {
-    std::lock_guard lock(m_render_mutex);
+    std::lock_guard lock(m_mutex);
     m_model_provider = provider;
     m_model_name = model;
     m_thinking_mode = thinking;
 }
 
 void TUI::set_lsp_status(std::string_view status) {
-    std::lock_guard lock(m_render_mutex);
+    std::lock_guard lock(m_mutex);
     m_lsp_status = status;
 }
 
 void TUI::set_mcp_status(std::string_view status) {
-    std::lock_guard lock(m_render_mutex);
+    std::lock_guard lock(m_mutex);
     m_mcp_status = status;
 }
 
@@ -72,372 +184,312 @@ void TUI::on_command(CommandCallback callback) {
 }
 
 void TUI::show_edit(const EditDisplay& edit) {
-    std::lock_guard lock(m_render_mutex);
+    std::lock_guard lock(m_mutex);
     m_edits.push_back(edit);
+    if (m_edits.size() > 50) m_edits.erase(m_edits.begin());
 }
 
 void TUI::show_edits(const std::vector<EditDisplay>& edits) {
-    std::lock_guard lock(m_render_mutex);
+    std::lock_guard lock(m_mutex);
     m_edits = edits;
 }
 
-void TUI::set_history_content(std::string_view history) {
-    std::lock_guard lock(m_render_mutex);
-}
-
-void TUI::display_image(std::string_view path_or_base64) {
-}
-
-void TUI::display_video_frame(std::string_view file_path, int frame_number) {
-#ifdef AGENT_HAS_FFMPEG
-#endif
-}
-
 void TUI::display_mind_map(std::string_view ascii_map) {
-    std::lock_guard lock(m_render_mutex);
+    std::lock_guard lock(m_mutex);
+    m_main_content += "\n";
     m_main_content += ascii_map;
-    m_max_scroll = static_cast<int>(std::count(m_main_content.begin(), m_main_content.end(), '\n'));
+    m_main_content += "\n";
 }
 
 void TUI::display_todo_list(const nlohmann::json& todos) {
-    std::lock_guard lock(m_render_mutex);
-    std::string output = "\n=== Todo List ===\n";
+    std::lock_guard lock(m_mutex);
+    std::string output = std::string("\n") + FG_CYAN + "=== Todo List ===" + RESET + "\n";
     for (size_t i = 0; i < todos.size(); ++i) {
         auto status = todos[i].value("status", "pending");
         auto content = todos[i].value("content", "");
-        std::string marker = (status == "completed") ? "[x]" : (status == "in_progress") ? "[>]" : "[ ]";
-        output += marker + " " + content + "\n";
+        if (status == "completed")
+            output += std::string(FG_GREEN) + "[x]" + RESET + " " + content + "\n";
+        else if (status == "in_progress")
+            output += std::string(FG_YELLOW) + "[>]" + RESET + " " + content + "\n";
+        else
+            output += std::string(FG_GRAY) + "[ ]" + RESET + " " + content + "\n";
     }
-    m_main_content += output;
-    m_max_scroll = static_cast<int>(std::count(m_main_content.begin(), m_main_content.end(), '\n'));
+    m_main_content += output + "\n";
 }
 
-void TUI::show_help() {}
-void TUI::show_command_palette() {}
-
-void TUI::setup_colors() {
-    if (!m_nc) return;
-
-    ncpalette* pal = ncpalette_new(m_nc);
-    ncpalette_set_rgb8(pal, 0, 0x00, 0x2b, 0x36);
-    ncpalette_set_rgb8(pal, 1, 0x83, 0x94, 0x96);
-    ncpalette_set_rgb8(pal, 2, 0x2a, 0xa1, 0x98);
-    ncpalette_set_rgb8(pal, 3, 0x26, 0x8b, 0xd2);
-    ncpalette_set_rgb8(pal, 4, 0x85, 0x99, 0x00);
-    ncpalette_set_rgb8(pal, 5, 0xb5, 0x89, 0x00);
-    ncpalette_set_rgb8(pal, 6, 0xdc, 0x32, 0x2f);
-    ncpalette_set_rgb8(pal, 7, 0xd3, 0x36, 0x82);
-    ncpalette_set_rgb8(pal, 8, 0x6c, 0x71, 0xc4);
-    ncpalette_free(pal);
-}
-
-void TUI::main_loop() {
-    notcurses_options opts{};
-    opts.flags = NCOPTION_INHIBIT_SETLOCALE;
-    m_nc = notcurses_init(&opts, nullptr);
-    if (!m_nc) return;
-
-    struct ncplane* stdplane = notcurses_stdplane(m_nc);
-    ncplane_dim_yx(stdplane, &m_term_h, &m_term_w);
-
-    setup_colors();
-
-    unsigned side_w = std::max<unsigned>(20, m_term_w / 5);
-    m_side_width = side_w;
-
-    ncplane_options status_opts{};
-    status_opts.y = 0;
-    status_opts.x = 0;
-    status_opts.rows = 1;
-    status_opts.cols = m_term_w;
-    m_status_plane = ncplane_create(stdplane, &status_opts);
-
-    ncplane_options content_opts{};
-    content_opts.y = 1;
-    content_opts.x = 0;
-    content_opts.rows = m_term_h - 4;
-    content_opts.cols = m_term_w - side_w;
-    m_content_plane = ncplane_create(stdplane, &content_opts);
-
-    ncplane_options side_opts{};
-    side_opts.y = 1;
-    side_opts.x = m_term_w - side_w;
-    side_opts.rows = m_term_h - 4;
-    side_opts.cols = side_w;
-    m_side_plane = ncplane_create(stdplane, &side_opts);
-
-    ncplane_options input_opts{};
-    input_opts.y = m_term_h - 3;
-    input_opts.x = 0;
-    input_opts.rows = 3;
-    input_opts.cols = m_term_w;
-    m_input_plane = ncplane_create(stdplane, &input_opts);
-
-    while (m_running.load()) {
-        render_frame();
-        notcurses_render(m_nc);
-
-        ncinput ni;
-        int ch = notcurses_get_blocking(m_nc, &ni);
-        if (ch == (int)'q' && ni.ctrl) {
-            m_running.store(false);
-            break;
-        }
-        if (ch == NCKEY_RESIZE) {
-            ncplane_dim_yx(stdplane, &m_term_h, &m_term_w);
-            side_w = std::max<unsigned>(20, m_term_w / 5);
-            m_side_width = side_w;
-            ncplane_resize(m_status_plane, 0, 0, 1, m_term_w, 0, 0, 0, 0);
-            ncplane_resize(m_content_plane, 0, 0, m_term_h - 4, m_term_w - side_w, 0, 0, 0, 0);
-            ncplane_resize(m_side_plane, 0, 0, m_term_h - 4, side_w, 0, 0, 0, 0);
-            ncplane_move_yx(m_side_plane, 1, m_term_w - side_w);
-            ncplane_resize(m_input_plane, 0, 0, 3, m_term_w, 0, 0, 0, 0);
-            ncplane_move_yx(m_input_plane, m_term_h - 3, 0);
-        }
-        handle_input(ch);
-    }
-
-    ncplane_destroy(m_side_plane);
-    ncplane_destroy(m_input_plane);
-    ncplane_destroy(m_content_plane);
-    ncplane_destroy(m_status_plane);
-    notcurses_stop(m_nc);
-    m_nc = nullptr;
-}
-
-void TUI::render_frame() {
-    if (!m_nc) return;
-    render_status_bar();
-    render_main_content();
-    render_input_area();
-    render_side_panel();
+void TUI::show_help() {
+    std::lock_guard lock(m_mutex);
+    m_main_content += std::string(FG_CYAN) + "\n=== Help ===" + RESET + "\n";
+    m_main_content += "  /help     - Show this help\n";
+    m_main_content += "  /new      - Create new session\n";
+    m_main_content += "  /model    - Switch model\n";
+    m_main_content += "  /sessions - List sessions\n";
+    m_main_content += "  /memory   - View memories\n";
+    m_main_content += "  /history  - Edit history\n";
+    m_main_content += "  /quit     - Exit\n";
+    m_main_content += "  Ctrl+C    - Interrupt/Exit\n\n";
 }
 
 void TUI::render_status_bar() {
-    if (!m_status_plane) return;
+    move_to(1, 1);
+    std::cout << BG_STATUS << FG_STATUS << BOLD;
 
-    std::lock_guard lock(m_render_mutex);
-    ncplane_erase(m_status_plane);
-
-    ncplane_set_fg_rgb8(m_status_plane, 0x00, 0x2b, 0x36);
-    ncplane_set_bg_rgb8(m_status_plane, 0xee, 0xe8, 0xd5);
-    ncplane_set_fg_rgb8(m_status_plane, 0x00, 0x2b, 0x36);
-
-    std::string left;
-    if (!m_model_provider.empty() && !m_model_name.empty()) {
-        left += " ";
-        left += m_model_provider;
-        left += ":";
-        left += m_model_name;
-        if (!m_thinking_mode.empty() && m_thinking_mode != "auto") {
-            left += "  think:" + m_thinking_mode;
-        }
+    std::string left = " ";
+    if (!m_model_provider.empty()) {
+        left += m_model_provider + ":" + m_model_name;
     }
-    ncplane_putstr(m_status_plane, left.c_str());
 
-    std::string center = "agent.cpp v" + std::string(AGENT_VERSION);
-    ncplane_printf_aligned(m_status_plane, m_term_w / 2, NCALIGN_CENTER, "%s", center.c_str());
+    std::string center = "agent.cpp v" AGENT_VERSION;
 
     std::string right;
-    if (!m_context_usage.empty()) {
-        right += " ctx:" + m_context_usage;
+    if (m_context_pct > 0) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "ctx:%.0f%% ", m_context_pct);
+        right += buf;
     }
-    if (!m_lsp_status.empty()) {
-        right += " LSP:" + m_lsp_status;
-    }
-    if (!m_mcp_status.empty()) {
-        right += " MCP:" + m_mcp_status;
-    }
-    if (!m_status_line.empty()) {
-        right += " " + m_status_line;
-    }
-    if (!right.empty()) {
-        ncplane_printf_aligned(m_status_plane, m_term_w - 1, NCALIGN_RIGHT, "%s", right.c_str());
-    }
+    if (!m_lsp_status.empty()) right += "LSP:" + m_lsp_status + " ";
+    if (!m_mcp_status.empty()) right += "MCP:" + m_mcp_status + " ";
+
+    int left_w = (int)left.size();
+    int center_w = (int)center.size();
+    int right_w = (int)right.size();
+    int pad_left = (m_term_w - center_w) / 2 - left_w;
+    int pad_right = m_term_w - left_w - center_w - std::max(0, pad_left) - right_w;
+
+    std::cout << left;
+    for (int i = 0; i < std::max(0, pad_left); ++i) std::cout << ' ';
+    std::cout << center;
+    for (int i = 0; i < std::max(0, pad_right); ++i) std::cout << ' ';
+    std::cout << right;
+
+    std::cout << RESET;
 }
 
-void TUI::render_main_content() {
-    if (!m_content_plane) return;
+void TUI::render_content() {
+    std::lock_guard lock(m_mutex);
 
-    std::lock_guard lock(m_render_mutex);
-    ncplane_erase(m_content_plane);
-
-    ncplane_set_fg_rgb8(m_content_plane, 0x83, 0x94, 0x96);
-    ncplane_set_bg_rgb8(m_content_plane, 0x00, 0x2b, 0x36);
-
-    unsigned rows, cols;
-    ncplane_dim_yx(m_content_plane, &rows, &cols);
-    if (rows == 0 || cols == 0) return;
+    int content_start = 2;
+    int content_end = m_term_h - 2;
+    int visible_rows = content_end - content_start;
 
     std::vector<std::string> lines;
     std::istringstream stream(m_main_content);
     std::string line;
     while (std::getline(stream, line)) {
-        while (!line.empty() && line.size() > cols) {
-            std::string wrap = line.substr(0, cols);
-            lines.push_back(wrap);
-            line = line.substr(cols);
-        }
-        if (!line.empty() || !m_main_content.empty()) {
-            lines.push_back(line);
-        }
+        lines.push_back(line);
     }
 
-    int total_lines = static_cast<int>(lines.size());
-    int viewport = static_cast<int>(rows);
-    if (m_max_scroll > viewport) {
-        m_scroll_offset = m_max_scroll - viewport;
-    } else {
-        m_scroll_offset = 0;
-    }
+    int total = (int)lines.size();
+    int start = std::max(0, total - visible_rows);
 
-    int start = std::max(0, total_lines - viewport - m_scroll_offset);
-    if (total_lines <= viewport) start = 0;
-
-    for (int i = 0; i < viewport && (start + i) < total_lines; ++i) {
-        const auto& l = lines[start + i];
-        int y = i;
-        ncplane_cursor_move_yx(m_content_plane, y, 0);
-        ncplane_putstr(m_content_plane, l.c_str());
+    for (int i = 0; i < visible_rows; ++i) {
+        move_to(content_start + i, 1);
+        clear_line();
+        int idx = start + i;
+        if (idx < total) {
+            std::cout << truncate(lines[idx], m_term_w);
+        }
     }
 }
 
-void TUI::render_input_area() {
-    if (!m_input_plane) return;
-
-    std::lock_guard lock(m_render_mutex);
-    ncplane_erase(m_input_plane);
-
-    ncplane_set_fg_rgb8(m_input_plane, 0x83, 0x94, 0x96);
-    ncplane_set_bg_rgb8(m_input_plane, 0x07, 0x36, 0x42);
-
-    unsigned rows, cols;
-    ncplane_dim_yx(m_input_plane, &rows, &cols);
-    if (rows == 0 || cols == 0) return;
-
-    ncplane_set_bg_rgb8(m_input_plane, 0x07, 0x36, 0x42);
-    for (unsigned r = 0; r < rows; ++r) {
-        ncplane_cursor_move_yx(m_input_plane, r, 0);
-        for (unsigned c = 0; c < cols; ++c) {
-            ncplane_putchar(m_input_plane, ' ');
-        }
-    }
-
-    ncplane_cursor_move_yx(m_input_plane, 0, 0);
-    ncplane_set_fg_rgb8(m_input_plane, 0x2a, 0xa1, 0x98);
-    ncplane_putstr(m_input_plane, "  > ");
-
-    ncplane_set_fg_rgb8(m_input_plane, 0xfd, 0xf6, 0xe3);
-
-    int prompt_offset = 5;
-    int display_col = prompt_offset;
-    for (int i = 0; i < static_cast<int>(m_input_buffer.size()) && static_cast<unsigned>(display_col) < cols - 1; ++i) {
-        ncplane_cursor_move_yx(m_input_plane, 0, display_col);
-        ncplane_putchar(m_input_plane, m_input_buffer[i]);
-        display_col++;
-    }
-
-    int cursor_vis_x = prompt_offset + m_input_cursor;
-    if (static_cast<unsigned>(cursor_vis_x) < cols - 1) {
-        ncplane_cursor_move_yx(m_input_plane, 0, cursor_vis_x);
-        ncplane_set_fg_rgb8(m_input_plane, 0xfd, 0xf6, 0xe3);
-    }
+void TUI::render_input_prompt() {
+    move_to(m_term_h - 1, 1);
+    std::cout << BG_INPUT << FG_CYAN << " > " << RESET << BG_INPUT << " " << std::flush;
 }
 
-void TUI::render_side_panel() {
-    if (!m_side_plane) return;
-
-    std::lock_guard lock(m_render_mutex);
-    ncplane_erase(m_side_plane);
-
-    unsigned rows, cols;
-    ncplane_dim_yx(m_side_plane, &rows, &cols);
-    if (rows == 0 || cols == 0) return;
-
-    ncplane_set_fg_rgb8(m_side_plane, 0x83, 0x94, 0x96);
-    ncplane_set_bg_rgb8(m_side_plane, 0x00, 0x2b, 0x36);
-
-    ncplane_set_fg_rgb8(m_side_plane, 0x93, 0xa1, 0xa1);
-    ncplane_cursor_move_yx(m_side_plane, 0, 0);
-    ncplane_putstr(m_side_plane, "  Edit History");
-
-    for (unsigned c = 0; c < cols; ++c) {
-        ncplane_cursor_move_yx(m_side_plane, 1, c);
-        ncplane_putchar(m_side_plane, ' ');
-
-        ncplane_set_bg_rgb8(m_side_plane, 0x07, 0x36, 0x42);
-        ncplane_set_fg_rgb8(m_side_plane, 0x58, 0x6e, 0x75);
-    }
-
-    int max_edits = static_cast<int>(rows) - 2;
-    if (max_edits <= 0) return;
-    int start = static_cast<int>(m_edits.size()) > max_edits
-                    ? static_cast<int>(m_edits.size()) - max_edits
-                    : 0;
-
-    for (int i = 0; i < max_edits && (start + i) < static_cast<int>(m_edits.size()); ++i) {
-        const auto& edit = m_edits[start + i];
-        ncplane_cursor_move_yx(m_side_plane, i + 2, 0);
-        ncplane_set_fg_rgb8(m_side_plane, 0x2a, 0xa1, 0x98);
-
-        std::string display = edit.file_path;
-        if (display.size() > cols - 2) {
-            display = "..." + display.substr(display.size() - cols + 5);
-        }
-        ncplane_putstr(m_side_plane, (" " + display).c_str());
-    }
+void TUI::render() {
+    get_term_size(m_term_w, m_term_h);
+    hide_cursor();
+    render_status_bar();
+    render_content();
+    render_input_prompt();
+    show_cursor();
+    move_to(m_term_h - 1, 5);
+    std::cout << std::flush;
 }
 
-void TUI::handle_input(int ch) {
-    std::lock_guard lock(m_render_mutex);
+std::string TUI::read_line() {
+    std::string buffer;
+    int cursor = 0;
 
-    if (ch == '\n' || ch == '\r') {
-        if (!m_input_buffer.empty()) {
-            if (m_input_buffer[0] == '/' && m_command_callback) {
-                m_command_callback(m_input_buffer);
-            } else if (m_input_callback) {
-                m_input_callback(m_input_buffer);
+    auto refresh_input = [&]() {
+        move_to(m_term_h - 1, 1);
+        clear_line();
+        std::cout << BG_INPUT << FG_CYAN << " > " << RESET << BG_INPUT << FG_WHITE;
+        int max_w = m_term_w - 5;
+        int start = std::max(0, cursor - max_w + 1);
+        std::string visible = buffer.substr(start, max_w);
+        std::cout << visible;
+        for (int i = (int)visible.size(); i < max_w; ++i) std::cout << ' ';
+        move_to(m_term_h - 1, 5 + cursor - start);
+        std::cout << std::flush;
+    };
+
+    while (m_running.load()) {
+#ifdef _WIN32
+        if (!_kbhit()) {
+            Sleep(10);
+            continue;
+        }
+        int ch = _getch();
+        if (ch == 0 || ch == 0xE0) {
+            int ext = _getch();
+            switch (ext) {
+            case 72:
+                if (!m_history.empty() && m_history_idx > 0) {
+                    m_history_idx--;
+                    buffer = m_history[m_history_idx];
+                    cursor = (int)buffer.size();
+                }
+                break;
+            case 80:
+                if (m_history_idx < m_history.size() - 1) {
+                    m_history_idx++;
+                    buffer = m_history[m_history_idx];
+                    cursor = (int)buffer.size();
+                } else if (m_history_idx == m_history.size() - 1) {
+                    m_history_idx = m_history.size();
+                    buffer.clear();
+                    cursor = 0;
+                }
+                break;
+            case 75: if (cursor > 0) cursor--; break;
+            case 77: if (cursor < (int)buffer.size()) cursor++; break;
+            case 83:
+                if (cursor < (int)buffer.size()) buffer.erase(cursor, 1);
+                break;
             }
-            m_history_buffer.push_back(m_input_buffer);
-            m_history_index = m_history_buffer.size();
-            m_input_buffer.clear();
-            m_input_cursor = 0;
+            refresh_input();
+            continue;
         }
-    } else if (ch == 27) {
-        m_input_buffer.clear();
-        m_input_cursor = 0;
-    } else if (ch == 8 || ch == 127 || ch == NCKEY_BACKSPACE) {
-        if (m_input_cursor > 0) {
-            m_input_buffer.erase(m_input_cursor - 1, 1);
-            m_input_cursor--;
+#else
+        char c;
+        if (read(STDIN_FILENO, &c, 1) <= 0) continue;
+        int ch = (unsigned char)c;
+
+        if (ch == 27) {
+            char seq[2];
+            if (read(STDIN_FILENO, &seq[0], 1) <= 0) continue;
+            if (read(STDIN_FILENO, &seq[1], 1) <= 0) continue;
+            if (seq[0] == '[') {
+                switch (seq[1]) {
+                case 'A':
+                    if (!m_history.empty() && m_history_idx > 0) {
+                        m_history_idx--;
+                        buffer = m_history[m_history_idx];
+                        cursor = (int)buffer.size();
+                    }
+                    break;
+                case 'B':
+                    if (m_history_idx < m_history.size() - 1) {
+                        m_history_idx++;
+                        buffer = m_history[m_history_idx];
+                        cursor = (int)buffer.size();
+                    } else {
+                        m_history_idx = m_history.size();
+                        buffer.clear();
+                        cursor = 0;
+                    }
+                    break;
+                case 'C': if (cursor < (int)buffer.size()) cursor++; break;
+                case 'D': if (cursor > 0) cursor--; break;
+                case '3':
+                    { char extra; read(STDIN_FILENO, &extra, 1);
+                      if (cursor < (int)buffer.size()) buffer.erase(cursor, 1); }
+                    break;
+                }
+                refresh_input();
+                continue;
+            }
+            continue;
         }
-    } else if (ch >= 32 && ch <= 126) {
-        m_input_buffer.insert(m_input_cursor, 1, static_cast<char>(ch));
-        m_input_cursor++;
-    } else if (ch == NCKEY_UP) {
-        if (m_history_index > 0) {
-            m_history_index--;
-            if (!m_history_buffer.empty()) {
-                m_input_buffer = m_history_buffer[m_history_index];
-                m_input_cursor = static_cast<int>(m_input_buffer.size());
+#endif
+
+        if (ch == '\r' || ch == '\n') {
+            std::cout << RESET << std::endl;
+            return buffer;
+        } else if (ch == 3) {
+            return "\x03";
+        } else if (ch == 8 || ch == 127) {
+            if (cursor > 0) {
+                buffer.erase(cursor - 1, 1);
+                cursor--;
+            }
+        } else if (ch >= 32 && ch <= 126) {
+            buffer.insert(cursor, 1, (char)ch);
+            cursor++;
+        }
+        refresh_input();
+    }
+    return "";
+}
+
+void TUI::main_loop() {
+#ifndef _WIN32
+    RawMode raw;
+#endif
+
+    clear_screen();
+
+    {
+        std::lock_guard lock(m_mutex);
+        m_main_content = std::string(FG_CYAN) + R"(
+   __ _  ___ _ __   ___ _ __   ___ _ __    ___ _ __  _ __
+  / _` |/ _ \ '_ \ / _ \ '_ \ / _ \ '_ \  / __| '_ \| '_ \
+ | (_| |  __/ | | |  __/ | | |  __/ |_) | \__ \ |_) | |_) |
+  \__,_|\___|_| |_|\___|_| |_|\___| .__/  |___/ .__/| .__/
+                                  |_|         |_|   |_|
+)" + RESET + "\n";
+        m_main_content += std::string("  ") + FG_WHITE + "agent.cpp v" + AGENT_VERSION + RESET + " " + DIM + "— Modular AI Coding Agent" + RESET + "\n";
+        m_main_content += std::string("  ") + FG_GRAY + "Type /help for commands, Ctrl+C to exit" + RESET + "\n\n";
+    }
+
+    render();
+
+    while (m_running.load()) {
+        std::string input = read_line();
+
+        if (input == "\x03") {
+            m_running.store(false);
+            break;
+        }
+
+        if (input.empty()) {
+            render();
+            continue;
+        }
+
+        m_history.push_back(input);
+        m_history_idx = m_history.size();
+
+        {
+            std::lock_guard lock(m_mutex);
+            m_main_content += std::string(FG_GREEN) + "> " + RESET + FG_WHITE + input + RESET + "\n";
+        }
+
+        if (input[0] == '/') {
+            if (input == "/quit" || input == "/exit" || input == "/q") {
+                m_running.store(false);
+                break;
+            }
+            if (input == "/help" || input == "/h") {
+                show_help();
+            } else if (m_command_callback) {
+                m_command_callback(input);
+            }
+        } else {
+            if (m_input_callback) {
+                m_input_callback(input);
             }
         }
-    } else if (ch == NCKEY_DOWN) {
-        if (m_history_index < m_history_buffer.size()) {
-            m_history_index++;
-            m_input_buffer = m_history_index < m_history_buffer.size()
-                                 ? m_history_buffer[m_history_index] : "";
-            m_input_cursor = static_cast<int>(m_input_buffer.size());
-        }
-    } else if (ch == NCKEY_LEFT) {
-        if (m_input_cursor > 0) m_input_cursor--;
-    } else if (ch == NCKEY_RIGHT) {
-        if (m_input_cursor < static_cast<int>(m_input_buffer.size())) m_input_cursor++;
-    } else if (ch == NCKEY_PGUP) {
-        m_scroll_offset = std::min(m_max_scroll, m_scroll_offset + 5);
-    } else if (ch == NCKEY_PGDOWN) {
-        m_scroll_offset = std::max(0, m_scroll_offset - 5);
+
+        render();
     }
+
+    clear_screen();
+    move_to(1, 1);
+    show_cursor();
+    std::cout << RESET;
 }
 
 } // namespace agent

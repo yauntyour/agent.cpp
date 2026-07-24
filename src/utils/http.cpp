@@ -2,19 +2,16 @@
 #include <fstream>
 #include <iostream>
 #include <cstring>
+#include <mutex>
 
 namespace agent::http {
 
-// ── HttpClient ────────────────────────────────────────────────────
 HttpClient::HttpClient() {
-    curl_global_init(CURL_GLOBAL_ALL);
-    m_handle = curl_easy_init();
+    static std::once_flag init_flag;
+    std::call_once(init_flag, []() { curl_global_init(CURL_GLOBAL_ALL); });
 }
 
-HttpClient::~HttpClient() {
-    if (m_handle) curl_easy_cleanup(m_handle);
-    curl_global_cleanup();
-}
+HttpClient::~HttpClient() {}
 
 HttpClient& HttpClient::instance() {
     static HttpClient client;
@@ -58,29 +55,34 @@ HttpResponse HttpClient::request(const HttpRequest& req) {
     std::string body;
     std::map<std::string, std::string> headers;
 
-    curl_easy_setopt(m_handle, CURLOPT_URL, req.url.c_str());
-    curl_easy_setopt(m_handle, CURLOPT_WRITEFUNCTION, write_callback);
-    curl_easy_setopt(m_handle, CURLOPT_WRITEDATA, &body);
-    curl_easy_setopt(m_handle, CURLOPT_HEADERFUNCTION, header_callback);
-    curl_easy_setopt(m_handle, CURLOPT_HEADERDATA, &headers);
-    curl_easy_setopt(m_handle, CURLOPT_TIMEOUT, req.timeout_sec > 0 ? (long)req.timeout_sec : 60L);
-    curl_easy_setopt(m_handle, CURLOPT_CONNECTTIMEOUT, req.connect_timeout_sec > 0 ? req.connect_timeout_sec : 30L);
-    curl_easy_setopt(m_handle, CURLOPT_FOLLOWLOCATION, req.follow_redirects ? 1L : 0L);
-    curl_easy_setopt(m_handle, CURLOPT_SSL_VERIFYPEER, req.verify_ssl ? 1L : 0L);
-    curl_easy_setopt(m_handle, CURLOPT_SSL_VERIFYHOST, req.verify_ssl ? 2L : 0L);
+    CURL* handle = curl_easy_init();
+    if (!handle) {
+        resp.error = "Failed to initialize CURL";
+        return resp;
+    }
+
+    curl_easy_setopt(handle, CURLOPT_URL, req.url.c_str());
+    curl_easy_setopt(handle, CURLOPT_WRITEFUNCTION, write_callback);
+    curl_easy_setopt(handle, CURLOPT_WRITEDATA, &body);
+    curl_easy_setopt(handle, CURLOPT_HEADERFUNCTION, header_callback);
+    curl_easy_setopt(handle, CURLOPT_HEADERDATA, &headers);
+    curl_easy_setopt(handle, CURLOPT_TIMEOUT, req.timeout_sec > 0 ? (long)req.timeout_sec : 60L);
+    curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT, req.connect_timeout_sec > 0 ? req.connect_timeout_sec : 30L);
+    curl_easy_setopt(handle, CURLOPT_FOLLOWLOCATION, req.follow_redirects ? 1L : 0L);
+    curl_easy_setopt(handle, CURLOPT_SSL_VERIFYPEER, req.verify_ssl ? 1L : 0L);
+    curl_easy_setopt(handle, CURLOPT_SSL_VERIFYHOST, req.verify_ssl ? 2L : 0L);
 
     if (!req.proxy.empty()) {
-        curl_easy_setopt(m_handle, CURLOPT_PROXY, req.proxy.c_str());
+        curl_easy_setopt(handle, CURLOPT_PROXY, req.proxy.c_str());
     } else if (!m_proxy.empty()) {
-        curl_easy_setopt(m_handle, CURLOPT_PROXY, m_proxy.c_str());
+        curl_easy_setopt(handle, CURLOPT_PROXY, m_proxy.c_str());
     }
 
     if (!m_user_agent.empty()) {
-        curl_easy_setopt(m_handle, CURLOPT_USERAGENT, m_user_agent.c_str());
+        curl_easy_setopt(handle, CURLOPT_USERAGENT, m_user_agent.c_str());
     }
 
     struct curl_slist* header_list = nullptr;
-    auto cleanup_headers = [&]() { if (header_list) curl_slist_free_all(header_list); };
 
     for (auto& [k, v] : m_default_headers) {
         std::string h = k + ": " + v;
@@ -92,43 +94,44 @@ HttpResponse HttpClient::request(const HttpRequest& req) {
     }
 
     if (req.method == "POST") {
-        curl_easy_setopt(m_handle, CURLOPT_POST, 1L);
-        curl_easy_setopt(m_handle, CURLOPT_POSTFIELDS, req.body.c_str());
-        curl_easy_setopt(m_handle, CURLOPT_POSTFIELDSIZE, (long)req.body.size());
+        curl_easy_setopt(handle, CURLOPT_POST, 1L);
+        curl_easy_setopt(handle, CURLOPT_POSTFIELDS, req.body.c_str());
+        curl_easy_setopt(handle, CURLOPT_POSTFIELDSIZE, (long)req.body.size());
     } else if (req.method == "PUT") {
-        curl_easy_setopt(m_handle, CURLOPT_CUSTOMREQUEST, "PUT");
-        curl_easy_setopt(m_handle, CURLOPT_POSTFIELDS, req.body.c_str());
-        curl_easy_setopt(m_handle, CURLOPT_POSTFIELDSIZE, (long)req.body.size());
+        curl_easy_setopt(handle, CURLOPT_CUSTOMREQUEST, "PUT");
+        curl_easy_setopt(handle, CURLOPT_POSTFIELDS, req.body.c_str());
+        curl_easy_setopt(handle, CURLOPT_POSTFIELDSIZE, (long)req.body.size());
     } else if (req.method == "DELETE") {
-        curl_easy_setopt(m_handle, CURLOPT_CUSTOMREQUEST, "DELETE");
+        curl_easy_setopt(handle, CURLOPT_CUSTOMREQUEST, "DELETE");
     }
 
-    curl_easy_setopt(m_handle, CURLOPT_HTTPHEADER, header_list);
+    curl_easy_setopt(handle, CURLOPT_HTTPHEADER, header_list);
 
     if (req.resume_from >= 0) {
-        curl_easy_setopt(m_handle, CURLOPT_RESUME_FROM_LARGE, req.resume_from);
+        curl_easy_setopt(handle, CURLOPT_RESUME_FROM_LARGE, req.resume_from);
     }
 
     if (req.progress_callback) {
-        curl_easy_setopt(m_handle, CURLOPT_XFERINFOFUNCTION, progress_callback);
-        curl_easy_setopt(m_handle, CURLOPT_XFERINFODATA, &req.progress_callback);
-        curl_easy_setopt(m_handle, CURLOPT_NOPROGRESS, 0L);
+        curl_easy_setopt(handle, CURLOPT_XFERINFOFUNCTION, progress_callback);
+        curl_easy_setopt(handle, CURLOPT_XFERINFODATA, &req.progress_callback);
+        curl_easy_setopt(handle, CURLOPT_NOPROGRESS, 0L);
     }
 
-    CURLcode res = curl_easy_perform(m_handle);
+    CURLcode res = curl_easy_perform(handle);
 
-    cleanup_headers();
+    if (header_list) curl_slist_free_all(header_list);
 
     if (res != CURLE_OK) {
         resp.error = curl_easy_strerror(res);
     } else {
         long status = 0;
-        curl_easy_getinfo(m_handle, CURLINFO_RESPONSE_CODE, &status);
+        curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, &status);
         resp.status_code = status;
         resp.body = std::move(body);
         resp.headers = std::move(headers);
     }
 
+    curl_easy_cleanup(handle);
     return resp;
 }
 
@@ -156,12 +159,9 @@ HttpResponse HttpClient::download(std::string_view url, const std::string& filep
     req.method = "GET";
     if (resume_from >= 0) req.resume_from = resume_from;
 
-    // Instead of using internal file writing, we use write callback redirect
-    // For simplicity, use request() and then write to file
     auto resp = request(req);
     if (!resp.ok()) return resp;
 
-    // Write body to file
     if (resume_from >= 0) {
         std::ofstream f(filepath, std::ios::app | std::ios::binary);
         f.write(resp.body.data(), resp.body.size());

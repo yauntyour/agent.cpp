@@ -28,8 +28,7 @@ struct HttpRequest {
     bool verify_ssl = true;
     long connect_timeout_sec = 30;
 
-    // ── Resumable download ─────────────────────────────────────
-    int64_t resume_from = -1;  // -1 = no resume, >=0 = byte offset
+    int64_t resume_from = -1;
     std::function<bool(int64_t downloaded, int64_t total)> progress_callback;
 };
 
@@ -40,8 +39,6 @@ public:
 
     HttpClient(const HttpClient&) = delete;
     HttpClient& operator=(const HttpClient&) = delete;
-    HttpClient(HttpClient&&) = delete;
-    HttpClient& operator=(HttpClient&&) = delete;
 
     static HttpClient& instance();
 
@@ -59,13 +56,11 @@ private:
     static size_t header_callback(void* contents, size_t size, size_t nmemb, void* userp);
     static int progress_callback(void* clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow);
 
-    CURL* m_handle;
     std::string m_proxy;
     std::string m_user_agent;
     std::map<std::string, std::string> m_default_headers;
 };
 
-// ── SSE stream parser ─────────────────────────────────────────────
 class SSEParser {
 public:
     using EventCallback = std::function<void(std::string_view event, std::string_view data)>;
@@ -79,7 +74,6 @@ private:
     std::string m_data;
 };
 
-// ── URL builder ───────────────────────────────────────────────────
 class URLBuilder {
 public:
     explicit URLBuilder(std::string_view base_url);

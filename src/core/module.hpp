@@ -48,7 +48,11 @@ template<typename T>
 class Module : public IModule {
 public:
     Module() = default;
-    ~Module() override { if (m_state != ModuleState::Terminated) shutdown(); }
+    ~Module() override {
+        if (m_state != ModuleState::Terminated) {
+            try { shutdown(); } catch (...) {}
+        }
+    }
 
     std::string_view name() const override { return static_name(); }
 
@@ -101,6 +105,9 @@ public:
     T& require() {
         auto* ptr = get<T>();
         if (!ptr) throw std::runtime_error("Required module not registered: " + std::string(typeid(T).name()));
+        if (ptr->state() == ModuleState::Uninitialized) {
+            ptr->initialize();
+        }
         return *ptr;
     }
 

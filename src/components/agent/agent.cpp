@@ -371,31 +371,58 @@ std::string Agent::execute_tool_calls(const std::vector<ToolCall>& calls) {
 std::string Agent::launch_background_sub_agent(const AgentConfig& config, std::string_view task) {
     auto task_id = "bg_agent_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
 
-    // Launch in thread pool
-    std::thread([this, config, task = std::string(task), task_id]() {
-        auto result = execute_sub_agent(config, task);
-        auto& notice = ModuleRegistry::instance().require<Notice>();
-        notice.background_completed(task_id, result.output);
+    auto bg = std::make_shared<BackgroundAgent>();
+    bg->id = task_id;
+    bg->config = config;
+    bg->task = std::string(task);
+
+    auto promise = std::make_shared<std::promise<AgentResult>>();
+    bg->future = promise->get_future().share();
+
+    std::thread([this, bg, promise]() {
+        try {
+            auto result = execute_sub_agent(bg->config, bg->task);
+            if (!bg->cancelled.load()) {
+                promise->set_value(result);
+                auto& notice = ModuleRegistry::instance().require<Notice>();
+                notice.background_completed(bg->id, result.output);
+            }
+        } catch (const std::exception& e) {
+            AgentResult err;
+            err.success = false;
+            err.error = e.what();
+            promise->set_value(err);
+        }
     }).detach();
+
+    {
+        std::lock_guard lock(m_bg_mutex);
+        m_bg_agents[task_id] = bg;
+    }
 
     return task_id;
 }
 
-std::future<AgentResult> Agent::get_background_result(std::string_view agent_id) {
-    std::promise<AgentResult> promise;
-    auto future = promise.get_future();
-
-    // For now, return a completed future with a placeholder
-    AgentResult result;
-    result.success = true;
-    result.output = "Background agent result (async)";
-    promise.set_value(result);
-
-    return future;
+std::shared_future<AgentResult> Agent::get_background_result(std::string_view agent_id) {
+    std::lock_guard lock(m_bg_mutex);
+    auto it = m_bg_agents.find(std::string(agent_id));
+    if (it == m_bg_agents.end()) {
+        std::promise<AgentResult> p;
+        AgentResult r;
+        r.success = false;
+        r.error = "Background agent not found: " + std::string(agent_id);
+        p.set_value(r);
+        return p.get_future().share();
+    }
+    return it->second->future;
 }
 
 void Agent::cancel_background_agent(std::string_view agent_id) {
-    // Cancel the background task
+    std::lock_guard lock(m_bg_mutex);
+    auto it = m_bg_agents.find(std::string(agent_id));
+    if (it != m_bg_agents.end()) {
+        it->second->cancelled.store(true);
+    }
 }
 
 Agent::MPCState Agent::get_mpc_state() const {
