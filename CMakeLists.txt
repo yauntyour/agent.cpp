@@ -26,7 +26,7 @@ if(AGENT_ENABLE_TUI)
 endif()
 
 if(AGENT_ENABLE_ROUTER)
-    if(EXISTS "${CMAKE_SOURCE_DIR}/external/servic.cpp/servic.hpp")
+    if(EXISTS "${CMAKE_SOURCE_DIR}/src/external/servic/servic.hpp")
         find_path(BOOST_INCLUDE_DIRS boost/asio.hpp PATHS ${MINGW_PREFIX}/include $ENV{MINGW_PREFIX}/include)
         if(BOOST_INCLUDE_DIRS)
             message(STATUS "Boost headers found: ${BOOST_INCLUDE_DIRS}")
@@ -127,9 +127,6 @@ target_link_libraries(agent PRIVATE
 
 if(AGENT_ENABLE_ROUTER)
     target_compile_definitions(agent PRIVATE AGENT_ENABLE_ROUTER)
-    target_include_directories(agent PRIVATE
-        ${CMAKE_SOURCE_DIR}/external/servic.cpp
-    )
     if(BOOST_INCLUDE_DIRS)
         target_include_directories(agent PRIVATE ${BOOST_INCLUDE_DIRS})
     endif()

@@ -155,6 +155,16 @@ int run_tui_mode(const System::CLIOptions& opts) {
     tui.set_lsp_status("idle");
     tui.set_mcp_status("idle");
 
+    {
+        auto cmds = sys.list_commands();
+        std::vector<std::string> completions;
+        for (auto& c : cmds) {
+            completions.push_back(c.name);
+            for (auto& a : c.aliases) completions.push_back(a);
+        }
+        tui.set_command_completions(completions);
+    }
+
     tui.on_input_submit([&](std::string_view text) {
         auto result = agent.execute(text,
             [&](std::string_view type, std::string_view content) {

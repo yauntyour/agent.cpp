@@ -217,6 +217,68 @@ void TUI::display_todo_list(const nlohmann::json& todos) {
     m_main_content += output + "\n";
 }
 
+void TUI::set_command_completions(const std::vector<std::string>& commands) {
+    m_command_completions = commands;
+    std::sort(m_command_completions.begin(), m_command_completions.end());
+}
+
+std::string TUI::find_common_prefix(const std::vector<std::string>& matches) const {
+    if (matches.empty()) return "";
+    std::string prefix = matches[0];
+    for (size_t i = 1; i < matches.size(); ++i) {
+        const auto& s = matches[i];
+        size_t j = 0;
+        while (j < prefix.size() && j < s.size() && prefix[j] == s[j]) ++j;
+        prefix.resize(j);
+        if (prefix.empty()) break;
+    }
+    return prefix;
+}
+
+void TUI::handle_tab_completion(std::string& buffer, int& cursor) {
+    if (buffer.empty() || m_command_completions.empty()) return;
+
+    if (!buffer.empty() && cursor != (int)buffer.size()) return;
+
+    bool is_command = !buffer.empty() && buffer[0] == '/';
+
+    if (is_command) {
+        std::string prefix = buffer;
+
+        if (m_completion_matches.empty() || prefix != m_last_completion_prefix) {
+            m_completion_matches.clear();
+            for (const auto& cmd : m_command_completions) {
+                if (cmd.size() >= prefix.size() &&
+                    cmd.compare(0, prefix.size(), prefix) == 0) {
+                    m_completion_matches.push_back(cmd);
+                }
+            }
+            m_last_completion_prefix = prefix;
+            m_completion_idx = 0;
+        }
+
+        if (m_completion_matches.empty()) return;
+
+        if (m_completion_matches.size() == 1) {
+            buffer = m_completion_matches[0];
+            cursor = (int)buffer.size();
+            m_completion_matches.clear();
+        } else {
+            std::string common = find_common_prefix(m_completion_matches);
+            if (common.size() > prefix.size()) {
+                buffer = common;
+                cursor = (int)buffer.size();
+            } else {
+                if (m_completion_idx < m_completion_matches.size()) {
+                    buffer = m_completion_matches[m_completion_idx];
+                    cursor = (int)buffer.size();
+                    m_completion_idx = (m_completion_idx + 1) % m_completion_matches.size();
+                }
+            }
+        }
+    }
+}
+
 void TUI::show_help() {
     std::lock_guard lock(m_mutex);
     m_main_content += std::string(FG_CYAN) + "\n=== Help ===" + RESET + "\n";
@@ -332,6 +394,10 @@ std::string TUI::read_line() {
             continue;
         }
         int ch = _getch();
+        if (ch == EOF) {
+            Sleep(10);
+            continue;
+        }
         if (ch == 0 || ch == 0xE0) {
             int ext = _getch();
             switch (ext) {
@@ -340,6 +406,8 @@ std::string TUI::read_line() {
                     m_history_idx--;
                     buffer = m_history[m_history_idx];
                     cursor = (int)buffer.size();
+                    m_last_completion_prefix.clear();
+                    m_completion_matches.clear();
                 }
                 break;
             case 80:
@@ -352,11 +420,17 @@ std::string TUI::read_line() {
                     buffer.clear();
                     cursor = 0;
                 }
+                m_last_completion_prefix.clear();
+                m_completion_matches.clear();
                 break;
             case 75: if (cursor > 0) cursor--; break;
             case 77: if (cursor < (int)buffer.size()) cursor++; break;
             case 83:
-                if (cursor < (int)buffer.size()) buffer.erase(cursor, 1);
+                if (cursor < (int)buffer.size()) {
+                    buffer.erase(cursor, 1);
+                    m_last_completion_prefix.clear();
+                    m_completion_matches.clear();
+                }
                 break;
             }
             refresh_input();
@@ -378,6 +452,8 @@ std::string TUI::read_line() {
                         m_history_idx--;
                         buffer = m_history[m_history_idx];
                         cursor = (int)buffer.size();
+                        m_last_completion_prefix.clear();
+                        m_completion_matches.clear();
                     }
                     break;
                 case 'B':
@@ -390,12 +466,18 @@ std::string TUI::read_line() {
                         buffer.clear();
                         cursor = 0;
                     }
+                    m_last_completion_prefix.clear();
+                    m_completion_matches.clear();
                     break;
                 case 'C': if (cursor < (int)buffer.size()) cursor++; break;
                 case 'D': if (cursor > 0) cursor--; break;
                 case '3':
                     { char extra; read(STDIN_FILENO, &extra, 1);
-                      if (cursor < (int)buffer.size()) buffer.erase(cursor, 1); }
+                      if (cursor < (int)buffer.size()) {
+                          buffer.erase(cursor, 1);
+                          m_last_completion_prefix.clear();
+                          m_completion_matches.clear();
+                      } }
                     break;
                 }
                 refresh_input();
@@ -414,10 +496,16 @@ std::string TUI::read_line() {
             if (cursor > 0) {
                 buffer.erase(cursor - 1, 1);
                 cursor--;
+                m_last_completion_prefix.clear();
+                m_completion_matches.clear();
             }
+        } else if (ch == 9) {
+            handle_tab_completion(buffer, cursor);
         } else if (ch >= 32 && ch <= 126) {
             buffer.insert(cursor, 1, (char)ch);
             cursor++;
+            m_last_completion_prefix.clear();
+            m_completion_matches.clear();
         }
         refresh_input();
     }

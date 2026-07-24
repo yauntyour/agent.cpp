@@ -52,6 +52,8 @@ public:
     void display_todo_list(const nlohmann::json& todos);
     void show_help();
 
+    void set_command_completions(const std::vector<std::string>& commands);
+
 private:
     void main_loop();
     void render();
@@ -59,6 +61,8 @@ private:
     void render_content();
     void render_input_prompt();
     std::string read_line();
+    void handle_tab_completion(std::string& buffer, int& cursor);
+    std::string find_common_prefix(const std::vector<std::string>& matches) const;
 
     std::string m_main_content;
     std::string m_status_line;
@@ -75,6 +79,11 @@ private:
     std::vector<EditDisplay> m_edits;
     std::deque<std::string> m_history;
     size_t m_history_idx = 0;
+
+    std::vector<std::string> m_command_completions;
+    std::vector<std::string> m_completion_matches;
+    size_t m_completion_idx = 0;
+    std::string m_last_completion_prefix;
 
     std::mutex m_mutex;
     std::atomic<bool> m_running{false};
