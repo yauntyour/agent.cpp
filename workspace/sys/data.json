@@ -1,0 +1,19 @@
+{
+    "usages": {
+        "Telegram": {
+            "completion_cost": 3612,
+            "prompt_cost": 207615,
+            "total_cost": 211227
+        },
+        "WeChat": {
+            "completion_cost": 1127,
+            "prompt_cost": 525815,
+            "total_cost": 526942
+        },
+        "memory": {
+            "completion_cost": 11510,
+            "prompt_cost": 24826,
+            "total_cost": 36336
+        }
+    }
+}

@@ -1,0 +1,201 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  release:
+    types: [published]
+  workflow_dispatch:
+  #schedule:
+  #  - cron: "0 0 * * 1" # 每周一 UTC 0:00
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            artifact_name: agent.cpp-Linux
+            asset_suffix: .tar.gz
+            executable_name: agent-cpp-linux
+          - os: windows-latest
+            artifact_name: agent.cpp-Windows
+            asset_suffix: .zip
+            executable_name: agent-cpp-windows.exe
+          - os: macos-latest
+            artifact_name: agent.cpp-Darwin
+            asset_suffix: .tar.gz
+            executable_name: agent-cpp-macos
+
+    steps:
+      - name: Checkout code with submodules
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      # ---------- Linux 依赖 ----------
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcurl4-openssl-dev libboost-dev libsodium-dev
+
+      # ---------- macOS 依赖 ----------
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+          brew install cmake ninja curl boost libsodium pkg-config
+          brew --prefix libsodium
+          ls -la $(brew --prefix libsodium)/lib/ || true
+
+      # ---------- Windows (MSYS2) 依赖 ----------
+      - name: Setup MSYS2 and install dependencies (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-curl mingw-w64-x86_64-boost mingw-w64-x86_64-libsodium
+
+      # ---------- CMake 配置 ----------
+      - name: Configure CMake (Windows MSYS2)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          mkdir build
+          cd build
+          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release
+
+      - name: Configure CMake (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir build
+          cd build
+          EXTRA_FLAGS=""
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            EXTRA_FLAGS="-DCMAKE_PREFIX_PATH=$(brew --prefix)"
+          fi
+          cmake .. -DCMAKE_BUILD_TYPE=Release $EXTRA_FLAGS
+
+      # ---------- 编译 ----------
+      - name: Build (Windows MSYS2)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: cmake --build build --parallel
+
+      - name: Build (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: cmake --build build --config Release --parallel
+
+      # ---------- 安装 ----------
+      - name: Install (staging)
+        shell: bash
+        run: cmake --install build --prefix install
+
+      # ---------- 打包 ----------
+      - name: Package with CPack (Windows MSYS2)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          cd build
+          cpack -G ZIP
+
+      - name: Package with CPack (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cd build
+          cpack -G TGZ
+
+      # ---------- 确定最终包名 ----------
+      - name: Determine package file name
+        id: package
+        shell: bash
+        run: |
+          cd build
+          # Nightly 事件下已经是固定名称，Stable 事件则自动检测
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            PKG_FILE="${{ matrix.artifact_name }}${{ matrix.asset_suffix }}"
+          else
+            PKG_FILE=$(ls *${{ matrix.asset_suffix }} | head -1)
+          fi
+          echo "pkg_file=$PKG_FILE" >> $GITHUB_OUTPUT
+          echo "pkg_path=build/$PKG_FILE" >> $GITHUB_OUTPUT
+
+      # ---------- 准备单独的可执行文件 ----------
+      - name: Prepare executable artifact
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            SRC="install/app.exe"
+          else
+            SRC="install/app"
+          fi
+          DST="${{ matrix.executable_name }}"
+          cp "$SRC" "$DST"
+          if [ "$RUNNER_OS" != "Windows" ]; then
+            chmod +x "$DST"
+          fi
+          echo "exec_path=$DST" >> $GITHUB_OUTPUT
+
+      - name: Upload executable artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.artifact_name }}-executable
+          path: ${{ matrix.executable_name }}
+
+      # ---------- 上传压缩包 ----------
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ steps.package.outputs.pkg_path }}
+
+  release-nightly:
+    name: Create Nightly Build ${{ github.run_number }}
+    # 触发条件保持不变
+    if:
+      github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      || startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      # 注意：你需要先 checkout，因为要用到 release.md 文件
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: ls -R artifacts
+
+      - name: Create or update Release
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # 关键修改：使用 GitHub 运行编号作为动态标签
+          # 比如：nightly-123
+          tag_name: nightly-${{ github.run_number }}
+          # 名字可以加上运行编号，方便区分
+          name: agent.cpp Nightly Build Run #${{ github.run_number }}
+          # 关键修改：用 body_path 而不是 body，这样才能读取 release.md 文件内容
+          body_path: release.md
+          files: artifacts/**/*
+          fail_on_unmatched_files: true
+          overwrite: false
