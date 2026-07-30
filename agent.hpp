@@ -1676,6 +1676,7 @@ namespace run_unit
     {
         nlohmann::json messages = nlohmann::json::array(); // 每个元素为 {role, content}
         nlohmann::json memory = {{"keywords", ""}, {"abstracts", ""}, {"created_at", "-1"}};
+        size_t last_saved_index = 0;
         bool loaded = false;
         bool thinking = false;
         std::string session_id;
@@ -1693,26 +1694,26 @@ namespace run_unit
                    memory["abstracts"].get_ref<const std::string &>().empty();
         }
 
-        std::pair<std::string, std::string> summary_query()
+        std::string summary_query()
         {
             std::time_t t = std::time(nullptr);
             std::string time = std::asctime(std::localtime(&t));
-            std::string abstracts_query;
-            std::string keywords_query;
+            std::string query;
             if (is_memory_empty())
             {
-                abstracts_query += "Summarize the following content, including the current Time, and output only the summary as a memory output:\nTime:" + time;
-                keywords_query += "Extract keywords from the following content, and output only the keywords:\n";
+                query += "Analyze the conversation below to produce both a summary and keywords. Include the current time.\nTime:" + time + "\n\nConversation:\n";
             }
             else
             {
-                abstracts_query += "Update the memories based with old memories and chat history for better work, including the current time, and output only the summary as a new memory output:\nTime:" + time;
-                abstracts_query += "Old Memory Content:\n" + memory["abstracts"].get<std::string>() + "\n\n";
-                keywords_query += "Update the keywords based with old keywords and chat history for better work, and output only the new keywords:\nOld Keywords:\n" + memory["keywords"].get<std::string>() + "\n\n";
+                query += "Update the existing memory with new conversation data. Include the current time.\nTime:" + time;
+                query += "\n\nOld Abstracts:\n" + memory["abstracts"].get<std::string>();
+                query += "\n\nOld Keywords:\n" + memory["keywords"].get<std::string>();
+                query += "\n\nNew conversation messages to incorporate (only new messages since last save):\n";
             }
 
-            for (auto &msg : messages)
+            for (size_t i = last_saved_index; i < messages.size(); i++)
             {
+                auto &msg = messages[i];
                 std::string content;
                 if (msg.is_object() && msg.contains("content"))
                 {
@@ -1727,26 +1728,54 @@ namespace run_unit
                         }
                     }
                 }
-                else if (msg.is_string()) // 兼容旧数据
+                else if (msg.is_string())
                 {
                     content = msg.get<std::string>();
                 }
-                abstracts_query += content + "\n\n";
-                keywords_query += content + "\n\n";
+                query += content + "\n\n";
             }
-            return {abstracts_query, keywords_query};
+
+            query += "Respond with valid JSON only (no other text):\n{\"abstracts\": \"...\", \"keywords\": \"...\"}";
+            return query;
         }
     };
 
     class SessionManager
     {
     public:
+        mutable std::mutex session_mutex;
         std::unordered_map<std::string, std::shared_ptr<SessionContext>> sessions;
         std::string current_session_id;
         std::string workspace = "";
 
+        struct MemoryCacheEntry {
+            nlohmann::json data;
+            std::filesystem::file_time_type mtime;
+        };
+        std::unordered_map<std::string, MemoryCacheEntry> memory_cache;
+        std::mutex cache_mutex;
+
+        nlohmann::json get_cached_memory(const std::string &path)
+        {
+            std::lock_guard<std::mutex> lock(cache_mutex);
+            auto it = memory_cache.find(path);
+            auto mtime = std::filesystem::last_write_time(path);
+            if (it != memory_cache.end() && it->second.mtime == mtime)
+                return it->second.data;
+            auto data = nlohmann::json::parse(tool_unit::readFile(path));
+            memory_cache[path] = {data, mtime};
+            return data;
+        }
+
+        void invalidate_cache(const std::string &path)
+        {
+            std::lock_guard<std::mutex> lock(cache_mutex);
+            memory_cache.erase(path);
+        }
+
         std::shared_ptr<SessionContext> get(const std::string &id)
         {
+            std::lock_guard<std::mutex> lock(session_mutex);
             auto it = sessions.find(id);
             if (it != sessions.end())
             {
@@ -1796,6 +1825,8 @@ namespace run_unit
                             it->second->memory = nlohmann::json::parse(tool_unit::readFile(memory_path));
                             if (!it->second->memory.contains("abstracts") || !it->second->memory.contains("keywords"))
                                 it->second->memory = {{"keywords", ""}, {"abstracts", ""}, {"created_at", "-1"}};
+                            if (it->second->memory.contains("last_saved_index"))
+                                it->second->last_saved_index = it->second->memory["last_saved_index"].get<size_t>();
                         }
                         catch (const std::exception &e)
                         {
@@ -1811,22 +1842,33 @@ namespace run_unit
 
         std::shared_ptr<SessionContext> create()
         {
+            std::lock_guard<std::mutex> lock(session_mutex);
             auto session = std::make_shared<SessionContext>();
             sessions[session->session_id] = session;
             current_session_id = session->session_id;
-            session->loaded = true; // 新会话已加载
+            session->loaded = true;
             return session;
         }
 
         std::shared_ptr<SessionContext> get_current()
         {
-            if (current_session_id.empty())
-                return create();
+            {
+                std::lock_guard<std::mutex> lock(session_mutex);
+                if (current_session_id.empty())
+                {
+                    auto session = std::make_shared<SessionContext>();
+                    sessions[session->session_id] = session;
+                    current_session_id = session->session_id;
+                    session->loaded = true;
+                    return session;
+                }
+            }
             return get(current_session_id);
         }
 
         std::vector<std::string> list_sessions() const
         {
+            std::lock_guard<std::mutex> lock(session_mutex);
             std::vector<std::string> result;
             for (const auto &pair : sessions)
                 result.push_back(pair.first);
@@ -1835,12 +1877,13 @@ namespace run_unit
 
         void clear_current()
         {
+            std::lock_guard<std::mutex> lock(session_mutex);
             auto ses = get_current();
             ses->messages.clear();
             ses->memory.clear();
             ses->memory = {{"keywords", ""}, {"abstracts", ""}, {"created_at", "-1"}};
+            ses->last_saved_index = 0;
 
-            // 同步删除磁盘上的会话消息和图片缓存文件
             if (!current_session_id.empty() && !workspace.empty())
             {
                 std::string session_file = workspace + "/sessions/" + current_session_id + ".json";
@@ -1850,7 +1893,10 @@ namespace run_unit
                 if (std::filesystem::exists(session_file))
                     std::filesystem::remove(session_file);
                 if (std::filesystem::exists(memory_file))
+                {
                     std::filesystem::remove(memory_file);
+                    invalidate_cache(memory_file);
+                }
                 if (std::filesystem::exists(asset_file))
                     std::filesystem::remove(asset_file);
             }
@@ -1858,6 +1904,7 @@ namespace run_unit
 
         void remove_session(const std::string &id)
         {
+            std::lock_guard<std::mutex> lock(session_mutex);
             sessions.erase(id);
         }
 
@@ -1879,6 +1926,7 @@ namespace run_unit
                                              asset_array.dump(4));
                     tool_unit::writeFile(workspace + "/sessions/" + current_session_id + ".json",
                                          save_msgs.dump(4));
+                    it->second->memory["last_saved_index"] = it->second->last_saved_index;
                     tool_unit::writeFile(workspace + "/memorys/" + current_session_id + ".json",
                                          it->second->memory.dump(4));
                     it->second->loaded = false;
@@ -1890,8 +1938,10 @@ namespace run_unit
         }
 
         SessionManager() = default;
-        SessionManager(const std::string &workspace) : workspace(workspace)
+
+        void init(const std::string &ws)
         {
+            workspace = ws;
             try
             {
                 auto load_sessions = get_all_files(workspace + "/sessions");
@@ -1929,6 +1979,7 @@ namespace run_unit
                                                  asset_array.dump(4));
                         tool_unit::writeFile(workspace + "/sessions/" + ses.first + ".json",
                                              save_msgs.dump(4));
+                        ses.second->memory["last_saved_index"] = ses.second->last_saved_index;
                         tool_unit::writeFile(workspace + "/memorys/" + ses.first + ".json",
                                              ses.second->memory.dump(4));
                     }
@@ -2026,7 +2077,7 @@ namespace run_unit
             throw std::runtime_error("Error - data.json not found. Please check your sys directory.");
 
         agent_data_manager = DataManager(workspace.string());
-        agent_session_manager = SessionManager(workspace.string());
+        agent_session_manager.init(workspace.string());
         return 0;
     }
 
@@ -2325,13 +2376,15 @@ namespace cs_unit
              try
              {
                  std::string keys;
-                 auto load_sessions = get_all_files(run_unit::settings["workspace"].get_ref<const std::string &>() + "/memorys");
+                 std::string mem_dir = run_unit::settings["workspace"].get_ref<const std::string &>() + "/memorys";
+                 auto &mgr = run_unit::agent_session_manager;
+                 auto load_sessions = get_all_files(mem_dir);
                  for (auto &session : load_sessions)
                  {
                      auto [name, ext] = file_parse(session);
                      if (ext == ".json")
                      {
-                         nlohmann::json memory = nlohmann::json::parse(tool_unit::readFile(session));
+                         nlohmann::json memory = mgr.get_cached_memory(session);
                          if (memory.contains("abstracts") && memory.contains("keywords"))
                              if (!memory["keywords"].get_ref<const std::string &>().empty() && !memory["abstracts"].get_ref<const std::string &>().empty())
                                  keys += name + ": " + memory["keywords"].get_ref<const std::string &>() + "\n";
@@ -2349,13 +2402,15 @@ namespace cs_unit
              try
              {
                  std::string query;
-                 auto load_sessions = get_all_files(run_unit::settings["workspace"].get_ref<const std::string &>() + "/memorys");
+                 std::string mem_dir = run_unit::settings["workspace"].get_ref<const std::string &>() + "/memorys";
+                 auto &mgr = run_unit::agent_session_manager;
+                 auto load_sessions = get_all_files(mem_dir);
                  for (auto &session : load_sessions)
                  {
                      auto [name, ext] = file_parse(session);
                      if (ext == ".json" && args.find(name) != std::string::npos)
                      {
-                         nlohmann::json memory = nlohmann::json::parse(tool_unit::readFile(session));
+                         nlohmann::json memory = mgr.get_cached_memory(session);
                          if (memory.contains("abstracts") && memory.contains("keywords"))
                              query += name + ": " + memory["abstracts"].get_ref<const std::string &>() + "\n";
                      }

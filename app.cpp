@@ -441,11 +441,11 @@ namespace app
         {
             size_t total_prompt_tokens = 0;
             size_t total_completion_tokens = 0;
-            auto [aq, kq] = session_ptr->summary_query();
+            std::string combined_query = session_ptr->summary_query();
             nlohmann::json response;
             nlohmann::json req = {
                 {"model", model},
-                {"messages", {{{"role", "system"}, {"content", aq}}}},
+                {"messages", {{{"role", "system"}, {"content", combined_query}}}},
                 {"stream", false}};
             client_generate(req, response);
             if (response.contains("usage"))
@@ -456,23 +456,25 @@ namespace app
                 if (usage.contains("completion_tokens"))
                     total_completion_tokens += usage["completion_tokens"].get<size_t>();
             }
-            session_ptr->memory["abstracts"] = response["choices"][0]["message"]["content"].get<std::string>();
-            std::cout << "Abstracts generated successfully." << std::endl;
 
-            req["messages"][0]["content"] = kq;
-            client_generate(req, response);
-            if (response.contains("usage"))
+            std::string content = response["choices"][0]["message"]["content"].get<std::string>();
+            try
             {
-                auto &usage = response["usage"];
-                if (usage.contains("prompt_tokens"))
-                    total_prompt_tokens += usage["prompt_tokens"].get<size_t>();
-                if (usage.contains("completion_tokens"))
-                    total_completion_tokens += usage["completion_tokens"].get<size_t>();
+                auto parsed = nlohmann::json::parse(content);
+                if (parsed.contains("abstracts"))
+                    session_ptr->memory["abstracts"] = parsed["abstracts"].get<std::string>();
+                if (parsed.contains("keywords"))
+                    session_ptr->memory["keywords"] = parsed["keywords"].get<std::string>();
             }
-            session_ptr->memory["keywords"] = response["choices"][0]["message"]["content"].get<std::string>();
-            std::cout << "Keywords generated successfully." << std::endl;
+            catch (...)
+            {
+                session_ptr->memory["abstracts"] = content;
+            }
+
+            std::cout << "Memory saved successfully." << std::endl;
 
             session_ptr->memory["created_at"] = std::to_string(std::time(nullptr));
+            session_ptr->last_saved_index = session_ptr->messages.size();
 
             auto &mem_usage = run_unit::agent_data_manager.data["usages"]["memory"];
             mem_usage["prompt_cost"] = mem_usage.value("prompt_cost", 0) + total_prompt_tokens;
@@ -1623,7 +1625,7 @@ namespace app
                 context.push_back({{"role", "system"}, {"content", tools_list_str}});
 
                 if (!session_ptr->is_memory_empty())
-                    context.push_back({{"role", "memory"}, {"content", session_ptr->memory["abstracts"]}});
+                    context.push_back({{"role", "system"}, {"content", session_ptr->memory["abstracts"]}});
                 else
                     for (auto &msg : session_ptr->messages)
                         context.push_back(msg);
@@ -1724,6 +1726,17 @@ namespace app
                     session_ptr->messages.push_back(sys_msg);
                 }
 
+                // 自动触发记忆保存（上下文超过 max_context 时）
+                {
+                    size_t ctx_size = session_ptr->messages.dump().size();
+                    size_t max_ctx = run_unit::settings["max_context"].get<size_t>();
+                    if (ctx_size > max_ctx)
+                    {
+                        std::cout << "Auto-trigger memory save (context: " << ctx_size << " > max: " << max_ctx << ")" << std::endl;
+                        save_memory(session_ptr, model);
+                    }
+                }
+
                 // 更新使用统计
                 if (run_unit::agent_data_manager.data["usages"].contains(sid))
                 {
@@ -1817,7 +1830,7 @@ namespace app
                 context.push_back({{"role", "system"}, {"content", tools_list_str}});
 
                 if (!session_ptr->is_memory_empty())
-                    context.push_back({{"role", "memory"}, {"content", session_ptr->memory["abstracts"]}});
+                    context.push_back({{"role", "system"}, {"content", session_ptr->memory["abstracts"]}});
                 else
                     for (auto &msg : session_ptr->messages)
                         context.push_back(msg);
@@ -1918,6 +1931,17 @@ namespace app
                     json sys_msg = {{"role", "tool"}, {"content", sys_contents}};
                     context.push_back(sys_msg);
                     session_ptr->messages.push_back(sys_msg);
+                }
+
+                // 自动触发记忆保存（上下文超过 max_context 时）
+                {
+                    size_t ctx_size = session_ptr->messages.dump().size();
+                    size_t max_ctx = run_unit::settings["max_context"].get<size_t>();
+                    if (ctx_size > max_ctx)
+                    {
+                        std::cout << "Auto-trigger memory save (context: " << ctx_size << " > max: " << max_ctx << ")" << std::endl;
+                        save_memory(session_ptr, model);
+                    }
                 }
 
                 // 更新使用统计
