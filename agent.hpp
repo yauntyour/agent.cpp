@@ -1056,6 +1056,7 @@ namespace net_unit
             return false;
         curl_easy_reset(__handle__);
         curl_easy_setopt(__handle__, CURLOPT_URL, URL);
+        curl_easy_setopt(__handle__, CURLOPT_NOPROXY, "localhost,127.0.0.1,::1"); // 本地服务不走系统代理
         curl_easy_setopt(__handle__, CURLOPT_WRITEFUNCTION, CURL_WriteCallback);
         curl_easy_setopt(__handle__, CURLOPT_WRITEDATA, &buf);
 
@@ -1083,6 +1084,7 @@ namespace net_unit
             return false;
         curl_easy_reset(__handle__);
         curl_easy_setopt(__handle__, CURLOPT_URL, URL);
+        curl_easy_setopt(__handle__, CURLOPT_NOPROXY, "localhost,127.0.0.1,::1"); // 本地服务不走系统代理
         curl_easy_setopt(__handle__, CURLOPT_WRITEFUNCTION, CURL_WriteCallback);
         curl_easy_setopt(__handle__, CURLOPT_WRITEDATA, &buf);
 
@@ -1110,6 +1112,7 @@ namespace net_unit
             return false;
         curl_easy_reset(__handle__);
         curl_easy_setopt(__handle__, CURLOPT_URL, URL);
+        curl_easy_setopt(__handle__, CURLOPT_NOPROXY, "localhost,127.0.0.1,::1"); // 本地服务不走系统代理
         curl_easy_setopt(__handle__, CURLOPT_POST, 1L);
         curl_easy_setopt(__handle__, CURLOPT_POSTFIELDS, data.c_str());
         curl_easy_setopt(__handle__, CURLOPT_POSTFIELDSIZE, data.size());
@@ -1141,6 +1144,7 @@ namespace net_unit
             return false;
         curl_easy_reset(__handle__);
         curl_easy_setopt(__handle__, CURLOPT_URL, URL);
+        curl_easy_setopt(__handle__, CURLOPT_NOPROXY, "localhost,127.0.0.1,::1"); // 本地服务不走系统代理
         curl_easy_setopt(__handle__, CURLOPT_POST, 1L);
         curl_easy_setopt(__handle__, CURLOPT_POSTFIELDS, data.c_str());
         curl_easy_setopt(__handle__, CURLOPT_POSTFIELDSIZE, data.size());
@@ -1187,6 +1191,7 @@ namespace net_unit
             return false;
 
         curl_easy_setopt(curl, CURLOPT_URL, url);
+        curl_easy_setopt(curl, CURLOPT_NOPROXY, "localhost,127.0.0.1,::1"); // 本地服务不走系统代理
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_data.c_str());
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &on_token);
@@ -2626,6 +2631,162 @@ namespace mcp_unit
                                  std::to_string(want_id) + ")");
     }
 
+    // ==================== MCP HTTP 客户端（libcurl / MCP Streamable HTTP 传输） ====================
+
+    class MCPHTTPClient
+    {
+    public:
+        MCPHTTPClient(const std::string &url, const std::map<std::string, std::string> &headers)
+            : url_(url), headers_(headers) {}
+
+        int timeout_ms = 120000;
+
+        json initialize()
+        {
+            json params = {
+                {"protocolVersion", "2025-03-26"},
+                {"capabilities", {}},
+                {"clientInfo", {{"name", "agent.cpp"}, {"version", "1.0"}}}};
+            return request(1, "initialize", params);
+        }
+
+        json list_tools() { return request(2, "tools/list", json::object()); }
+
+        json call_tool(const std::string &tool, const json &arguments)
+        {
+            json params = {{"name", tool}, {"arguments", arguments}};
+            return request(3, "tools/call", params);
+        }
+
+        void notify(const std::string &method, const json &params)
+        {
+            json msg = {{"jsonrpc", "2.0"}, {"method", method}, {"params", params}};
+            try
+            {
+                post(msg);
+            }
+            catch (...)
+            {
+            } // 服务器可能以 202 + 空响应确认通知
+        }
+
+        json request(int64_t id, const std::string &method, const json &params)
+        {
+            json msg = {{"jsonrpc", "2.0"}, {"id", id}, {"method", method}, {"params", params}};
+            json resp = post(msg);
+            if (resp.contains("error"))
+                throw std::runtime_error("MCP JSON-RPC error: " + resp["error"].dump());
+            if (!resp.contains("result"))
+                throw std::runtime_error("MCP JSON-RPC response missing result: " + resp.dump());
+            return resp["result"];
+        }
+
+    private:
+        std::string url_;
+        std::map<std::string, std::string> headers_;
+        std::string session_id_;
+
+        // 捕获 Mcp-Session-Id 响应头，后续请求回传以维持会话
+        static size_t header_cb(void *contents, size_t size, size_t nmemb, void *userdata)
+        {
+            MCPHTTPClient *self = static_cast<MCPHTTPClient *>(userdata);
+            std::string line((char *)contents, size * nmemb);
+            size_t colon = line.find(':');
+            if (colon != std::string::npos)
+            {
+                std::string name = line.substr(0, colon);
+                std::string value = line.substr(colon + 1);
+                while (!value.empty() && (value.front() == ' ' || value.front() == '\t'))
+                    value.erase(value.begin());
+                while (!value.empty() && (value.back() == '\r' || value.back() == '\n'))
+                    value.pop_back();
+                for (auto &c : name)
+                    if (c >= 'A' && c <= 'Z')
+                        c += 32;
+                if (name == "mcp-session-id")
+                    self->session_id_ = value;
+            }
+            return size * nmemb;
+        }
+
+        // 响应体可能是纯 JSON 或 SSE 流（text/event-stream）
+        static json parse_response(const std::string &buf)
+        {
+            try
+            {
+                return json::parse(buf);
+            }
+            catch (...)
+            {
+            }
+            size_t pos = 0;
+            while (pos < buf.size())
+            {
+                size_t nl = buf.find('\n', pos);
+                std::string line = buf.substr(pos, nl == std::string::npos ? std::string::npos : nl - pos);
+                pos = nl == std::string::npos ? buf.size() : nl + 1;
+                if (!line.empty() && line.back() == '\r')
+                    line.pop_back();
+                if (line.rfind("data:", 0) == 0)
+                {
+                    std::string payload = line.substr(5);
+                    if (!payload.empty() && payload.front() == ' ')
+                        payload.erase(payload.begin());
+                    if (!payload.empty())
+                    {
+                        try
+                        {
+                            return json::parse(payload);
+                        }
+                        catch (...)
+                        {
+                        }
+                    }
+                }
+            }
+            throw std::runtime_error("MCP: failed to parse HTTP response");
+        }
+
+        json post(const json &msg)
+        {
+            CURL *curl = curl_easy_init();
+            if (!curl)
+                throw std::runtime_error("curl_easy_init failed");
+            std::string body = msg.dump();
+            std::string buf;
+            struct curl_slist *hdr = nullptr;
+            hdr = curl_slist_append(hdr, "Content-Type: application/json");
+            hdr = curl_slist_append(hdr, "Accept: application/json, text/event-stream");
+            if (!session_id_.empty())
+                hdr = curl_slist_append(hdr, ("Mcp-Session-Id: " + session_id_).c_str());
+            for (auto &[k, v] : headers_)
+                hdr = curl_slist_append(hdr, (k + ": " + v).c_str());
+
+            curl_easy_setopt(curl, CURLOPT_URL, url_.c_str());
+            curl_easy_setopt(curl, CURLOPT_NOPROXY, "localhost,127.0.0.1,::1"); // 本地 MCP 服务器不走系统代理
+            curl_easy_setopt(curl, CURLOPT_POST, 1L);
+            curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
+            curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)body.size());
+            curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, net_unit::CURL_WriteCallback);
+            curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
+            curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, header_cb);
+            curl_easy_setopt(curl, CURLOPT_HEADERDATA, this);
+            curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdr);
+            curl_easy_setopt(curl, CURLOPT_TIMEOUT, (long)std::max(1, timeout_ms / 1000));
+
+            CURLcode res = curl_easy_perform(curl);
+            long code = 0;
+            curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &code);
+            curl_slist_free_all(hdr);
+            curl_easy_cleanup(curl);
+            if (res != CURLE_OK)
+                throw std::runtime_error(std::string("MCP HTTP request failed: ") + curl_easy_strerror(res));
+            if (code >= 400)
+                throw std::runtime_error("MCP HTTP request failed (HTTP " + std::to_string(code) + "): " + buf);
+            return parse_response(buf);
+        }
+    };
+
     // ==================== 配置持久化：workspace/tools/mcp_tools.json ====================
 
     inline std::string config_path()
@@ -2673,6 +2834,16 @@ namespace mcp_unit
         return p;
     }
 
+    inline std::map<std::string, std::string> mcp_http_headers(const json &server)
+    {
+        std::map<std::string, std::string> headers;
+        if (server.contains("headers") && server["headers"].is_object())
+            for (auto &[k, v] : server["headers"].items())
+                if (v.is_string())
+                    headers[k] = v.get<std::string>();
+        return headers;
+    }
+
     // 连接 MCP 服务器并返回远程工具列表
     inline json list_remote_tools(const std::string &server_name, int timeout_ms = 120000)
     {
@@ -2680,6 +2851,17 @@ namespace mcp_unit
         const json *server = find_server(cfg, server_name);
         if (!server)
             throw std::runtime_error("MCP server not found: " + server_name);
+        std::string url = server->value("url", "");
+        if (!url.empty())
+        {
+            // Streamable HTTP 传输（libcurl）
+            MCPHTTPClient client(url, mcp_http_headers(*server));
+            client.timeout_ms = timeout_ms;
+            client.initialize();
+            client.notify("notifications/initialized", json::object());
+            json result = client.list_tools();
+            return result.value("tools", json::array());
+        }
         if (server->value("command", "").empty())
             throw std::runtime_error("MCP server command is empty: " + server_name);
         MCPClient client(to_process(*server));
@@ -2699,8 +2881,8 @@ namespace mcp_unit
         std::string name = server.value("name", "");
         if (name.empty())
             throw std::runtime_error("MCP server name is required");
-        if (server.value("command", "").empty())
-            throw std::runtime_error("MCP server command is required");
+        if (server.value("command", "").empty() && server.value("url", "").empty())
+            throw std::runtime_error("MCP server command or url is required");
         auto cfg = load_config();
         for (auto &s : cfg["servers"])
         {
@@ -2839,13 +3021,6 @@ namespace mcp_unit
         if (!server)
             throw std::runtime_error("MCP server not found: " + mapping->value("server", ""));
 
-        MCPClient client(to_process(*server));
-        client.timeout_ms = 120000; // 首次 npx 拉取依赖可能较慢
-        if (!client.open())
-            throw std::runtime_error("Failed to start MCP server: " + server->value("command", ""));
-        client.initialize();
-        client.notify("notifications/initialized", json::object());
-
         json arguments = json::object();
         std::string trimmed = args_str;
         while (!trimmed.empty() && (trimmed.front() == ' ' || trimmed.front() == '\t' ||
@@ -2873,7 +3048,27 @@ namespace mcp_unit
                 arguments = {{"input", args_str}};
         }
 
-        json result = client.call_tool(mapping->value("tool", name), arguments);
+        json result;
+        std::string url = server->value("url", "");
+        if (!url.empty())
+        {
+            // Streamable HTTP 传输（libcurl）
+            MCPHTTPClient client(url, mcp_http_headers(*server));
+            client.timeout_ms = 120000;
+            client.initialize();
+            client.notify("notifications/initialized", json::object());
+            result = client.call_tool(mapping->value("tool", name), arguments);
+        }
+        else
+        {
+            MCPClient client(to_process(*server));
+            client.timeout_ms = 120000; // 首次 npx 拉取依赖可能较慢
+            if (!client.open())
+                throw std::runtime_error("Failed to start MCP server: " + server->value("command", ""));
+            client.initialize();
+            client.notify("notifications/initialized", json::object());
+            result = client.call_tool(mapping->value("tool", name), arguments);
+        }
         std::string out;
         bool is_err = result.value("isError", false);
         if (is_err)
