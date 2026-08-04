@@ -1,1 +1,28 @@
-[]
+[
+    {
+        "content": [
+            {
+                "text": "检查工具列表",
+                "type": "text"
+            }
+        ],
+        "role": "Yauntyours"
+    },
+    {
+        "content": "<cs>tools</cs>",
+        "role": "assistant"
+    },
+    {
+        "content": [
+            {
+                "text": "<system_output>\n[{\"description\":\"图像生成工具，利用Z-Image-Turbo模型强大的功能，在9-12个steps内生成图像\",\"enabled\":true,\"name\":\"image-drawer\"},{\"description\":\"浏览器自动化命令行工具\",\"enabled\":true,\"name\":\"playwright-tools\"}]\n[CS_DONE]\n\n</system_output>\n",
+                "type": "text"
+            }
+        ],
+        "role": "tool"
+    },
+    {
+        "content": "Tools ready to roll! ✨\n\nThe system is loaded up and ready for action. Here is the list of available tools:\n\n1.  **`image-drawer`**: This is our powerhouse image generator. It uses the Z-Image-Turbo model and can whip up stunning visuals in just 9-12 steps! Perfect for turning abstract ideas into concrete (or digital) masterpieces.\n2.  **`playwright-tools`**: Our browser automation champ. If you need to interact with a website—click buttons, fill forms, scrape data, or just navigate around—this tool handles it.\n\nWhat do you want to create or explore first? Should we generate an image, or shall we dive into a website? Let me know! 😊",
+        "role": "assistant"
+    }
+]
