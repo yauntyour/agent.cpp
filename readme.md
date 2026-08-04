@@ -189,6 +189,36 @@ def print_tool_help():
         print(f"警告: 未找到帮助文件 {tool_md_path}")
 ```
 
+## 工具目录说明（workspace/tools）
+
+所有可调度工具统一存放于 `workspace/tools/`，通过 `tools.json` 注册清单进行管理：
+
+```json
+[
+    {
+        "description": "图像生成工具，利用Z-Image-Turbo模型强大的功能，在9-12个steps内生成图像",
+        "enabled": true,
+        "name": "image-drawer"
+    }
+]
+```
+
+- `name`：工具名称，即 `<tool>name:args</tool>` 中的调用名
+- `enabled`：是否启用（`false` 时工具将被禁用，不参与调度）
+- `description`：工具功能描述，Agent 根据该描述决定何时调用此工具
+
+每个工具目录固定包含 `run.py`（被 CS 指令系统调度的入口脚本）与 `tool.md`（参数文档与使用说明，仅此文件被系统读取用于生成帮助）。
+
+### 内置工具
+
+| 工具 | 目录 | 功能描述 |
+| :--- | :--- | :--- |
+| `image-drawer` | `image-drawer/` | 图像生成工具，调用 sd-cli 服务（stable-diffusion.cpp & llama.cpp 自动化混合端），基于 Z-Image-Turbo 模型在 9~12 steps 内生成图像，支持自定义尺寸与负提示词 |
+| `playwright-tools` | `playwright-tools/` | 浏览器自动化命令行工具，支持链式执行打开网页、点击、输入、截图、PDF 导出、Cookie/存储管理、网络拦截、录制视频等操作 |
+| `mcp-linker` | `mcp-linker/` | MCP (Model Context Protocol) 调用工具，支持通过 `--server-url`（HTTP/SSE）或 `--server-command`（stdio）连接 MCP 服务器，列出并调用服务器上的工具 |
+
+各工具的详细参数说明见对应目录下的 `tool.md`，也可让 Agent 直接调用该工具获取帮助信息。
+
 ## 安全与控制机制
 
 - **高风险操作需显式授权**：当 Agent 处于自主调用模式时，执行重启、关键文件写入等操作必须获得用户显式确认。通过主动指令触发的操作则无需二次确认（仍建议通过提示词约束 `shutdown` 等敏感行为）。
