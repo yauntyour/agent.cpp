@@ -6,9 +6,9 @@
             "total_cost": 211227
         },
         "WeChat": {
-            "completion_cost": 1127,
-            "prompt_cost": 525815,
-            "total_cost": 526942
+            "completion_cost": 1845,
+            "prompt_cost": 534948,
+            "total_cost": 536793
         },
         "memory": {
             "completion_cost": 11510,

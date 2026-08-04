@@ -10,7 +10,6 @@
 #include <random>
 #include <list>
 #include <sstream>
-#include <mutex>
 #include <ctime>
 #include <unordered_map>
 #include <unordered_set>
@@ -1565,16 +1564,13 @@ namespace run_unit
     std::string cs_prompt = "";
     nlohmann::json settings;
     nlohmann::json tools_list;
-    std::mutex ctx_lock;
     std::string setting_file_path;
 
-    // 文件使用跟踪
+    // 文件使用跟踪（单线程异步事件循环，无锁访问）
     std::unordered_set<std::string> used_files;
-    std::mutex used_files_mutex;
 
     void mark_file_used(const std::string &path)
     {
-        std::lock_guard<std::mutex> lock(used_files_mutex);
         used_files.insert(path);
         if (used_files.size() > 100)
             used_files.erase(used_files.begin());
@@ -1582,7 +1578,6 @@ namespace run_unit
 
     std::vector<std::string> get_used_files()
     {
-        std::lock_guard<std::mutex> lock(used_files_mutex);
         return {used_files.begin(), used_files.end()};
     }
 
@@ -1756,21 +1751,19 @@ namespace run_unit
     class SessionManager
     {
     public:
-        mutable std::mutex session_mutex;
         std::unordered_map<std::string, std::shared_ptr<SessionContext>> sessions;
         std::string current_session_id;
         std::string workspace = "";
 
-        struct MemoryCacheEntry {
+        struct MemoryCacheEntry
+        {
             nlohmann::json data;
             std::filesystem::file_time_type mtime;
         };
         std::unordered_map<std::string, MemoryCacheEntry> memory_cache;
-        std::mutex cache_mutex;
 
         nlohmann::json get_cached_memory(const std::string &path)
         {
-            std::lock_guard<std::mutex> lock(cache_mutex);
             auto it = memory_cache.find(path);
             auto mtime = std::filesystem::last_write_time(path);
             if (it != memory_cache.end() && it->second.mtime == mtime)
@@ -1782,13 +1775,11 @@ namespace run_unit
 
         void invalidate_cache(const std::string &path)
         {
-            std::lock_guard<std::mutex> lock(cache_mutex);
             memory_cache.erase(path);
         }
 
         std::shared_ptr<SessionContext> get(const std::string &id)
         {
-            std::lock_guard<std::mutex> lock(session_mutex);
             auto it = sessions.find(id);
             if (it != sessions.end())
             {
@@ -1855,7 +1846,6 @@ namespace run_unit
 
         std::shared_ptr<SessionContext> create()
         {
-            std::lock_guard<std::mutex> lock(session_mutex);
             auto session = std::make_shared<SessionContext>();
             sessions[session->session_id] = session;
             current_session_id = session->session_id;
@@ -1865,23 +1855,19 @@ namespace run_unit
 
         std::shared_ptr<SessionContext> get_current()
         {
+            if (current_session_id.empty())
             {
-                std::lock_guard<std::mutex> lock(session_mutex);
-                if (current_session_id.empty())
-                {
-                    auto session = std::make_shared<SessionContext>();
-                    sessions[session->session_id] = session;
-                    current_session_id = session->session_id;
-                    session->loaded = true;
-                    return session;
-                }
+                auto session = std::make_shared<SessionContext>();
+                sessions[session->session_id] = session;
+                current_session_id = session->session_id;
+                session->loaded = true;
+                return session;
             }
             return get(current_session_id);
         }
 
         std::vector<std::string> list_sessions() const
         {
-            std::lock_guard<std::mutex> lock(session_mutex);
             std::vector<std::string> result;
             for (const auto &pair : sessions)
                 result.push_back(pair.first);
@@ -1890,34 +1876,15 @@ namespace run_unit
 
         void clear_current()
         {
-            std::lock_guard<std::mutex> lock(session_mutex);
             auto ses = get_current();
             ses->messages.clear();
             ses->memory.clear();
             ses->memory = {{"keywords", ""}, {"abstracts", ""}, {"created_at", "-1"}};
             ses->last_saved_index = 0;
-
-            if (!current_session_id.empty() && !workspace.empty())
-            {
-                std::string session_file = workspace + "/sessions/" + current_session_id + ".json";
-                std::string memory_file = workspace + "/memorys/" + current_session_id + ".json";
-                std::string asset_file = workspace + "/assets/messages/" + current_session_id + ".json";
-
-                if (std::filesystem::exists(session_file))
-                    std::filesystem::remove(session_file);
-                if (std::filesystem::exists(memory_file))
-                {
-                    std::filesystem::remove(memory_file);
-                    invalidate_cache(memory_file);
-                }
-                if (std::filesystem::exists(asset_file))
-                    std::filesystem::remove(asset_file);
-            }
         }
 
         void remove_session(const std::string &id)
         {
-            std::lock_guard<std::mutex> lock(session_mutex);
             sessions.erase(id);
         }
 
