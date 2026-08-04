@@ -1,8 +1,5 @@
 {
     "agent_name": "assistant",
-    "filesystem": {
-        "auto_expand": false
-    },
     "channels": [
         {
             "config": {
@@ -32,10 +29,12 @@
         }
     ],
     "current_provider": "openai-default",
+    "filesystem": {
+        "auto_expand": false
+    },
     "max_context": 1048576,
     "max_mpc_rounds": 5,
     "model": "uGemma4",
-    "webui_password": "a2aba198385559c15dc12398e197d556ef3cd6b45329d003b8886a0eecedec05",
     "prompt": "agent.txt",
     "providers": [
         {
@@ -48,5 +47,6 @@
     ],
     "stream": true,
     "user_name": "Yauntyours",
+    "webui_password": "a2aba198385559c15dc12398e197d556ef3cd6b45329d003b8886a0eecedec05",
     "workspace": "./workspace/"
 }

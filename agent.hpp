@@ -27,9 +27,15 @@
 #include <sys/sysctl.h>
 #include <mach/mach.h>
 #include <unistd.h>
+#include <sys/wait.h>
+#include <sys/select.h>
+#include <signal.h>
 #elif __linux__
 #include <fstream>
 #include <unistd.h>
+#include <sys/wait.h>
+#include <sys/select.h>
+#include <signal.h>
 #endif
 
 #include <algorithm>
@@ -2492,10 +2498,10 @@ namespace mcp_unit
         pid_t pid = fork();
         if (pid < 0)
         {
-            close(in_pipe[0]);
-            close(in_pipe[1]);
-            close(out_pipe[0]);
-            close(out_pipe[1]);
+            ::close(in_pipe[0]);
+            ::close(in_pipe[1]);
+            ::close(out_pipe[0]);
+            ::close(out_pipe[1]);
             return false;
         }
         if (pid == 0)
@@ -2503,10 +2509,10 @@ namespace mcp_unit
             dup2(in_pipe[0], STDIN_FILENO);
             dup2(out_pipe[1], STDOUT_FILENO);
             dup2(out_pipe[1], STDERR_FILENO);
-            close(in_pipe[0]);
-            close(in_pipe[1]);
-            close(out_pipe[0]);
-            close(out_pipe[1]);
+            ::close(in_pipe[0]);
+            ::close(in_pipe[1]);
+            ::close(out_pipe[0]);
+            ::close(out_pipe[1]);
             for (auto &[k, v] : cfg_.env)
                 setenv(k.c_str(), v.c_str(), 1);
             std::vector<char *> argv;
@@ -2517,8 +2523,8 @@ namespace mcp_unit
             execvp(cfg_.command.c_str(), argv.data());
             _exit(127);
         }
-        close(in_pipe[0]);
-        close(out_pipe[1]);
+        ::close(in_pipe[0]);
+        ::close(out_pipe[1]);
         pid_ = pid;
         in_fd_ = in_pipe[1];
         out_fd_ = out_pipe[0];
@@ -2572,12 +2578,12 @@ namespace mcp_unit
     {
         if (in_fd_ >= 0)
         {
-            close(in_fd_);
+            ::close(in_fd_);
             in_fd_ = -1;
         }
         if (out_fd_ >= 0)
         {
-            close(out_fd_);
+            ::close(out_fd_);
             out_fd_ = -1;
         }
         if (pid_ > 0)
