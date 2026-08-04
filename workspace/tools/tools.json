@@ -8,5 +8,10 @@
         "description": "浏览器自动化命令行工具",
         "enabled": true,
         "name": "playwright-tools"
+    },
+    {
+        "description": "调用MCP (Model Context Protocol) 服务器的工具，支持列出及调用服务器上的工具",
+        "enabled": true,
+        "name": "mcp-linker"
     }
 ]
