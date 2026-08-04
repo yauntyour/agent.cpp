@@ -265,18 +265,63 @@
 
 * **路径**: `/api/tools`
 * **方法**: `GET`
-* **描述**: 扫描 `workspace/tools` 目录下的 `.md` 文件，读取首行作为描述并返回工具列表。
+* **描述**: 返回工具列表（本地 `tools.json` 工具 + 已映射的 `mcp_tools.json` MCP 工具，MCP 工具带 `"mcp": true` 标记）。
 * **响应 (200 OK)**:
 
 ```json
 [
   {
     "name": "tool_name",
-    "description": "工具的单行描述"
+    "description": "工具的单行描述",
+    "enabled": true
+  },
+  {
+    "name": "fetch",
+    "description": "MCP 工具描述",
+    "enabled": true,
+    "mcp": true,
+    "server": "fetch",
+    "tool": "fetch",
+    "schema": {}
   }
 ]
-
 ```
+
+### 5.1.1 切换工具启用状态
+
+* **路径**: `/api/tools/toggle`
+* **方法**: `POST`
+* **描述**: 启用/禁用本地工具（MCP 工具请使用 `/api/mcp/toggle`）。
+* **请求体**:
+
+```json
+{ "name": "image-drawer", "enabled": false }
+```
+
+### 5.1.2 MCP 工具映射管理
+
+MCP 服务器配置与工具映射统一保存在 `workspace/tools/mcp_tools.json`：
+
+```json
+{
+  "servers": [
+    { "name": "fetch", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-fetch"], "env": {} }
+  ],
+  "tools": [
+    { "name": "fetch", "description": "...", "enabled": true, "server": "fetch", "tool": "fetch", "schema": {} }
+  ]
+}
+```
+
+映射后的 MCP 工具可直接以 `<tool>name:{"参数":"值"}</tool>` 形式被 Agent 调用，后端会通过 MCP stdio (JSON-RPC 2.0) 转发 `tools/call` 请求。
+
+* **`GET`** `/api/mcp` — 返回 `{servers, tools}` 配置。
+* **`POST`** `/api/mcp/save` — 添加/更新服务器。请求体: `{name, command, args[], env{}}`。
+* **`POST`** `/api/mcp/delete` — 删除服务器（同时移除其全部映射）。请求体: `{name}`。
+* **`POST`** `/api/mcp/scan` — 连接服务器并列出远程工具。请求体: `{server}`，响应: `{tools:[{name, description, inputSchema}]}`。
+* **`POST`** `/api/mcp/map` — 将远程工具映射为本地工具。请求体: `{server, tool, name?, description?, schema?}`。
+* **`POST`** `/api/mcp/unmap` — 取消映射。请求体: `{name}`。
+* **`POST`** `/api/mcp/toggle` — 启用/禁用已映射的 MCP 工具。请求体: `{name, enabled}`。
 
 ### 5.2 获取频道列表
 

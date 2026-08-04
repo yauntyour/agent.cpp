@@ -189,6 +189,15 @@ def print_tool_help():
         print(f"警告: 未找到帮助文件 {tool_md_path}")
 ```
 
+## MCP 工具映射
+
+系统支持将任意 MCP (Model Context Protocol) 服务器的工具映射为本地工具，由 Agent 通过 `<tool>name:{"参数":"值"}</tool>` 直接调用（参数以 JSON 对象形式透传给 MCP 服务器，后端内置 MCP stdio / JSON-RPC 客户端）。
+
+- **配置位置**：`workspace/tools/mcp_tools.json`，包含 `servers`（MCP 服务器定义）与 `tools`（已映射的工具列表）两部分，WebUI 的「系统设置 → 工具」面板提供可视化管理。
+- **使用流程**：添加服务器（命令 + 参数 + 环境变量）→ 点击扫描获取远程工具列表 → 映射为本地工具 → 在工具列表中启用/禁用。
+- **调用格式**：映射后的工具名直接用于 `<tool>name:args</tool>`，`args` 需为 JSON 对象；非 JSON 参数会回退为 `{"input": "..."}`。
+- **示例**：将 `@modelcontextprotocol/server-fetch` 的 `fetch` 工具映射后，Agent 可调用 `<tool>fetch:{"url":"https://example.com"}</tool>` 抓取网页内容。
+
 ## 安全与控制机制
 
 - **高风险操作需显式授权**：当 Agent 处于自主调用模式时，执行重启、关键文件写入等操作必须获得用户显式确认。通过主动指令触发的操作则无需二次确认（仍建议通过提示词约束 `shutdown` 等敏感行为）。

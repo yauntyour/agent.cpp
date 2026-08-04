@@ -398,16 +398,8 @@ namespace app
         }
 
         Admin = run_unit::settings["user_name"].get<std::string>();
-        // 仅启用 enabled 的工具
-        {
-            nlohmann::json enabled_tools = nlohmann::json::array();
-            for (auto &t : run_unit::tools_list)
-            {
-                if (t.value("enabled", true))
-                    enabled_tools.push_back(t);
-            }
-            tools_list_str = enabled_tools.dump();
-        }
+        // 仅启用 enabled 的工具（含已映射的 MCP 工具）
+        tools_list_str = mcp_unit::enabled_tools_prompt_str();
 
         system_prompt = tool_unit::readFile(
                             run_unit::settings["workspace"].get_ref<const std::string &>() +
@@ -542,6 +534,15 @@ namespace app
 
         int handle_tools_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
 
+        // ——— MCP 工具映射管理 ———
+        int handle_mcp_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+        int handle_mcp_save(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+        int handle_mcp_delete(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+        int handle_mcp_scan(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+        int handle_mcp_map(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+        int handle_mcp_unmap(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+        int handle_mcp_toggle(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+
         int handle_todos_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
         int handle_todos_setting(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
         int handle_todos_delete(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
@@ -592,6 +593,13 @@ namespace app
             router.on("/api/channel/token/:name", handle_channel_token_get); // GET — 解密读取
             router.on("/api/tools", handle_tools_list);
             router.on("/api/tools/toggle", handle_tools_toggle);
+            router.on("/api/mcp", handle_mcp_list);
+            router.on("/api/mcp/save", handle_mcp_save);
+            router.on("/api/mcp/delete", handle_mcp_delete);
+            router.on("/api/mcp/scan", handle_mcp_scan);
+            router.on("/api/mcp/map", handle_mcp_map);
+            router.on("/api/mcp/unmap", handle_mcp_unmap);
+            router.on("/api/mcp/toggle", handle_mcp_toggle);
             router.on("/api/fs/list", handle_fs_list);
             router.on("/api/fs/used", handle_fs_used);
             router.on("/api/todos", handle_todos_list);
@@ -1310,7 +1318,7 @@ namespace app
         }
         int handle_tools_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
-            output = build_http_response(200, "application/json", run_unit::tools_list.dump());
+            output = build_http_response(200, "application/json", mcp_unit::merged_tools_list().dump());
             return rt::FLAG_DONE;
         }
         int handle_tools_toggle(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
@@ -1324,26 +1332,35 @@ namespace app
                 std::string tool_name = request["name"];
                 bool enabled = request.value("enabled", true);
 
+                bool found_local = false;
                 for (auto &tool : run_unit::tools_list)
                 {
                     if (tool["name"] == tool_name)
                     {
                         tool["enabled"] = enabled;
+                        found_local = true;
                         break;
                     }
                 }
 
-                std::string tools_path = run_unit::settings["workspace"].get<std::string>() + "/tools/tools.json";
-                tool_unit::writeFile(tools_path, run_unit::tools_list.dump(4));
+                if (found_local)
+                {
+                    std::string tools_path = run_unit::settings["workspace"].get<std::string>() + "/tools/tools.json";
+                    tool_unit::writeFile(tools_path, run_unit::tools_list.dump(4));
+                }
+                else if (mcp_unit::is_mcp_tool(tool_name))
+                {
+                    mcp_unit::set_mapping_enabled(tool_name, enabled);
+                }
+                else
+                {
+                    output = build_http_response(404, "application/json",
+                                                 json{{"error", "tool not found: " + tool_name}}.dump());
+                    return rt::FLAG_ERROR;
+                }
 
                 // 重建工具列表字符串
-                nlohmann::json enabled_tools = nlohmann::json::array();
-                for (auto &t : run_unit::tools_list)
-                {
-                    if (t.value("enabled", true))
-                        enabled_tools.push_back(t);
-                }
-                tools_list_str = enabled_tools.dump();
+                tools_list_str = mcp_unit::enabled_tools_prompt_str();
 
                 output = build_http_response(200, "application/json",
                                              json{{"status", "OK"}, {"name", tool_name}, {"enabled", enabled}}.dump());
@@ -1352,6 +1369,162 @@ namespace app
             catch (const std::exception &e)
             {
                 webui_log("ERROR", "handle_tools_toggle", e.what());
+                output = build_http_response(500, "application/json", json{{"error", e.what()}}.dump());
+                return rt::FLAG_ERROR;
+            }
+        }
+        int handle_mcp_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+        {
+            try
+            {
+                output = build_http_response(200, "application/json",
+                                             json{{"servers", mcp_unit::list_servers()},
+                                                  {"tools", mcp_unit::list_mapped_tools()}}
+                                                 .dump());
+                return rt::FLAG_DONE;
+            }
+            catch (const std::exception &e)
+            {
+                webui_log("ERROR", "handle_mcp_list", e.what());
+                output = build_http_response(500, "application/json", json{{"error", e.what()}}.dump());
+                return rt::FLAG_ERROR;
+            }
+        }
+        int handle_mcp_save(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+        {
+            try
+            {
+                size_t header_end = input.find("\r\n\r\n");
+                std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
+                json request = json::parse(body);
+
+                json server = {
+                    {"name", request.value("name", "")},
+                    {"command", request.value("command", "")},
+                    {"args", request.value("args", json::array())},
+                    {"env", request.value("env", json::object())},
+                };
+                mcp_unit::add_server(server);
+                output = build_http_response(200, "application/json",
+                                             json{{"status", "OK"}, {"server", server}}.dump());
+                return rt::FLAG_DONE;
+            }
+            catch (const std::exception &e)
+            {
+                webui_log("ERROR", "handle_mcp_save", e.what());
+                output = build_http_response(500, "application/json", json{{"error", e.what()}}.dump());
+                return rt::FLAG_ERROR;
+            }
+        }
+        int handle_mcp_delete(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+        {
+            try
+            {
+                size_t header_end = input.find("\r\n\r\n");
+                std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
+                json request = json::parse(body);
+                mcp_unit::delete_server(request["name"]);
+                tools_list_str = mcp_unit::enabled_tools_prompt_str();
+                output = build_http_response(200, "application/json", json{{"status", "OK"}}.dump());
+                return rt::FLAG_DONE;
+            }
+            catch (const std::exception &e)
+            {
+                webui_log("ERROR", "handle_mcp_delete", e.what());
+                output = build_http_response(500, "application/json", json{{"error", e.what()}}.dump());
+                return rt::FLAG_ERROR;
+            }
+        }
+        int handle_mcp_scan(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+        {
+            try
+            {
+                size_t header_end = input.find("\r\n\r\n");
+                std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
+                json request = json::parse(body);
+                json tools = mcp_unit::list_remote_tools(request["server"]);
+                output = build_http_response(200, "application/json", json{{"status", "OK"}, {"tools", tools}}.dump());
+                return rt::FLAG_DONE;
+            }
+            catch (const std::exception &e)
+            {
+                webui_log("ERROR", "handle_mcp_scan", e.what());
+                output = build_http_response(500, "application/json", json{{"error", e.what()}}.dump());
+                return rt::FLAG_ERROR;
+            }
+        }
+        int handle_mcp_map(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+        {
+            try
+            {
+                size_t header_end = input.find("\r\n\r\n");
+                std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
+                json request = json::parse(body);
+
+                std::string server = request["server"];
+                std::string tool = request["tool"];
+                std::string name = request.value("name", tool);
+                if (name.empty())
+                    name = tool;
+
+                json mapping = {
+                    {"name", name},
+                    {"description", request.value("description", "")},
+                    {"enabled", request.value("enabled", true)},
+                    {"server", server},
+                    {"tool", tool},
+                    {"schema", request.value("schema", json::object())},
+                };
+                mcp_unit::add_mapping(mapping);
+                tools_list_str = mcp_unit::enabled_tools_prompt_str();
+                output = build_http_response(200, "application/json",
+                                             json{{"status", "OK"}, {"mapping", mapping}}.dump());
+                return rt::FLAG_DONE;
+            }
+            catch (const std::exception &e)
+            {
+                webui_log("ERROR", "handle_mcp_map", e.what());
+                output = build_http_response(500, "application/json", json{{"error", e.what()}}.dump());
+                return rt::FLAG_ERROR;
+            }
+        }
+        int handle_mcp_unmap(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+        {
+            try
+            {
+                size_t header_end = input.find("\r\n\r\n");
+                std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
+                json request = json::parse(body);
+                mcp_unit::delete_mapping(request["name"]);
+                tools_list_str = mcp_unit::enabled_tools_prompt_str();
+                output = build_http_response(200, "application/json", json{{"status", "OK"}}.dump());
+                return rt::FLAG_DONE;
+            }
+            catch (const std::exception &e)
+            {
+                webui_log("ERROR", "handle_mcp_unmap", e.what());
+                output = build_http_response(500, "application/json", json{{"error", e.what()}}.dump());
+                return rt::FLAG_ERROR;
+            }
+        }
+        int handle_mcp_toggle(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+        {
+            try
+            {
+                size_t header_end = input.find("\r\n\r\n");
+                std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
+                json request = json::parse(body);
+                std::string name = request["name"];
+                bool enabled = request.value("enabled", true);
+                mcp_unit::set_mapping_enabled(name, enabled);
+                tools_list_str = mcp_unit::enabled_tools_prompt_str();
+                output = build_http_response(200, "application/json",
+                                             json{{"status", "OK"}, {"name", name}, {"enabled", enabled}}.dump());
+                return rt::FLAG_DONE;
+            }
+            catch (const std::exception &e)
+            {
+                webui_log("ERROR", "handle_mcp_toggle", e.what());
                 output = build_http_response(500, "application/json", json{{"error", e.what()}}.dump());
                 return rt::FLAG_ERROR;
             }
