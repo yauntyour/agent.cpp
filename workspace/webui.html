@@ -2288,13 +2288,6 @@
                             style="font-size:11px;color:var(--text-dim);background:var(--bg-base);padding:4px 10px;border-radius:var(--radius-sm);border:1px solid var(--border-color);white-space:nowrap;">0/0</span>
                     </div>
                     <div id="tools-toggle-list" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;"></div>
-                    <div id="mcp-header-bar" style="display:flex;align-items:center;gap:8px;margin-top:16px;padding-top:12px;border-top:1px solid var(--border-color);">
-                        <span style="font-size:12px;color:var(--text-muted);font-weight:500;">MCP 服务器</span>
-                        <button class="save-btn" onclick="addMcpServerForm()" style="margin-left:auto;margin-top:0;padding:6px 12px;font-size:11px;background:var(--accent-color);">
-                            <i class="fa-solid fa-plus"></i> 添加服务器
-                        </button>
-                    </div>
-                    <div id="mcp-servers-list" style="margin-top:8px;"></div>
                 </div>
                 <div class="overlay-panel" id="opanel-todos">
                     <div style="display:flex;gap:6px;margin-bottom:10px;">
@@ -2360,7 +2353,6 @@
             sessions: [], currentSessionId: null, messages: [],
             settings: {}, models: [], currentModel: null,
             thinkMode: false, tools: [], todos: [], channels: [],
-            mcpServers: [], mcpMappedTools: [], mcpDiscovered: {},
             isTyping: false, pendingImages: [],
             assistantMsgId: null,
             streamBuffers: { content: '', thinking: '', thinkings: [], toolOutputs: [] },
@@ -2395,7 +2387,6 @@
             imagePreviewContainer: $('#image-preview-container'),
             settingsFormContainer: $('#settings-form-container'), saveSettingsBtn: $('#save-settings-btn'),
             dataStatsBtn: $('#data-stats-btn'), toolsToggleList: $('#tools-toggle-list'),
-            mcpServersList: $('#mcp-servers-list'),
             settingsGearBtn: $('#settings-gear-btn'), closeSettingsBtn: $('#close-settings-btn'),
             settingsOverlay: $('#settings-overlay'), overlayBackdrop: $('#overlay-backdrop'),
             statsOverlay: $('#stats-overlay'), statsOverlayBody: $('#stats-overlay-body'),
@@ -3633,7 +3624,6 @@
         // ============ 工具/任务/频道 ============
         async function loadTools() {
             try { const r = await axios.get(API + '/tools'); state.tools = r.data || []; renderToolToggles(); } catch (e) { log('加载工具列表失败: ' + (e.message || e), 'error'); }
-            await loadMcp();
         }
         function renderToolToggles() {
             const enabledCount = state.tools.filter(t => t.enabled !== false).length;
@@ -3643,7 +3633,7 @@
             els.toolsToggleList.innerHTML = filtered.map(t => `
     <div class="tool-toggle-card p-3 border border-[var(--border-color)] bg-[var(--bg-surface)] rounded-lg hover:border-[var(--border-hover)] transition-all">
       <div class="flex items-center justify-between mb-2">
-        <span class="text-xs font-semibold text-gray-200 truncate" style="display:flex;align-items:center;gap:6px;">${esc(t.name)}${t.mcp ? '<span style="font-size:9px;color:#a78bfa;background:rgba(167,139,250,0.12);padding:1px 6px;border-radius:4px;border:1px solid rgba(167,139,250,0.35);flex-shrink:0;">MCP</span>' : ''}</span>
+        <span class="text-xs font-semibold text-gray-200 truncate" style="display:flex;align-items:center;gap:6px;">${esc(t.name)}</span>
         <label class="relative inline-flex items-center cursor-pointer">
           <input type="checkbox" class="sr-only peer" ${t.enabled !== false ? 'checked' : ''} 
                  onchange="toggleTool('${esc(t.name)}', this.checked)">
@@ -3668,15 +3658,9 @@
         }
         async function toggleTool(name, enabled) {
             try {
+                await axios.post(API + '/tools/toggle', { name, enabled });
                 const t = state.tools.find(t => t.name === name);
-                if (t && t.mcp) {
-                    await axios.post(API + '/mcp/toggle', { name, enabled });
-                    const mt = state.mcpMappedTools.find(m => m.name === name);
-                    if (mt) mt.enabled = enabled;
-                } else {
-                    await axios.post(API + '/tools/toggle', { name, enabled });
-                    if (t) t.enabled = enabled;
-                }
+                if (t) t.enabled = enabled;
                 renderToolToggles();
                 toast(`工具 ${name} ${enabled ? '已启用' : '已禁用'}`, 'success');
             } catch (e) {
@@ -3685,151 +3669,6 @@
             }
         }
 
-        // ============ MCP 工具映射 ============
-        async function loadMcp() {
-            try {
-                const r = await axios.get(API + '/mcp');
-                state.mcpServers = r.data.servers || [];
-                state.mcpMappedTools = r.data.tools || [];
-                renderMcpServers();
-            } catch (e) {
-                log('加载 MCP 配置失败: ' + (e.message || e), 'error');
-            }
-        }
-        function renderMcpServers() {
-            if (!els.mcpServersList) return;
-            if (!state.mcpServers.length) {
-                els.mcpServersList.innerHTML = '<div style="color:var(--text-dim);font-size:12px;text-align:center;padding:12px;">暂无 MCP 服务器，点击右上角添加。映射后的 MCP 工具会出现在上方工具列表中，可直接启用/禁用。</div>';
-                return;
-            }
-            els.mcpServersList.innerHTML = state.mcpServers.map(s => {
-                const disc = state.mcpDiscovered[s.name] || [];
-                const mapped = state.mcpMappedTools.filter(t => t.server === s.name);
-                return `<div class="channel-item" data-mcp-server="${esc(s.name)}">
-                    <div class="channel-item-header">
-                        <span class="channel-item-name">${esc(s.name)}</span>
-                        <div style="display:flex;gap:4px;">
-                            <button class="channel-btn" onclick="scanMcpServer('${esc(s.name)}')" title="扫描服务器工具"><i class="fa-solid fa-magnifying-glass"></i></button>
-                            <button class="channel-btn danger" onclick="deleteMcpServer('${esc(s.name)}')" title="删除服务器"><i class="fa-solid fa-trash"></i></button>
-                        </div>
-                    </div>
-                    <div style="font-size:11px;color:var(--text-dim);margin-top:6px;">${esc(s.command)} ${esc((s.args || []).join(' '))}</div>
-                    ${mapped.length ? `<div style="margin-top:6px;border-top:1px solid var(--border-color);padding-top:6px;">
-                        ${mapped.map(m => `<div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;margin-top:3px;">
-                            <span style="color:#a78bfa;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">→ ${esc(m.name)}</span>
-                            <button class="channel-btn danger" onclick="unmapMcpTool('${esc(m.name)}')" title="取消映射"><i class="fa-solid fa-unlink"></i></button>
-                        </div>`).join('')}
-                    </div>` : ''}
-                    ${disc.length ? `<div style="margin-top:8px;border-top:1px solid var(--border-color);padding-top:8px;">
-                        ${disc.map(t => {
-                            const isMapped = mapped.find(m => m.tool === t.name);
-                            return `<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:4px;">
-                            <span style="font-size:11px;color:var(--text-main);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc((t.description || '').slice(0, 300))}">${esc(t.name)}</span>
-                            ${isMapped ? '<span style="font-size:10px;color:#4ade80;">已映射</span>' : `<button class="channel-btn save" onclick="mapMcpTool('${esc(s.name)}','${esc(t.name)}')" title="映射为本地工具"><i class="fa-solid fa-link"></i></button>`}
-                        </div>`;
-                        }).join('')}
-                    </div>` : '<div style="font-size:11px;color:var(--text-dim);margin-top:6px;">点击 <i class="fa-solid fa-magnifying-glass"></i> 扫描可用工具</div>'}
-                </div>`;
-            }).join('');
-        }
-        async function scanMcpServer(name) {
-            try {
-                toast('正在扫描 ' + name + ' 的工具...', 'info');
-                const r = await axios.post(API + '/mcp/scan', { server: name });
-                state.mcpDiscovered[name] = r.data.tools || [];
-                renderMcpServers();
-                toast('扫描完成: 发现 ' + state.mcpDiscovered[name].length + ' 个工具', 'success');
-                log('MCP 扫描完成: ' + name + ' 发现 ' + state.mcpDiscovered[name].length + ' 个工具', 'success');
-            } catch (e) {
-                toast('扫描失败: ' + (e.response?.data?.error || e.message), 'error');
-                log('MCP 扫描失败: ' + (e.message || e), 'error');
-            }
-        }
-        async function mapMcpTool(server, tool) {
-            try {
-                const disc = (state.mcpDiscovered[server] || []).find(t => t.name === tool);
-                let name = tool;
-                const conflict = state.tools.find(t => t.name === name);
-                if (conflict) name = server + '-' + tool;
-                const r = await axios.post(API + '/mcp/map', {
-                    server, tool, name,
-                    description: disc ? (disc.description || `MCP 工具 ${server}::${tool}`) : `MCP 工具 ${server}::${tool}`,
-                    schema: disc ? (disc.inputSchema || {}) : {}
-                });
-                toast(`工具 ${tool} 已映射为 ${name}`, 'success');
-                await loadMcp();
-                await loadTools();
-            } catch (e) {
-                toast('映射失败: ' + (e.response?.data?.error || e.message), 'error');
-                log('MCP 映射失败: ' + (e.message || e), 'error');
-            }
-        }
-        async function unmapMcpTool(name) {
-            try {
-                await axios.post(API + '/mcp/unmap', { name });
-                toast(`已取消映射 ${name}`, 'success');
-                await loadMcp();
-                await loadTools();
-            } catch (e) {
-                toast('取消映射失败: ' + (e.response?.data?.error || e.message), 'error');
-            }
-        }
-        async function deleteMcpServer(name) {
-            if (!confirm(`确定删除 MCP 服务器 ${name}？其所有映射工具将一并移除。`)) return;
-            try {
-                await axios.post(API + '/mcp/delete', { name });
-                delete state.mcpDiscovered[name];
-                toast('已删除服务器 ' + name, 'success');
-                await loadMcp();
-                await loadTools();
-            } catch (e) {
-                toast('删除失败: ' + (e.response?.data?.error || e.message), 'error');
-            }
-        }
-        function addMcpServerForm() {
-            const container = els.mcpServersList;
-            const addBtn = container.querySelector('.add-mcp-server-btn');
-            if (addBtn) addBtn.remove();
-            const div = document.createElement('div');
-            div.className = 'channel-item';
-            div.style.borderColor = '#6366f1';
-            div.innerHTML = `
-        <div class="channel-item-header"><span class="channel-item-name" style="color:#a5b4fc;">新 MCP 服务器</span></div>
-        <div class="channel-field"><label>名称</label><input type="text" class="mcp-name-new" placeholder="如: fetch (唯一标识)"></div>
-        <div class="channel-field"><label>命令</label><input type="text" class="mcp-cmd-new" placeholder="如: npx / python / uvx"></div>
-        <div class="channel-field"><label>参数 (空格分隔)</label><input type="text" class="mcp-args-new" placeholder='如: -y @modelcontextprotocol/server-fetch'></div>
-        <div class="channel-field"><label>环境变量 (JSON, 可选)</label><input type="text" class="mcp-env-new" placeholder='如: {"API_KEY":"xxx"}'></div>
-        <div class="channel-actions">
-          <button class="channel-btn save" onclick="commitMcpServer()"><i class="fa-solid fa-check"></i> 创建</button>
-          <button class="channel-btn secondary" onclick="renderMcpServers()"><i class="fa-solid fa-times"></i> 取消</button>
-        </div>
-      `;
-            container.insertBefore(div, container.firstChild);
-        }
-        async function commitMcpServer() {
-            const name = document.querySelector('.mcp-name-new')?.value.trim();
-            const command = document.querySelector('.mcp-cmd-new')?.value.trim();
-            const argsStr = document.querySelector('.mcp-args-new')?.value.trim() || '';
-            const envStr = document.querySelector('.mcp-env-new')?.value.trim() || '';
-            if (!name || !command) { toast('名称和命令不能为空', 'error'); return; }
-            if (state.mcpServers.find(s => s.name === name)) { toast('服务器名称已存在', 'error'); return; }
-            let args = [];
-            if (argsStr) {
-                try { args = JSON.parse('[' + argsStr.split(' ').map(a => JSON.stringify(a)).join(',') + ']'); }
-                catch (e) { args = argsStr.split(/\s+/); }
-            }
-            let env = {};
-            if (envStr) {
-                try { env = JSON.parse(envStr); } catch (e) { toast('环境变量 JSON 格式错误', 'error'); return; }
-            }
-            try {
-                const r = await axios.post(API + '/mcp/save', { name, command, args, env });
-                toast('服务器 ' + name + ' 已添加', 'success');
-                await loadMcp();
-            } catch (e) {
-                toast('添加失败: ' + (e.response?.data?.error || e.message), 'error');
-            }
-        }
         async function loadTodos() {
             try { const r = await axios.get(API + '/todos'); state.todos = r.data || []; renderTodos(); } catch (e) { log('加载任务列表失败: ' + (e.message || e), 'error'); }
         }
