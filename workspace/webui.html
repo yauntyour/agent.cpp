@@ -200,6 +200,39 @@
             pointer-events: all;
         }
 
+        /* 扫码登录弹窗（居中模态） */
+        .qr-modal {
+            position: fixed;
+            inset: 0;
+            z-index: 60;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
+        }
+        .qr-modal.open {
+            pointer-events: all;
+        }
+        .qr-modal-box {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-lg);
+            width: 340px;
+            max-width: 92vw;
+            max-height: 88vh;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            transform: scale(0.92);
+            opacity: 0;
+            transition: transform var(--transition-smooth), opacity var(--transition-smooth);
+        }
+        .qr-modal.open .qr-modal-box {
+            transform: scale(1);
+            opacity: 1;
+        }
+
         /* 侧边栏 */
         .sidebar-header {
             padding: 14px 14px 12px;
@@ -2333,6 +2366,20 @@
                 <div style="padding:40px 20px;text-align:center;color:var(--text-dim);font-size:13px;">加载中...</div>
             </div>
         </aside>
+
+        <!-- 扫码登录弹窗（居中模态） -->
+        <div id="channel-qr-overlay" class="qr-modal">
+            <div class="qr-modal-box">
+                <div class="overlay-header">
+                    <h2 id="channel-qr-title">扫码登录</h2>
+                    <button class="icon-btn" id="close-channel-qr-btn" style="font-size:16px;"><i
+                            class="fa-solid fa-times"></i></button>
+                </div>
+                <div class="overlay-body" id="channel-qr-overlay-body">
+                    <div style="padding:40px 20px;text-align:center;color:var(--text-dim);font-size:13px;">加载中...</div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- 加载覆盖层 -->
@@ -2391,6 +2438,8 @@
             settingsOverlay: $('#settings-overlay'), overlayBackdrop: $('#overlay-backdrop'),
             statsOverlay: $('#stats-overlay'), statsOverlayBody: $('#stats-overlay-body'),
             channelOverlay: $('#channel-overlay'), channelOverlayBody: $('#channel-overlay-body'),
+            channelQrOverlay: $('#channel-qr-overlay'), channelQrOverlayBody: $('#channel-qr-overlay-body'),
+            closeChannelQrBtn: $('#close-channel-qr-btn'),
             closeStatsBtn: $('#close-stats-btn'), closeChannelBtn: $('#close-channel-btn'),
             fileBrowserBtn: $('#file-browser-btn'),
             themeToggleBtn: $('#theme-toggle-btn'),
@@ -2462,6 +2511,7 @@
             els.statsOverlay.classList.remove('open');
             els.channelOverlay.classList.remove('open');
             els.overlayBackdrop.classList.remove('show');
+            closeChannelQrLogin();
         }
         els.settingsGearBtn.onclick = openOverlay;
         els.closeSettingsBtn.onclick = () => {
@@ -2484,6 +2534,7 @@
             renderChannels();
             renderSessions();
         };
+        els.closeChannelQrBtn.onclick = closeChannelQrLogin;
         els.overlayBackdrop.onclick = closeOverlay;
 
         // 覆盖层标签切换
@@ -2559,6 +2610,61 @@
             els.overlayBackdrop.classList.add('show');
             renderChannelManager();
         }
+
+        // ============ 扫码登录弹窗 ============
+        let qrLoginChannel = null;
+        let qrLoginTimer = null;
+        let qrAutoCloseTimer = null;
+
+        // 请求启动频道 Bot（若未运行）并弹出扫码登录窗口
+        async function requestChannelQr(name) {
+            try {
+                await axios.post(API + '/channel/start', { name });
+            } catch (e) { /* 忽略：未启动时弹窗也会显示状态 */ }
+            openChannelQrLogin(name);
+        }
+        function openChannelQrLogin(name) {
+            qrLoginChannel = name;
+            const title = document.getElementById('channel-qr-title');
+            if (title) title.textContent = name + ' 扫码登录';
+            els.channelQrOverlay.classList.add('open');
+            els.overlayBackdrop.classList.add('show');
+            stopQrLoginPoll();
+            qrLoginTimer = setInterval(refreshQrLoginPanel, 2000);
+            refreshQrLoginPanel();
+        }
+        function closeChannelQrLogin() {
+            qrLoginChannel = null;
+            stopQrLoginPoll();
+            if (qrAutoCloseTimer) { clearTimeout(qrAutoCloseTimer); qrAutoCloseTimer = null; }
+            els.channelQrOverlay.classList.remove('open');
+            if (!els.settingsOverlay.classList.contains('open') && !els.statsOverlay.classList.contains('open') && !els.channelOverlay.classList.contains('open')) {
+                els.overlayBackdrop.classList.remove('show');
+            }
+        }
+        function stopQrLoginPoll() {
+            if (qrLoginTimer) { clearInterval(qrLoginTimer); qrLoginTimer = null; }
+        }
+        async function refreshQrLoginPanel() {
+            const body = els.channelQrOverlayBody;
+            if (!qrLoginChannel || !body) return;
+            try {
+                const d = (await axios.get(API + '/channel/qr/' + encodeURIComponent(qrLoginChannel))).data;
+                const stateText = d.state || 'idle';
+                let html = '';
+                html += `<div class="channel-hint" style="margin-top:6px;"><i class="fa-solid fa-qrcode" style="margin-right:4px;"></i>机器人状态：<b>${esc(stateText)}</b>${d.running ? '（运行中）' : '（未运行）'}</div>`;
+                if (d.qr_svg && stateText === 'waiting_qr') {
+                    html += `<div style="text-align:center;margin-top:10px;"><img src="data:image/svg+xml;base64,${d.qr_svg}" style="width:240px;height:240px;background:#fff;padding:8px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.25);" alt="登录二维码"><div style="font-size:11px;color:var(--text-dim);margin-top:6px;">请使用微信扫码登录</div></div>`;
+                }
+                if (d.detail) html += `<div style="font-size:12px;color:var(--text-muted);margin-top:8px;">${esc(d.detail)}</div>`;
+                if (d.qr_url && stateText === 'waiting_qr') html += `<div style="font-size:11px;color:var(--text-dim);word-break:break-all;margin-top:4px;">备用链接：${esc(d.qr_url)}</div>`;
+                if (stateText === 'running') {
+                    html = `<div style="text-align:center;padding:20px 10px;"><div style="font-size:38px;color:#4ade80;"><i class="fa-solid fa-circle-check"></i></div><div style="font-size:14px;color:var(--text-main);margin-top:8px;">登录成功，机器人已运行</div><div style="font-size:11px;color:var(--text-dim);margin-top:4px;">窗口即将自动关闭</div></div>`;
+                    if (!qrAutoCloseTimer) qrAutoCloseTimer = setTimeout(() => { if (qrLoginChannel) closeChannelQrLogin(); }, 1500);
+                }
+                body.innerHTML = html;
+            } catch (e) { /* 忽略轮询错误 */ }
+        }
         function renderChannelManager() {
             const container = els.channelOverlayBody;
             let html = '';
@@ -2605,6 +2711,7 @@
             </div>
             <div class="channel-actions">
               <button class="channel-btn save" onclick="saveChannel(${idx})"><i class="fa-solid fa-check"></i> 更新</button>
+              <button class="channel-btn secondary" onclick="requestChannelQr('${esc(c.name)}')" title="显示扫码登录/运行状态"><i class="fa-solid fa-qrcode"></i> 扫码登录</button>
             </div>
           </div>
         `}).join('');
@@ -2667,6 +2774,10 @@
             state.settings.channels.push({ name, path, status, user_count: 1, config: {} });
             toast('频道已添加', 'success');
             renderChannelManager();
+            // 新建即启用的频道 → 弹出扫码登录窗口
+            if (status === 'active') {
+                requestChannelQr(name);
+            }
         }
         function saveChannel(idx) {
             const item = els.channelOverlayBody.querySelector(`[data-idx="${idx}"]`);
@@ -2674,6 +2785,7 @@
             const name = item.querySelector('.ch-name')?.value.trim();
             const path = item.querySelector('.ch-path')?.value.trim();
             const status = item.querySelector('.ch-status')?.value;
+            const oldStatus = state.settings.channels[idx].status;
             if (!name) { toast('频道名称不能为空', 'error'); return; }
             if (state.settings.channels.find((c, i) => c.name === name && i !== idx)) { toast('频道名称已存在', 'error'); return; }
 
@@ -2711,6 +2823,10 @@
 
             toast('频道已更新', 'success');
             renderChannelManager();
+            // 频道被启用 → 弹出扫码登录窗口
+            if (status === 'active' && oldStatus !== 'active') {
+                requestChannelQr(name);
+            }
         }
         function deleteChannel(idx) {
             if (!confirm('确定删除此频道？')) return;

@@ -14,6 +14,7 @@
 #include "servic.cpp/servic.hpp"
 #include "servic.cpp/router/router.hpp"
 #include "agent.hpp"
+#include "bot.hpp"
 #include "servic.cpp/tiny_sha.h"
 
 using json = nlohmann::json;
@@ -530,6 +531,11 @@ namespace app
         int handle_channel_token_set(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
         int handle_channel_token_get(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
 
+        // ——— 内置 Bot 状态 / 登录二维码 ———
+        int handle_channel_qr(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+        int handle_channel_status(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+        int handle_channel_start(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+
         int handle_tools_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
 
         int handle_todos_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
@@ -580,6 +586,9 @@ namespace app
             router.on("/api/channels", handle_channels_list);
             router.on("/api/channel/token", handle_channel_token_set);       // POST — 加密存储
             router.on("/api/channel/token/:name", handle_channel_token_get); // GET — 解密读取
+            router.on("/api/channel/qr/:name", handle_channel_qr);           // GET — 登录二维码/状态
+            router.on("/api/channel/status", handle_channel_status);         // GET — 全部 Bot 状态
+            router.on("/api/channel/start", handle_channel_start);           // POST — 运行时启动指定频道 Bot
             router.on("/api/tools", handle_tools_list);
             router.on("/api/tools/toggle", handle_tools_toggle);
             router.on("/api/fs/list", handle_fs_list);
@@ -1294,6 +1303,74 @@ namespace app
             catch (const std::exception &e)
             {
                 webui_log("ERROR", "handle_channel_token_get", e.what());
+                output = build_http_response(500, "application/json", json{{"error", e.what()}}.dump());
+                return rt::FLAG_ERROR;
+            }
+        }
+
+        // GET /api/channel/qr/:name → {name, state, detail, qr_svg(base64), qr_url, running}
+        int handle_channel_qr(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+        {
+            try
+            {
+                auto it = params.find("name");
+                std::string name = (it != params.end()) ? it->second : "";
+                if (name.empty())
+                {
+                    output = build_http_response(400, "application/json", R"({"error":"missing name"})");
+                    return rt::FLAG_ERROR;
+                }
+                output = build_http_response(200, "application/json", bot::channel_qr_json(name).dump());
+                return rt::FLAG_DONE;
+            }
+            catch (const std::exception &e)
+            {
+                webui_log("ERROR", "handle_channel_qr", e.what());
+                output = build_http_response(500, "application/json", json{{"error", e.what()}}.dump());
+                return rt::FLAG_ERROR;
+            }
+        }
+
+        // GET /api/channel/status → 全部内置 Bot 运行状态
+        int handle_channel_status(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+        {
+            try
+            {
+                output = build_http_response(200, "application/json", bot::channel_status_json().dump());
+                return rt::FLAG_DONE;
+            }
+            catch (const std::exception &e)
+            {
+                webui_log("ERROR", "handle_channel_status", e.what());
+                output = build_http_response(500, "application/json", json{{"error", e.what()}}.dump());
+                return rt::FLAG_ERROR;
+            }
+        }
+
+        // POST /api/channel/start  body: {"name":"WeChat"}
+        // 运行时按 settings.json channels 配置拉起指定频道的内置 Bot
+        int handle_channel_start(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+        {
+            try
+            {
+                size_t header_end = input.find("\r\n\r\n");
+                std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
+                json req = json::parse(body);
+                std::string name = req.value("name", "");
+                if (name.empty())
+                {
+                    output = build_http_response(400, "application/json", R"({"error":"missing name"})");
+                    return rt::FLAG_ERROR;
+                }
+                bool started = bot::start_channel(name);
+                json out = bot::channel_qr_json(name);
+                out["started"] = started;
+                output = build_http_response(200, "application/json", out.dump());
+                return rt::FLAG_DONE;
+            }
+            catch (const std::exception &e)
+            {
+                webui_log("ERROR", "handle_channel_start", e.what());
                 output = build_http_response(500, "application/json", json{{"error", e.what()}}.dump());
                 return rt::FLAG_ERROR;
             }
@@ -2029,6 +2106,9 @@ int main(int argc, char *argv[])
         boost::asio::io_context io_context;
         rt::router router;
         app::server::register_routes(router);
+
+        // 启动内置 Telegram / WeChat 机器人（按 settings.json channels 配置）
+        bot::start_channels();
 
         std::cout << "http://localhost:" << port << std::endl;
         servic::Server server(io_context, port);
