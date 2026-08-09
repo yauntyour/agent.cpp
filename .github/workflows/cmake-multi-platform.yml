@@ -107,6 +107,12 @@ jobs:
         shell: bash
         run: cmake --build build --config Release --parallel
 
+      # ---------- 安装 ----------
+      - name: Install (staging)
+        if: runner.os != 'Linux'
+        shell: bash
+        run: cmake --install build --prefix install
+
       # ---------- 验证零依赖 ----------
       - name: Verify zero dependencies (Linux)
         if: runner.os == 'Linux'
@@ -146,12 +152,6 @@ jobs:
           else
             echo "OK: Windows executable has no external runtime DLL dependencies"
           fi
-
-      # ---------- 安装 ----------
-      - name: Install (staging)
-        if: runner.os != 'Linux'
-        shell: bash
-        run: cmake --install build --prefix install
 
       # ---------- 打包 ----------
       - name: Package with CPack (Windows MSYS2)
