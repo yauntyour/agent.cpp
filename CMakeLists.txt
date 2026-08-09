@@ -5,59 +5,169 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# ============================================================
+# 0 依赖构建开关（默认开启，面向 CI 云编译发布产物）
+#   ON  : 静态链接所有第三方库，产出无需任何额外运行库的可执行文件
+#         - Linux   : 全静态 musl 二进制（CI 内使用 Alpine 容器构建）
+#         - Windows : 全静态 MinGW exe（无任何 DLL 依赖）
+#         - macOS   : 静态链接 curl/libsodium，仅依赖苹果系统自带库
+#   OFF : 动态链接系统库（本地开发调试用）
+# ============================================================
+option(STATIC_BUILD "Build a fully static, zero-runtime-dependency executable" ON)
+
 # 统一输出目录
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
-# 查找 CURL
-find_package(CURL REQUIRED)
-
-# 查找 libsodium
 include(FetchContent)
 
-find_package(PkgConfig QUIET)
-if(PkgConfig_FOUND)
-    pkg_check_modules(SODIUM QUIET libsodium)
-endif()
-if(NOT SODIUM_FOUND)
-    find_package(Sodium CONFIG QUIET)
-endif()
+# ---------- libcurl ----------
+if(STATIC_BUILD)
+    # 只搜索静态库，避免误链到动态库导致运行期依赖
+    if(NOT APPLE)
+        set(CMAKE_FIND_LIBRARY_SUFFIXES .a)
+    endif()
 
-# 始终通过 find_library 获取完整路径，避免 macOS 上 -lsodium 找不到库的问题
-set(_sodium_hints
-    ${SODIUM_LIBRARY_DIRS}
-    ${MSYS2_DIR}/mingw64/lib
-    /mingw64/lib
-    /opt/homebrew/lib
-    /usr/local/lib
-    /usr/lib
-    /usr/lib/x86_64-linux-gnu
-)
-find_library(SODIUM_LIBRARY sodium HINTS ${_sodium_hints})
-
-set(_sodium_include_hints
-    ${SODIUM_INCLUDE_DIRS}
-    ${MSYS2_DIR}/mingw64/include
-    /mingw64/include
-    /opt/homebrew/include
-    /usr/local/include
-    /usr/include
-)
-find_path(SODIUM_INCLUDE_DIR sodium.h HINTS ${_sodium_include_hints})
-
-if(SODIUM_LIBRARY AND SODIUM_INCLUDE_DIR)
-    set(SODIUM_INCLUDE_DIRS ${SODIUM_INCLUDE_DIR})
-    set(SODIUM_LIBRARIES ${SODIUM_LIBRARY})
-    message(STATUS "Found libsodium: ${SODIUM_LIBRARY}")
-else()
-    message(STATUS "libsodium not found on system, building from source via FetchContent")
+    # 从源码静态构建 libcurl（curl 8.12.1），按平台选择原生 TLS 后端：
+    #   macOS  -> SecureTransport（系统钥匙串，零额外依赖）
+    #   Windows-> Schannel（Windows 证书库，零额外依赖）
+    #   Linux  -> OpenSSL（CI 中为 Alpine 静态 musl 构建）
+    # 注意：curl 子项目的选项都是 CACHE 变量，必须用 CACHE+FORCE 传入才会生效
+    set(BUILD_CURL_EXE OFF CACHE BOOL "" FORCE)
+    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(CURL_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
+    set(CURL_ENABLE_EXPORT_TARGET OFF CACHE BOOL "" FORCE)
+    set(HTTP_ONLY ON CACHE BOOL "" FORCE)
+    set(CURL_USE_OPENSSL OFF CACHE BOOL "" FORCE)
+    set(CURL_BROTLI OFF CACHE STRING "" FORCE)
+    set(CURL_ZSTD OFF CACHE STRING "" FORCE)
+    set(CURL_ZLIB OFF CACHE STRING "" FORCE)
+    set(USE_LIBIDN2 OFF CACHE BOOL "" FORCE)
+    set(CURL_USE_LIBPSL OFF CACHE BOOL "" FORCE)
+    set(CURL_USE_LIBSSH2 OFF CACHE BOOL "" FORCE)
+    set(CURL_USE_LIBSSH OFF CACHE BOOL "" FORCE)
+    set(CURL_USE_GSASL OFF CACHE BOOL "" FORCE)
+    set(CURL_USE_GSSAPI OFF CACHE BOOL "" FORCE)
+    set(CURL_USE_LIBUV OFF CACHE BOOL "" FORCE)
+    set(USE_NGHTTP2 OFF CACHE BOOL "" FORCE)
+    set(ENABLE_ARES OFF CACHE BOOL "" FORCE)
+    if(APPLE)
+        set(CURL_USE_SECTRANSP ON CACHE BOOL "" FORCE)
+    elseif(WIN32)
+        set(CURL_USE_SCHANNEL ON CACHE BOOL "" FORCE)
+    else()
+        set(CURL_USE_OPENSSL ON CACHE BOOL "" FORCE)
+        set(CURL_ZLIB ON CACHE STRING "" FORCE)
+    endif()
     FetchContent_Declare(
-        libsodium
-        GIT_REPOSITORY https://github.com/jedisct1/libsodium.git
-        GIT_TAG 1.0.20-RELEASE
+        curl
+        GIT_REPOSITORY https://github.com/curl/curl.git
+        GIT_TAG curl-8_12_1
+        GIT_SHALLOW TRUE
     )
-    FetchContent_MakeAvailable(libsodium)
+    FetchContent_MakeAvailable(curl)
+
+    # curl 8.12 的静态库目标把依赖以 PRIVATE 方式链接，
+    # 这里为最终可执行文件补充各平台所需的传递依赖库
+    set(CURL_EXTRA_LIBS "")
+    if(APPLE)
+        set(CURL_EXTRA_LIBS
+            "-framework Security"
+            "-framework CoreFoundation"
+            "-framework CoreServices"
+            "-framework SystemConfiguration"
+        )
+    elseif(WIN32)
+        set(CURL_EXTRA_LIBS bcrypt crypt32 advapi32 secur32 iphlpapi)
+    else()
+        set(CURL_EXTRA_LIBS ssl crypto z)
+    endif()
+else()
+    find_package(CURL REQUIRED)
+endif()
+
+# ---------- libsodium ----------
+if(STATIC_BUILD)
+    if(APPLE)
+        # macOS 无打包好的静态 libsodium，直接从源码构建
+        message(STATUS "libsodium: building static from source via FetchContent")
+        set(BUILD_SHARED_LIBS OFF)
+        FetchContent_Declare(
+            libsodium
+            GIT_REPOSITORY https://github.com/jedisct1/libsodium.git
+            GIT_TAG 1.0.20-RELEASE
+            GIT_SHALLOW TRUE
+        )
+        FetchContent_MakeAvailable(libsodium)
+        set(SODIUM_LIBRARIES "")
+    else()
+        # 优先使用系统静态库（Alpine libsodium-static / MSYS2 libsodium），
+        # 找不到时退回源码构建
+        find_library(SODIUM_LIBRARY sodium)
+        find_path(SODIUM_INCLUDE_DIR sodium.h)
+        if(SODIUM_LIBRARY AND SODIUM_INCLUDE_DIR)
+            message(STATUS "Found static libsodium: ${SODIUM_LIBRARY}")
+            set(SODIUM_INCLUDE_DIRS ${SODIUM_INCLUDE_DIR})
+            set(SODIUM_LIBRARIES ${SODIUM_LIBRARY})
+        else()
+            message(STATUS "libsodium not found on system, building from source via FetchContent")
+            FetchContent_Declare(
+                libsodium
+                GIT_REPOSITORY https://github.com/jedisct1/libsodium.git
+                GIT_TAG 1.0.20-RELEASE
+                GIT_SHALLOW TRUE
+            )
+            FetchContent_MakeAvailable(libsodium)
+            set(SODIUM_LIBRARIES "")
+        endif()
+    endif()
+else()
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(SODIUM QUIET libsodium)
+    endif()
+    if(NOT SODIUM_FOUND)
+        find_package(Sodium CONFIG QUIET)
+    endif()
+
+    # 始终通过 find_library 获取完整路径，避免 macOS 上 -lsodium 找不到库的问题
+    set(_sodium_hints
+        ${SODIUM_LIBRARY_DIRS}
+        ${MSYS2_DIR}/mingw64/lib
+        /mingw64/lib
+        /opt/homebrew/lib
+        /usr/local/lib
+        /usr/lib
+        /usr/lib/x86_64-linux-gnu
+    )
+    find_library(SODIUM_LIBRARY sodium HINTS ${_sodium_hints})
+
+    set(_sodium_include_hints
+        ${SODIUM_INCLUDE_DIRS}
+        ${MSYS2_DIR}/mingw64/include
+        /mingw64/include
+        /opt/homebrew/include
+        /usr/local/include
+        /usr/include
+    )
+    find_path(SODIUM_INCLUDE_DIR sodium.h HINTS ${_sodium_include_hints})
+
+    if(SODIUM_LIBRARY AND SODIUM_INCLUDE_DIR)
+        set(SODIUM_INCLUDE_DIRS ${SODIUM_INCLUDE_DIR})
+        set(SODIUM_LIBRARIES ${SODIUM_LIBRARY})
+        message(STATUS "Found libsodium: ${SODIUM_LIBRARY}")
+    else()
+        message(STATUS "libsodium not found on system, building from source via FetchContent")
+        FetchContent_Declare(
+            libsodium
+            GIT_REPOSITORY https://github.com/jedisct1/libsodium.git
+            GIT_TAG 1.0.20-RELEASE
+        )
+        FetchContent_MakeAvailable(libsodium)
+        set(SODIUM_LIBRARIES "")
+    endif()
 endif()
 
 # ---------- Boost (header-only) ----------
@@ -79,17 +189,35 @@ add_executable(app
 
 # 链接库
 target_link_libraries(app PRIVATE
-    CURL::libcurl
     Boost::boost
     nlohmann_json::nlohmann_json
 )
-if(SODIUM_LIBRARIES)
-    target_link_libraries(app PRIVATE ${SODIUM_LIBRARIES})
-    if(SODIUM_INCLUDE_DIRS)
+
+if(STATIC_BUILD)
+    target_link_libraries(app PRIVATE CURL::libcurl ${CURL_EXTRA_LIBS})
+
+    if(SODIUM_LIBRARIES)
+        target_link_libraries(app PRIVATE ${SODIUM_LIBRARIES})
         target_include_directories(app PRIVATE ${SODIUM_INCLUDE_DIRS})
+    elseif(TARGET sodium)
+        target_link_libraries(app PRIVATE sodium)
     endif()
-elseif(TARGET sodium)
-    target_link_libraries(app PRIVATE sodium)
+
+    # 完全静态链接（Linux musl / Windows MinGW），产出零依赖二进制
+    if(WIN32 OR (UNIX AND NOT APPLE))
+        target_link_options(app PRIVATE -static)
+    endif()
+else()
+    target_link_libraries(app PRIVATE CURL::libcurl)
+
+    if(SODIUM_LIBRARIES)
+        target_link_libraries(app PRIVATE ${SODIUM_LIBRARIES})
+        if(SODIUM_INCLUDE_DIRS)
+            target_include_directories(app PRIVATE ${SODIUM_INCLUDE_DIRS})
+        endif()
+    elseif(TARGET sodium)
+        target_link_libraries(app PRIVATE sodium)
+    endif()
 endif()
 
 if(WIN32)

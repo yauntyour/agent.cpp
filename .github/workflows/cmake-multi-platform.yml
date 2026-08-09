@@ -41,23 +41,37 @@ jobs:
         with:
           submodules: recursive
 
-      # ---------- Linux 依赖 ----------
-      - name: Install dependencies (Linux)
+      # ---------- Linux: Alpine (musl) 容器内全静态编译 ----------
+      # 产出完全静态链接的 ELF 二进制，不依赖 glibc/curl/libsodium 等任何系统库
+      - name: Build fully static (Linux, Alpine musl)
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libcurl4-openssl-dev libboost-dev libsodium-dev
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:/work" -w /work \
+            alpine:3.20 /bin/sh -c '
+            set -ex
+            apk add --no-cache \
+              build-base cmake ninja-build git \
+              boost-dev \
+              libsodium-dev libsodium-static \
+              openssl-dev openssl-libs-static zlib-dev zlib-static \
+              ca-certificates-bundle
+            cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSTATIC_BUILD=ON
+            cmake --build build --parallel
+            cmake --install build --prefix install
+            cd build && cpack -G TGZ
+            '
 
       # ---------- macOS 依赖 ----------
+      # curl/libsodium 由 CMake 从源码静态构建（SecureTransport），无需系统库
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
           brew update
-          brew install cmake ninja curl boost libsodium pkg-config
-          brew --prefix libsodium
-          ls -la $(brew --prefix libsodium)/lib/ || true
+          brew install cmake ninja
 
       # ---------- Windows (MSYS2) 依赖 ----------
+      # curl 由 CMake 从源码静态构建（Schannel），无需 mingw 版 curl
       - name: Setup MSYS2 and install dependencies (Windows)
         if: runner.os == 'Windows'
         uses: msys2/setup-msys2@v2
@@ -65,29 +79,22 @@ jobs:
           msystem: MINGW64
           update: true
           install: >-
+            git
             mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja
-            mingw-w64-x86_64-curl mingw-w64-x86_64-boost mingw-w64-x86_64-libsodium
+            mingw-w64-x86_64-boost mingw-w64-x86_64-libsodium
 
       # ---------- CMake 配置 ----------
       - name: Configure CMake (Windows MSYS2)
         if: runner.os == 'Windows'
         shell: msys2 {0}
         run: |
-          mkdir build
-          cd build
-          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSTATIC_BUILD=ON
 
-      - name: Configure CMake (Unix)
-        if: runner.os != 'Windows'
+      - name: Configure CMake (macOS)
+        if: runner.os == 'macOS'
         shell: bash
         run: |
-          mkdir build
-          cd build
-          EXTRA_FLAGS=""
-          if [ "$RUNNER_OS" = "macOS" ]; then
-            EXTRA_FLAGS="-DCMAKE_PREFIX_PATH=$(brew --prefix)"
-          fi
-          cmake .. -DCMAKE_BUILD_TYPE=Release $EXTRA_FLAGS
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSTATIC_BUILD=ON
 
       # ---------- 编译 ----------
       - name: Build (Windows MSYS2)
@@ -95,13 +102,54 @@ jobs:
         shell: msys2 {0}
         run: cmake --build build --parallel
 
-      - name: Build (Unix)
-        if: runner.os != 'Windows'
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
         shell: bash
         run: cmake --build build --config Release --parallel
 
+      # ---------- 验证零依赖 ----------
+      - name: Verify zero dependencies (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          file install/app
+          ldd install/app || true
+          if file install/app | grep -q "statically linked"; then
+            echo "OK: Linux binary is fully static"
+          else
+            echo "FAIL: Linux binary is NOT fully static"
+            exit 1
+          fi
+
+      - name: Verify zero dependencies (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          otool -L install/app
+          EXTRA=$(otool -L install/app | tail -n +2 | grep -oE '^\s*/[^ ]+' | grep -vE '^/usr/lib/|^/System/Library/' || true)
+          if [ -z "$EXTRA" ]; then
+            echo "OK: macOS binary only uses Apple system libraries"
+          else
+            echo "FAIL: unexpected dynamic dependencies:"
+            echo "$EXTRA"
+            exit 1
+          fi
+
+      - name: Verify zero dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          objdump -p install/app.exe | grep "DLL Name" || echo "(no DLL imports at all)"
+          if objdump -p install/app.exe | grep "DLL Name" | grep -iE "curl|sodium|ssl|crypto|stdc|gcc|winpthread|zlib|brotli|zstd|nghttp|idn|psl|ssh|iconv|intl"; then
+            echo "FAIL: executable imports non-Windows runtime DLLs"
+            exit 1
+          else
+            echo "OK: Windows executable has no external runtime DLL dependencies"
+          fi
+
       # ---------- 安装 ----------
       - name: Install (staging)
+        if: runner.os != 'Linux'
         shell: bash
         run: cmake --install build --prefix install
 
@@ -113,8 +161,8 @@ jobs:
           cd build
           cpack -G ZIP
 
-      - name: Package with CPack (Unix)
-        if: runner.os != 'Windows'
+      - name: Package with CPack (macOS)
+        if: runner.os == 'macOS'
         shell: bash
         run: |
           cd build
