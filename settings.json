@@ -1,13 +1,12 @@
 {
     "agent_name": "assistant",
+    "auto_summary_threshold": 0,
     "channels": [
         {
             "config": {
-                "backend_url": "http://127.0.0.1:8080/api/input",
                 "model": "default",
                 "proxy": "http://127.0.0.1:10809",
-                "think": false,
-                "timeout": 600
+                "think": false
             },
             "name": "Telegram",
             "path": "sys/tg_bot.py",
@@ -16,11 +15,9 @@
         },
         {
             "config": {
-                "backend_url": "http://127.0.0.1:8080/api/input",
                 "ilink_base": "https://ilinkai.weixin.qq.com",
                 "model": "default",
-                "think": false,
-                "timeout": 600
+                "think": false
             },
             "name": "WeChat",
             "path": "sys/wx_bot.py",
@@ -47,6 +44,5 @@
     ],
     "stream": true,
     "user_name": "Yauntyours",
-    "webui_password": "",
     "workspace": "./workspace/"
 }

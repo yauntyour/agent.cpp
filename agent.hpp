@@ -2706,6 +2706,14 @@ namespace LLMProviders
 #include <iomanip>
 #include <algorithm>
 
+// 前向声明：频道消息聊天处理器（定义于 app.cpp）。
+// bot 线程直接把消息上下文交给进程内 Channel 处理（不再 HTTP 自请求主线程），
+// 频道会话与会话列表/WebUI 共用 run_unit::agent_session_manager。
+namespace app
+{
+    nlohmann::json channel_chat(const nlohmann::json &request);
+}
+
 namespace bot
 {
     using json = nlohmann::json;
@@ -3520,18 +3528,6 @@ namespace bot
     }
 
     // ════════════════════════════════════════════════════════════════
-    // 后端调用（agent.cpp /api/input）
-    // ════════════════════════════════════════════════════════════════
-    inline json call_backend(const std::string &backend_url, const json &req_data, long timeout)
-    {
-        HttpResp resp = http_post(backend_url, req_data.dump(), timeout,
-                                  {{"Content-Type", "application/json"}});
-        if (resp.status != 200)
-            throw std::runtime_error("backend HTTP " + std::to_string(resp.status));
-        return json::parse(resp.body);
-    }
-
-    // ════════════════════════════════════════════════════════════════
     // Telegram Bot
     // ════════════════════════════════════════════════════════════════
     namespace tg
@@ -3635,10 +3631,8 @@ namespace bot
             return;
         }
         std::string proxy = cfg.value("proxy", "");
-        long timeout = cfg.value("timeout", 600);
         bool think = cfg.value("think", false);
         std::string model = cfg.value("model", "default");
-        std::string backend_url = cfg.value("backend_url", "http://127.0.0.1:8080/api/input");
         std::string channel_name = cfg.value("channel", "Telegram");
 
         update_status(name, true, "running", "长轮询中");
@@ -3731,11 +3725,11 @@ namespace bot
                     json data_resp;
                     try
                     {
-                        data_resp = call_backend(backend_url, req, timeout);
+                        data_resp = app::channel_chat(req);
                     }
                     catch (const std::exception &e)
                     {
-                        std::cerr << "[" << name << "] backend error: " << e.what() << std::endl;
+                        std::cerr << "[" << name << "] channel_chat error: " << e.what() << std::endl;
                         try
                         {
                             tg::send_message(token, chat_id, "连接丢失了嘤嘤嘤~", proxy);
@@ -4253,11 +4247,9 @@ namespace bot
     inline void wx_worker(json cfg, const std::string &name)
     {
         std::string ilink_base = cfg.value("ilink_base", "https://ilinkai.weixin.qq.com");
-        long timeout = cfg.value("timeout", 600);
         bool think = cfg.value("think", false);
         std::string model = cfg.value("model", "default");
         std::string channel_name = cfg.value("channel", "WeChat");
-        std::string backend_url = cfg.value("backend_url", "http://127.0.0.1:8080/api/input");
 
         std::string token = load_channel_token(name);
         if (token.empty())
@@ -4362,11 +4354,11 @@ namespace bot
                     json data_resp;
                     try
                     {
-                        data_resp = call_backend(backend_url, req, timeout);
+                        data_resp = app::channel_chat(req);
                     }
                     catch (const std::exception &e)
                     {
-                        std::cerr << "[" << name << "] backend error: " << e.what() << std::endl;
+                        std::cerr << "[" << name << "] channel_chat error: " << e.what() << std::endl;
                         try
                         {
                             wx::send_text(ilink_base, hdrs, to_user, ctx_token, "连接丢失了嘤嘤嘤~");

@@ -30,11 +30,9 @@ namespace app
     "channels": [
         {
             "config": {
-                "backend_url": "http://127.0.0.1:8080/api/input",
                 "model": "default",
                 "proxy": "http://127.0.0.1:10809",
-                "think": false,
-                "timeout": 600
+                "think": false
             },
             "name": "Telegram",
             "path": "sys/tg_bot.py",
@@ -43,11 +41,9 @@ namespace app
         },
         {
             "config": {
-                "backend_url": "http://127.0.0.1:8080/api/input",
                 "ilink_base": "https://ilinkai.weixin.qq.com",
                 "model": "default",
-                "think": false,
-                "timeout": 600
+                "think": false
             },
             "name": "WeChat",
             "path": "sys/wx_bot.py",
@@ -115,6 +111,11 @@ namespace app
         }
     }
     static std::string tools_list_str; // 工具列表的字符串表示
+
+    // 全局聊天互斥锁：频道 bot 线程（tg_worker / wx_worker）现在直接进程内调用
+    // channel_chat()，与主线程 HTTP 会话共享 LLM 客户端、会话管理器与工具队列，
+    // 统一串行化这些共享状态的读写，避免并发竞争。
+    static std::mutex chat_mutex;
 
     // ==================== 模型供应商支持 ====================
     enum class ProviderType
@@ -478,6 +479,197 @@ namespace app
         }
         return 0;
     }
+
+    // ════════════════════════════════════════════════════════════════
+    // 频道消息聊天（进程内直连，专用 Channel 处理）
+    // bot 线程把消息上下文直接交给本函数处理（不再 HTTP 自请求主线程），
+    // 使用与 /api/input 相同的会话/上下文/工具循环逻辑。
+    // 频道会话存于 run_unit::agent_session_manager（workspace/sessions/<channel>.json），
+    // 与 WebUI 会话列表共用，可在 WebUI 中查看当前频道聊天。
+    // ════════════════════════════════════════════════════════════════
+    json channel_chat(const json &request)
+    {
+        std::lock_guard<std::mutex> lk(chat_mutex);
+
+        std::string user_message = request["messages"].get<std::string>();
+        std::string model = request.value("model", "default");
+        if (model == "default")
+            model = run_unit::settings["model"].get<std::string>();
+
+        std::string channel;
+        bool think_mode = request.value("think", false);
+        size_t total_prompt_tokens = 0;
+        size_t total_completion_tokens = 0;
+        std::string sid = "";
+        std::shared_ptr<run_unit::SessionContext> session_ptr;
+
+        // 确定会话：频道消息使用以频道名为 key 的专用会话（WebUI 可见）
+        if (request.contains("channel"))
+        {
+            channel = request["channel"].get<std::string>();
+            session_ptr = run_unit::agent_session_manager.get(channel);
+            if (!session_ptr)
+            {
+                session_ptr = run_unit::agent_session_manager.create();
+                run_unit::agent_session_manager.change_session(session_ptr->session_id);
+            }
+        }
+        else if (request.contains("session_id"))
+        {
+            sid = request["session_id"].get<std::string>();
+            session_ptr = run_unit::agent_session_manager.get(sid);
+            if (!session_ptr)
+                throw std::runtime_error("session not found");
+            run_unit::agent_session_manager.change_session(sid);
+        }
+        else
+        {
+            session_ptr = run_unit::agent_session_manager.get_current();
+        }
+
+        // 构建上下文
+        json context = json::array();
+        context.push_back({{"role", "system"}, {"content", system_prompt}});
+        context.push_back({{"role", "system"}, {"content", tools_list_str}});
+
+        if (!session_ptr->is_memory_empty())
+            context.push_back({{"role", "system"}, {"content", session_ptr->memory["abstracts"]}});
+        else
+            for (auto &msg : session_ptr->messages)
+                context.push_back(msg);
+
+        json contents = json::array();
+        if (!channel.empty())
+            contents.push_back({{"type", "text"}, {"text", "Messages received from " + channel + ":" + user_message}});
+        else
+            contents.push_back({{"type", "text"}, {"text", user_message}});
+
+        if (request.contains("images") && request["images"].is_array())
+        {
+            for (auto &img : request["images"])
+                contents.push_back({{"type", "image_url"}, {"image_url", {{"url", img.get<std::string>()}}}});
+        }
+        json user_msg = {{"role", Admin}, {"content", contents}};
+        context.push_back(user_msg);
+        session_ptr->messages.push_back(user_msg);
+
+        // 工具/CS 循环（非流式）
+        json thinkings = json::array();
+        json tools_called_arr = json::array();
+        std::string final_response;
+        size_t max_rounds = run_unit::settings["max_mpc_rounds"].get<size_t>();
+        size_t mpc_count = 0;
+
+        for (; mpc_count < max_rounds; ++mpc_count)
+        {
+            json llm_req = {
+                {"model", model},
+                {"messages", context},
+                {"think", think_mode}};
+
+            json response;
+            if (!client_generate(llm_req, response))
+                throw std::runtime_error("LLM generate failed");
+
+            // 提取 thinking 内容
+            if (think_mode && response["choices"][0]["message"].contains("reasoning_content"))
+            {
+                thinkings.push_back(response["choices"][0]["message"]["reasoning_content"].get<std::string>());
+            }
+
+            // 提取回复文本
+            std::string response_text = response["choices"][0]["message"]["content"].get<std::string>();
+
+            json agent_response = {
+                {"role", run_unit::settings["agent_name"]},
+                {"content", response_text}};
+            context.push_back(agent_response);
+            session_ptr->messages.push_back(agent_response);
+
+            final_response += response_text;
+
+            // 记录 token 用量
+            if (response.contains("usage"))
+            {
+                auto &usage = response["usage"];
+                if (usage.contains("prompt_tokens"))
+                    total_prompt_tokens += usage["prompt_tokens"].get<size_t>();
+                if (usage.contains("completion_tokens"))
+                    total_completion_tokens += usage["completion_tokens"].get<size_t>();
+            }
+
+            // 扫描工具/CS 调用
+            std::string sys_out;
+            auto [tools_called, tools_ok] = tool_unit::tools_scan(response_text, sys_out);
+            auto cs_called = cs_unit::cs_scan(response_text, sys_out);
+
+            // 收集工具调用信息
+            auto tool_tags = extractAllTags(response_text, "tool");
+            auto sys_out_blocks = extractAllTags(sys_out, "system_output");
+
+            for (size_t ti = 0; ti < tool_tags.size(); ti++)
+            {
+                auto [name, args] = parseArgs(tool_tags[ti]);
+                json tool_entry = {
+                    {"name", std::string(name)},
+                    {"args", std::string(args)},
+                    {"round", mpc_count}};
+                if (ti < sys_out_blocks.size())
+                    tool_entry["output"] = std::string(sys_out_blocks[ti]);
+                tools_called_arr.push_back(tool_entry);
+            }
+
+            // 添加工具消息到上下文
+            json sys_contents = json::array();
+            sys_contents.push_back({{"type", "text"}, {"text", sys_out}});
+            if (!tool_unit::image_queue.empty())
+            {
+                for (auto &img : tool_unit::image_queue)
+                    sys_contents.push_back({{"type", "image_url"}, {"image_url", {{"url", img}}}});
+                tool_unit::image_queue.clear();
+            }
+            json sys_msg = {{"role", "tool"}, {"content", sys_contents}};
+            context.push_back(sys_msg);
+            session_ptr->messages.push_back(sys_msg);
+        }
+
+        // 自动触发记忆保存（上下文超过 max_context 时）
+        {
+            size_t ctx_size = session_ptr->messages.dump().size();
+            size_t max_ctx = run_unit::settings["max_context"].get<size_t>();
+            if (ctx_size > max_ctx)
+            {
+                std::cout << "Auto-trigger memory save (context: " << ctx_size << " > max: " << max_ctx << ")" << std::endl;
+                save_memory(session_ptr, model);
+            }
+        }
+
+        // 更新使用统计
+        if (!sid.empty() && run_unit::agent_data_manager.data["usages"].contains(sid))
+        {
+            run_unit::agent_data_manager.data["usages"][sid]["prompt_cost"] = run_unit::agent_data_manager.data["usages"][sid]["prompt_cost"].get<size_t>() + total_prompt_tokens;
+            run_unit::agent_data_manager.data["usages"][sid]["completion_cost"] = run_unit::agent_data_manager.data["usages"][sid]["completion_cost"].get<size_t>() + total_completion_tokens;
+            run_unit::agent_data_manager.data["usages"][sid]["total_cost"] = run_unit::agent_data_manager.data["usages"][sid]["total_cost"].get<size_t>() + total_prompt_tokens + total_completion_tokens;
+        }
+        else if (!sid.empty())
+        {
+            run_unit::agent_data_manager.data["usages"][sid] = {
+                {"prompt_cost", total_prompt_tokens},
+                {"completion_cost", total_completion_tokens},
+                {"total_cost", total_prompt_tokens + total_completion_tokens}};
+        }
+
+        // 构建统一 JSON 响应（与 /api/input 一致）
+        json result = {
+            {"content", final_response},
+            {"thinking", thinkings},
+            {"tools", tools_called_arr},
+            {"rounds", mpc_count},
+            {"usage", {{"prompt_cost", total_prompt_tokens}, {"completion_cost", total_completion_tokens}, {"total_cost", total_prompt_tokens + total_completion_tokens}}}};
+
+        return result;
+    }
+
     namespace server
     {
         std::string build_http_response(int status_code, const std::string &content_type, const std::string &body, bool cors = true)
@@ -643,12 +835,14 @@ namespace app
         }
         int handle_session_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
+            std::lock_guard<std::mutex> lk(chat_mutex);
             json resp = {{"session_list", run_unit::agent_session_manager.list_sessions()}};
             output = build_http_response(200, "application/json", resp.dump());
             return rt::FLAG_DONE;
         }
         int handle_new_session(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
+            std::lock_guard<std::mutex> lk(chat_mutex);
             auto new_session = run_unit::agent_session_manager.create();
             json resp = {{"status", "OK"}, {"session_id", new_session->session_id}};
             output = build_http_response(200, "application/json", resp.dump());
@@ -656,6 +850,7 @@ namespace app
         }
         int handle_session_clear(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
+            std::lock_guard<std::mutex> lk(chat_mutex);
             run_unit::agent_session_manager.clear_current();
             json resp = {{"status", "cleared"}};
             output = build_http_response(200, "application/json", resp.dump());
@@ -663,6 +858,7 @@ namespace app
         }
         int handle_session_delete(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
+            std::lock_guard<std::mutex> lk(chat_mutex);
             try
             {
                 size_t header_end = input.find("\r\n\r\n");
@@ -716,6 +912,7 @@ namespace app
         }
         int handle_session_get_msg(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
+            std::lock_guard<std::mutex> lk(chat_mutex);
             try
             {
                 size_t header_end = input.find("\r\n\r\n");
@@ -752,6 +949,7 @@ namespace app
         }
         int handle_session_memory(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
+            std::lock_guard<std::mutex> lk(chat_mutex);
             try
             {
                 auto session = run_unit::agent_session_manager.get_current();
@@ -770,6 +968,7 @@ namespace app
         }
         int handle_settings(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
+            std::lock_guard<std::mutex> lk(chat_mutex);
             try
             {
                 size_t header_end = input.find("\r\n\r\n");
@@ -807,6 +1006,7 @@ namespace app
         }
         int handle_data(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
+            std::lock_guard<std::mutex> lk(chat_mutex);
             try
             {
                 output = build_http_response(200, "application/json", run_unit::agent_data_manager.data.dump());
@@ -827,6 +1027,7 @@ namespace app
         }
         int handle_provider(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
+            std::lock_guard<std::mutex> lk(chat_mutex);
             try
             {
                 size_t header_end = input.find("\r\n\r\n");
@@ -884,6 +1085,7 @@ namespace app
         // POST /api/providers/add → 添加新供应商
         int handle_providers_add(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
+            std::lock_guard<std::mutex> lk(chat_mutex);
             try
             {
                 size_t header_end = input.find("\r\n\r\n");
@@ -955,6 +1157,7 @@ namespace app
         // POST /api/providers/update → 更新供应商配置
         int handle_providers_update(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
+            std::lock_guard<std::mutex> lk(chat_mutex);
             try
             {
                 size_t header_end = input.find("\r\n\r\n");
@@ -1036,6 +1239,7 @@ namespace app
         // POST /api/providers/delete → 删除供应商
         int handle_providers_delete(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
+            std::lock_guard<std::mutex> lk(chat_mutex);
             try
             {
                 size_t header_end = input.find("\r\n\r\n");
@@ -1619,6 +1823,8 @@ namespace app
         }
         void handle_input_streaming(std::string &input, rt::WriteCallback write, const std::map<std::string, std::string> &params)
         {
+            std::lock_guard<std::mutex> lk(chat_mutex);
+
             auto sse = [&](const json &data)
             {
                 write("data: " + data.dump() + "\n\n");
@@ -1852,189 +2058,8 @@ namespace app
                 }
                 std::string body = input.substr(header_end + 4);
                 json request = json::parse(body);
-
-                std::string user_message = request["messages"].get<std::string>();
-                std::string model = request.value("model", "default");
-                if (model == "default")
-                    model = run_unit::settings["model"].get<std::string>();
-
-                std::string channel;
-                bool think_mode = request.value("think", false);
-                size_t total_prompt_tokens = 0;
-                size_t total_completion_tokens = 0;
-                std::string sid = "";
-                std::shared_ptr<run_unit::SessionContext> session_ptr;
-
-                // 确定会话
-                if (request.contains("channel"))
-                {
-                    channel = request["channel"].get<std::string>();
-                    session_ptr = run_unit::agent_session_manager.get(channel);
-                    if (!session_ptr)
-                    {
-                        session_ptr = run_unit::agent_session_manager.create();
-                        run_unit::agent_session_manager.change_session(session_ptr->session_id);
-                    }
-                }
-                else if (request.contains("session_id"))
-                {
-                    sid = request["session_id"].get<std::string>();
-                    session_ptr = run_unit::agent_session_manager.get(sid);
-                    if (!session_ptr)
-                    {
-                        output = build_http_response(400, "application/json", R"({"error":"session not found"})");
-                        return rt::FLAG_DONE;
-                    }
-                    run_unit::agent_session_manager.change_session(sid);
-                }
-                else
-                {
-                    session_ptr = run_unit::agent_session_manager.get_current();
-                }
-
-                // 构建上下文
-                json context = json::array();
-                context.push_back({{"role", "system"}, {"content", system_prompt}});
-                context.push_back({{"role", "system"}, {"content", tools_list_str}});
-
-                if (!session_ptr->is_memory_empty())
-                    context.push_back({{"role", "system"}, {"content", session_ptr->memory["abstracts"]}});
-                else
-                    for (auto &msg : session_ptr->messages)
-                        context.push_back(msg);
-
-                json contents = json::array();
-                if (!channel.empty())
-                    contents.push_back({{"type", "text"}, {"text", "Messages received from " + channel + ":" + user_message}});
-                else
-                    contents.push_back({{"type", "text"}, {"text", user_message}});
-
-                if (request.contains("images") && request["images"].is_array())
-                {
-                    for (auto &img : request["images"])
-                        contents.push_back({{"type", "image_url"}, {"image_url", {{"url", img.get<std::string>()}}}});
-                }
-                json user_msg = {{"role", Admin}, {"content", contents}};
-                context.push_back(user_msg);
-                session_ptr->messages.push_back(user_msg);
-
-                // 工具/CS 循环（非流式）
-                json thinkings = json::array();
-                json tools_called_arr = json::array();
-                std::string final_response;
-                size_t max_rounds = run_unit::settings["max_mpc_rounds"].get<size_t>();
-                size_t mpc_count = 0;
-
-                for (; mpc_count < max_rounds; ++mpc_count)
-                {
-                    json llm_req = {
-                        {"model", model},
-                        {"messages", context},
-                        {"think", think_mode}};
-
-                    json response;
-                    if (!client_generate(llm_req, response))
-                    {
-                        output = build_http_response(500, "application/json", R"({"error":"LLM generate failed"})");
-                        return rt::FLAG_ERROR;
-                    }
-
-                    // 提取 thinking 内容
-                    if (think_mode && response["choices"][0]["message"].contains("reasoning_content"))
-                    {
-                        thinkings.push_back(response["choices"][0]["message"]["reasoning_content"].get<std::string>());
-                    }
-
-                    // 提取回复文本
-                    std::string response_text = response["choices"][0]["message"]["content"].get<std::string>();
-
-                    json agent_response = {
-                        {"role", run_unit::settings["agent_name"]},
-                        {"content", response_text}};
-                    context.push_back(agent_response);
-                    session_ptr->messages.push_back(agent_response);
-
-                    final_response += response_text;
-
-                    // 记录 token 用量
-                    if (response.contains("usage"))
-                    {
-                        auto &usage = response["usage"];
-                        if (usage.contains("prompt_tokens"))
-                            total_prompt_tokens += usage["prompt_tokens"].get<size_t>();
-                        if (usage.contains("completion_tokens"))
-                            total_completion_tokens += usage["completion_tokens"].get<size_t>();
-                    }
-
-                    // 扫描工具/CS 调用
-                    std::string sys_out;
-                    auto [tools_called, tools_ok] = tool_unit::tools_scan(response_text, sys_out);
-                    auto cs_called = cs_unit::cs_scan(response_text, sys_out);
-
-                    // 收集工具调用信息
-                    auto tool_tags = extractAllTags(response_text, "tool");
-                    auto sys_out_blocks = extractAllTags(sys_out, "system_output");
-
-                    for (size_t ti = 0; ti < tool_tags.size(); ti++)
-                    {
-                        auto [name, args] = parseArgs(tool_tags[ti]);
-                        json tool_entry = {
-                            {"name", std::string(name)},
-                            {"args", std::string(args)},
-                            {"round", mpc_count}};
-                        if (ti < sys_out_blocks.size())
-                            tool_entry["output"] = std::string(sys_out_blocks[ti]);
-                        tools_called_arr.push_back(tool_entry);
-                    }
-
-                    // 添加工具消息到上下文
-                    json sys_contents = json::array();
-                    sys_contents.push_back({{"type", "text"}, {"text", sys_out}});
-                    if (!tool_unit::image_queue.empty())
-                    {
-                        for (auto &img : tool_unit::image_queue)
-                            sys_contents.push_back({{"type", "image_url"}, {"image_url", {{"url", img}}}});
-                        tool_unit::image_queue.clear();
-                    }
-                    json sys_msg = {{"role", "tool"}, {"content", sys_contents}};
-                    context.push_back(sys_msg);
-                    session_ptr->messages.push_back(sys_msg);
-                }
-
-                // 自动触发记忆保存（上下文超过 max_context 时）
-                {
-                    size_t ctx_size = session_ptr->messages.dump().size();
-                    size_t max_ctx = run_unit::settings["max_context"].get<size_t>();
-                    if (ctx_size > max_ctx)
-                    {
-                        std::cout << "Auto-trigger memory save (context: " << ctx_size << " > max: " << max_ctx << ")" << std::endl;
-                        save_memory(session_ptr, model);
-                    }
-                }
-
-                // 更新使用统计
-                if (!sid.empty() && run_unit::agent_data_manager.data["usages"].contains(sid))
-                {
-                    run_unit::agent_data_manager.data["usages"][sid]["prompt_cost"] = run_unit::agent_data_manager.data["usages"][sid]["prompt_cost"].get<size_t>() + total_prompt_tokens;
-                    run_unit::agent_data_manager.data["usages"][sid]["completion_cost"] = run_unit::agent_data_manager.data["usages"][sid]["completion_cost"].get<size_t>() + total_completion_tokens;
-                    run_unit::agent_data_manager.data["usages"][sid]["total_cost"] = run_unit::agent_data_manager.data["usages"][sid]["total_cost"].get<size_t>() + total_prompt_tokens + total_completion_tokens;
-                }
-                else if (!sid.empty())
-                {
-                    run_unit::agent_data_manager.data["usages"][sid] = {
-                        {"prompt_cost", total_prompt_tokens},
-                        {"completion_cost", total_completion_tokens},
-                        {"total_cost", total_prompt_tokens + total_completion_tokens}};
-                }
-
-                // 构建统一 JSON 响应
-                json result = {
-                    {"content", final_response},
-                    {"thinking", thinkings},
-                    {"tools", tools_called_arr},
-                    {"rounds", mpc_count},
-                    {"usage", {{"prompt_cost", total_prompt_tokens}, {"completion_cost", total_completion_tokens}, {"total_cost", total_prompt_tokens + total_completion_tokens}}}};
-
+                // 与频道 bot 线程共用同一进程内 Channel 处理逻辑（channel_chat）
+                json result = channel_chat(request);
                 output = build_http_response(200, "application/json", result.dump());
                 return rt::FLAG_DONE;
             }

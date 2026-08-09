@@ -297,11 +297,9 @@ def print_tool_help():
             "user_count": 1,
             "path": "sys/tg_bot.py",             // 频道对应的驱动脚本（相对于 workspace）
             "config": {
-                "backend_url": "http://127.0.0.1:8080/api/input",
                 "model": "default",
                 "proxy": "http://127.0.0.1:10809",
-                "think": false,
-                "timeout": 600
+                "think": false
             }
         },
         {
@@ -310,11 +308,9 @@ def print_tool_help():
             "user_count": 1,
             "path": "sys/wx_bot.py",
             "config": {
-                "backend_url": "http://127.0.0.1:8080/api/input",
                 "ilink_base": "https://ilinkai.weixin.qq.com",
                 "model": "default",
-                "think": false,
-                "timeout": 600
+                "think": false
             }
         }
     ]
