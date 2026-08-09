@@ -3154,7 +3154,9 @@ namespace bot
         std::string m = str_to_lower(method);
         if (m == "post" || m == "put")
         {
-            curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, m.c_str());
+            // 用原始方法名（POST/PUT），不能小写：CURLOPT_CUSTOMREQUEST 会原样写入
+            // 请求行，小写 "post" 会被服务器（如 ilink WAF）拒绝/断开
+            curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method.c_str());
             if (!body.empty())
             {
                 curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.data());
@@ -4045,9 +4047,23 @@ namespace bot
                               const std::string &to_user, const std::string &ctx_token, const std::string &text,
                               long timeout = 30)
         {
+            // 注意：json::array({{"type",1},...}) 会把元素推断成数组 ["type",1]，
+            // 必须先用显式对象构造再放入数组，否则服务器返回 "invalid request"
+            json item = {{"type", 1}, {"text_item", {{"text", text}}}};
             json payload = {
-                {"msg", {{"to_user_id", to_user}, {"message_type", 2}, {"message_state", 2}, {"context_token", ctx_token}, {"client_id", make_client_id()}, {"item_list", json::array({{"type", 1}, {"text_item", {{"text", text}}}})}}}};
-            return ilink_call(ilink_base, "/ilink/bot/sendmessage", payload, hdrs, timeout);
+                {"msg", {{"to_user_id", to_user}, {"message_type", 2}, {"message_state", 2}, {"context_token", ctx_token}, {"client_id", make_client_id()}, {"item_list", json::array({item})}}}};
+            json resp = ilink_call(ilink_base, "/ilink/bot/sendmessage", payload, hdrs, timeout);
+            // context_token 可能已过期/一次性使用：带 token 失败时去掉后重试一次，
+            // 否则回复会静默丢失（ret != 0 且无错误打印）
+            if (resp.value("ret", 0) != 0 && !ctx_token.empty())
+            {
+                json retry = payload;
+                retry["msg"].erase("context_token");
+                resp = ilink_call(ilink_base, "/ilink/bot/sendmessage", retry, hdrs, timeout);
+            }
+            if (resp.value("ret", 0) != 0)
+                std::cerr << "[wx] sendmessage failed: " << resp.dump().substr(0, 300) << std::endl;
+            return resp;
         }
 
         inline json send_image(const std::string &ilink_base, const std::map<std::string, std::string> &hdrs,
@@ -4136,7 +4152,16 @@ namespace bot
 
                 json payload = {
                     {"msg", {{"to_user_id", to_user}, {"message_type", 2}, {"message_state", 2}, {"context_token", ctx_token}, {"client_id", make_client_id()}, {"item_list", item_list}}}};
-                return ilink_call(ilink_base, "/ilink/bot/sendmessage", payload, hdrs, 30);
+                json resp = ilink_call(ilink_base, "/ilink/bot/sendmessage", payload, hdrs, 30);
+                if (resp.value("ret", 0) != 0 && !ctx_token.empty())
+                {
+                    json retry = payload;
+                    retry["msg"].erase("context_token");
+                    resp = ilink_call(ilink_base, "/ilink/bot/sendmessage", retry, hdrs, 30);
+                }
+                if (resp.value("ret", 0) != 0)
+                    std::cerr << "[wx] sendimage failed: " << resp.dump().substr(0, 300) << std::endl;
+                return resp;
             }
             catch (...)
             {
@@ -4281,6 +4306,14 @@ namespace bot
                 catch (const std::exception &e)
                 {
                     update_status(name, true, "running", std::string("getupdates 失败: ") + e.what());
+                    std::this_thread::sleep_for(std::chrono::seconds(5));
+                    continue;
+                }
+                // ilink_call 失败不抛异常（返回 ret!=0）：避免断网时空转打请求
+                if (updates.value("ret", 0) != 0)
+                {
+                    std::string msg = updates.value("msg", updates.value("errmsg", ""));
+                    update_status(name, true, "running", "getupdates 失败: " + msg);
                     std::this_thread::sleep_for(std::chrono::seconds(5));
                     continue;
                 }
