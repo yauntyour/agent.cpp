@@ -2046,16 +2046,6 @@ namespace run_unit
             tools_list = nlohmann::json::parse(tool_unit::readFile(tools_list_path.string()));
         }
 
-        std::filesystem::path mcp_tools_path = workspace / "tools/mcp_tools.json";
-        if (!std::filesystem::exists(mcp_tools_path))
-        {
-            std::cout << "Warning - No mcp_tools.json found, creating a new one..." << std::endl;
-            tool_unit::writeFile(mcp_tools_path.string(),
-                                 nlohmann::json{{"servers", nlohmann::json::array()},
-                                                {"tools", nlohmann::json::array()}}
-                                     .dump(4));
-        }
-
         std::filesystem::path cs_prompt_path = sysPath / "cs.txt";
         if (!std::filesystem::exists(cs_prompt_path) || !std::filesystem::is_regular_file(cs_prompt_path))
             throw std::runtime_error("Error - cs.txt not found. Please check your sys directory.");

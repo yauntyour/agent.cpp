@@ -12,3 +12,4 @@ _CPack_Packages
 .playwright-cli
 workspace/webui.log
 *.enc
+workspace/sys/key
