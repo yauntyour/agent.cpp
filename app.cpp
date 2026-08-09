@@ -14,7 +14,6 @@
 #include "servic.cpp/servic.hpp"
 #include "servic.cpp/router/router.hpp"
 #include "agent.hpp"
-#include "bot.hpp"
 #include "servic.cpp/tiny_sha.h"
 
 using json = nlohmann::json;
