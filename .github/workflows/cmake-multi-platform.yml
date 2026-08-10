@@ -132,7 +132,7 @@ jobs:
         shell: bash
         run: |
           otool -L install/app
-          EXTRA=$(otool -L install/app | tail -n +2 | grep -oE '^\s*/[^ ]+' | grep -vE '^/usr/lib/|^/System/Library/' || true)
+          EXTRA=$(otool -L install/app | tail -n +2 | sed -E 's/^\s+//' | grep -oE '^/[^ ]+' | grep -vE '^/usr/lib/|^/System/Library/' || true)
           if [ -z "$EXTRA" ]; then
             echo "OK: macOS binary only uses Apple system libraries"
           else
