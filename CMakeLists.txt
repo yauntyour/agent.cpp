@@ -171,8 +171,7 @@ else()
 endif()
 
 # ---------- Boost (header-only) ----------
-set(Boost_NO_BOOST_CMAKE ON)
-find_package(Boost REQUIRED)
+find_path(BOOST_INCLUDE_DIR boost/config.hpp)
 
 # ---------- nlohmann_json (header-only) ----------
 FetchContent_Declare(
@@ -189,9 +188,10 @@ add_executable(app
 
 # 链接库
 target_link_libraries(app PRIVATE
-    Boost::boost
     nlohmann_json::nlohmann_json
 )
+
+target_include_directories(app PRIVATE ${BOOST_INCLUDE_DIR})
 
 if(STATIC_BUILD)
     target_link_libraries(app PRIVATE CURL::libcurl ${CURL_EXTRA_LIBS})

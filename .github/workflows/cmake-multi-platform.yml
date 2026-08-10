@@ -56,6 +56,7 @@ jobs:
               libsodium-dev libsodium-static \
               openssl-dev openssl-libs-static zlib-dev zlib-static \
               ca-certificates-bundle
+            export PATH=/usr/lib/ninja-build/bin:$PATH
             cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSTATIC_BUILD=ON
             cmake --build build --parallel
             cmake --install build --prefix install
@@ -68,7 +69,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew update
-          brew install cmake ninja
+          brew install cmake ninja boost
 
       # ---------- Windows (MSYS2) 依赖 ----------
       # curl 由 CMake 从源码静态构建（Schannel），无需 mingw 版 curl
