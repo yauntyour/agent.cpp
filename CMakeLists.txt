@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.28)
 project(agent.cpp LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -90,28 +90,20 @@ endif()
 
 # ---------- libsodium ----------
 if(STATIC_BUILD)
-    # macOS 系统路径默认优先 .dylib,静态构建强制只搜 .a
-    if(APPLE)
-        set(_sodium_orig_suffixes ${CMAKE_FIND_LIBRARY_SUFFIXES})
-        set(CMAKE_FIND_LIBRARY_SUFFIXES .a)
-    endif()
-
-    find_library(SODIUM_LIBRARY sodium
-        HINTS ${MSYS2_DIR}/mingw64/lib /mingw64/lib /opt/homebrew/lib /usr/local/lib /usr/lib)
-    find_path(SODIUM_INCLUDE_DIR sodium.h
-        HINTS ${MSYS2_DIR}/mingw64/include /mingw64/include /opt/homebrew/include /usr/local/include /usr/include)
-
-    if(APPLE)
-        set(CMAKE_FIND_LIBRARY_SUFFIXES ${_sodium_orig_suffixes})
-    endif()
-
-    if(SODIUM_LIBRARY AND SODIUM_INCLUDE_DIR)
-        message(STATUS "Found static libsodium: ${SODIUM_LIBRARY}")
-        set(SODIUM_INCLUDE_DIRS ${SODIUM_INCLUDE_DIR})
-        set(SODIUM_LIBRARIES ${SODIUM_LIBRARY})
-    else()
-        message(FATAL_ERROR "Static libsodium not found. Install it: Alpine 'libsodium-static', MSYS2 'mingw-w64-x86_64-libsodium', macOS 'brew install libsodium'")
-    endif()
+    # libsodium 官方仓库无 CMake 构建文件（纯 autotools），
+    # 使用官方认可的 CMake 包装 robinlinden/libsodium-cmake
+    # （以 submodule 打包完整 libsodium 源码），三平台统一从源码静态构建，
+    # 产出零外部依赖的二进制
+    set(SODIUM_DISABLE_TESTS ON CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        libsodium
+        GIT_REPOSITORY https://github.com/robinlinden/libsodium-cmake.git
+        GIT_TAG 9b2848dfc1b917a9410f0de9d81059b26cbfaa8d
+        GIT_SUBMODULES libsodium
+    )
+    FetchContent_MakeAvailable(libsodium)
+    set(SODIUM_LIBRARIES "")
+    message(STATUS "libsodium: building static from source via FetchContent")
 else()
     find_package(PkgConfig QUIET)
     if(PkgConfig_FOUND)

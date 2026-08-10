@@ -53,7 +53,6 @@ jobs:
             apk add --no-cache \
               build-base cmake ninja-build git \
               boost-dev \
-              libsodium-dev libsodium-static \
               openssl-dev openssl-libs-static zlib-dev zlib-static \
               ca-certificates-bundle
             export PATH=/usr/lib/ninja-build/bin:$PATH
@@ -64,12 +63,12 @@ jobs:
             '
 
       # ---------- macOS 依赖 ----------
-      # curl 由 CMake 从源码静态构建（SecureTransport）；libsodium 用 brew 静态库
+      # curl 由 CMake 从源码静态构建（SecureTransport）；libsodium 由 CMake 从源码构建
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
           brew update
-          brew install cmake ninja boost libsodium
+          brew install cmake ninja boost
 
       # ---------- Windows (MSYS2) 依赖 ----------
       # curl 由 CMake 从源码静态构建（Schannel），无需 mingw 版 curl
@@ -82,7 +81,7 @@ jobs:
           install: >-
             git
             mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja
-            mingw-w64-x86_64-boost mingw-w64-x86_64-libsodium
+            mingw-w64-x86_64-boost
 
       # ---------- CMake 配置 ----------
       - name: Configure CMake (Windows MSYS2)
