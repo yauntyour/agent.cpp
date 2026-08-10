@@ -8,7 +8,7 @@ cmd = [
     "-g",
     "app.cpp",
     "-o",
-    "app",
+    "agentcpp",
     "-lcurl",
     "-lsodium",
     "-lws2_32",

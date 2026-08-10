@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.28)
-project(agent.cpp LANGUAGES CXX)
+project(agentcpp LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -156,51 +156,51 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(nlohmann_json)
 
 # 主可执行文件
-add_executable(app
+add_executable(agentcpp
     app.cpp
 )
 
 # 链接库
-target_link_libraries(app PRIVATE
+target_link_libraries(agentcpp PRIVATE
     nlohmann_json::nlohmann_json
 )
 
-target_include_directories(app PRIVATE ${BOOST_INCLUDE_DIR})
+target_include_directories(agentcpp PRIVATE ${BOOST_INCLUDE_DIR})
 
 if(STATIC_BUILD)
-    target_link_libraries(app PRIVATE CURL::libcurl ${CURL_EXTRA_LIBS})
+    target_link_libraries(agentcpp PRIVATE CURL::libcurl ${CURL_EXTRA_LIBS})
 
     if(SODIUM_LIBRARIES)
-        target_link_libraries(app PRIVATE ${SODIUM_LIBRARIES})
-        target_include_directories(app PRIVATE ${SODIUM_INCLUDE_DIRS})
+        target_link_libraries(agentcpp PRIVATE ${SODIUM_LIBRARIES})
+        target_include_directories(agentcpp PRIVATE ${SODIUM_INCLUDE_DIRS})
     elseif(TARGET sodium)
-        target_link_libraries(app PRIVATE sodium)
+        target_link_libraries(agentcpp PRIVATE sodium)
     endif()
 
     # 完全静态链接（Linux musl / Windows MinGW），产出零依赖二进制
     if(WIN32 OR (UNIX AND NOT APPLE))
-        target_link_options(app PRIVATE -static)
+        target_link_options(agentcpp PRIVATE -static)
     endif()
 else()
-    target_link_libraries(app PRIVATE CURL::libcurl)
+    target_link_libraries(agentcpp PRIVATE CURL::libcurl)
 
     if(SODIUM_LIBRARIES)
-        target_link_libraries(app PRIVATE ${SODIUM_LIBRARIES})
+        target_link_libraries(agentcpp PRIVATE ${SODIUM_LIBRARIES})
         if(SODIUM_INCLUDE_DIRS)
-            target_include_directories(app PRIVATE ${SODIUM_INCLUDE_DIRS})
+            target_include_directories(agentcpp PRIVATE ${SODIUM_INCLUDE_DIRS})
         endif()
     elseif(TARGET sodium)
-        target_link_libraries(app PRIVATE sodium)
+        target_link_libraries(agentcpp PRIVATE sodium)
     endif()
 endif()
 
 if(WIN32)
-    target_link_libraries(app PRIVATE ws2_32 wsock32)
+    target_link_libraries(agentcpp PRIVATE ws2_32 wsock32)
 endif()
 
 # ========== 安装规则 ==========
-# 1. app 可执行文件放在根目录
-install(TARGETS app RUNTIME DESTINATION .)
+# 1. agentcpp 可执行文件放在根目录
+install(TARGETS agentcpp RUNTIME DESTINATION .)
 
 # 2. settings.json 单独放在根目录
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/settings.json DESTINATION .)

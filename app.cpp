@@ -16,6 +16,16 @@
 #include "agent.hpp"
 #include "servic.cpp/tiny_sha.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <limits.h>
+#include <unistd.h>
+#endif
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+
 using json = nlohmann::json;
 namespace fs = std::filesystem;
 
@@ -2081,10 +2091,58 @@ namespace app
     } // namespace server
 } // namespace app
 
+// 获取可执行文件所在目录（跨平台），使 settings.json / workspace 等相对路径
+// 始终相对于 exe 自身解析，从而在任何目录下运行 app --password 都能启动服务
+static std::string get_exe_dir()
+{
+#ifdef _WIN32
+    wchar_t wbuf[MAX_PATH];
+    DWORD len = GetModuleFileNameW(nullptr, wbuf, MAX_PATH);
+    if (len == 0 || len >= MAX_PATH)
+        return std::string();
+    std::filesystem::path p(wbuf);
+    return p.parent_path().string();
+#else
+    char buf[PATH_MAX];
+#ifdef __APPLE__
+    uint32_t size = static_cast<uint32_t>(sizeof(buf));
+    if (_NSGetExecutablePath(buf, &size) == 0)
+    {
+        std::filesystem::path p(buf);
+        return p.parent_path().string();
+    }
+#endif
+    ssize_t len = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+    if (len < 0)
+        return std::string();
+    buf[len] = '\0';
+    std::filesystem::path p(buf);
+    return p.parent_path().string();
+#endif
+}
+
 int main(int argc, char *argv[])
 {
     try
     {
+        // 将工作目录切换到可执行文件同级目录：
+        // settings.json、./workspace/ 及工具脚本路径全部相对 exe 解析，
+        // 在任意位置执行 ./agentcpp --password xxx 均可正常启动服务
+        {
+            std::string exe_dir = get_exe_dir();
+            if (!exe_dir.empty())
+            {
+                try
+                {
+                    std::filesystem::current_path(exe_dir);
+                }
+                catch (const std::exception &e)
+                {
+                    std::cerr << "Warning - failed to chdir to executable dir: " << e.what() << std::endl;
+                }
+            }
+        }
+
         std::cout << get_system_status() << std::endl;
 
         // ——— 所有运行参数仅从 CLI 传入，不从 settings.json 读取 ———

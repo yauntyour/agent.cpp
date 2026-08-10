@@ -23,15 +23,15 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         include:
           - os: ubuntu-latest
-            artifact_name: agent.cpp-Linux
+            artifact_name: agentcpp-Linux
             asset_suffix: .tar.gz
             executable_name: agent-cpp-linux
           - os: windows-latest
-            artifact_name: agent.cpp-Windows
+            artifact_name: agentcpp-Windows
             asset_suffix: .zip
             executable_name: agent-cpp-windows.exe
           - os: macos-latest
-            artifact_name: agent.cpp-Darwin
+            artifact_name: agentcpp-Darwin
             asset_suffix: .tar.gz
             executable_name: agent-cpp-macos
 
@@ -118,9 +118,9 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          file install/app
-          ldd install/app || true
-          if file install/app | grep -q "statically linked"; then
+          file install/agentcpp
+          ldd install/agentcpp || true
+          if file install/agentcpp | grep -q "statically linked"; then
             echo "OK: Linux binary is fully static"
           else
             echo "FAIL: Linux binary is NOT fully static"
@@ -131,8 +131,8 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          otool -L install/app
-          EXTRA=$(otool -L install/app | tail -n +2 | sed -E 's/^\s+//' | grep -oE '^/[^ ]+' | grep -vE '^/usr/lib/|^/System/Library/' || true)
+          otool -L install/agentcpp
+          EXTRA=$(otool -L install/agentcpp | tail -n +2 | sed -E 's/^\s+//' | grep -oE '^/[^ ]+' | grep -vE '^/usr/lib/|^/System/Library/' || true)
           if [ -z "$EXTRA" ]; then
             echo "OK: macOS binary only uses Apple system libraries"
           else
@@ -145,8 +145,8 @@ jobs:
         if: runner.os == 'Windows'
         shell: msys2 {0}
         run: |
-          objdump -p install/app.exe | grep "DLL Name" || echo "(no DLL imports at all)"
-          if objdump -p install/app.exe | grep "DLL Name" | grep -iE "curl|sodium|ssl|crypto|stdc|gcc|winpthread|zlib|brotli|zstd|nghttp|idn|psl|ssh|iconv|intl"; then
+          objdump -p install/agentcpp.exe | grep "DLL Name" || echo "(no DLL imports at all)"
+          if objdump -p install/agentcpp.exe | grep "DLL Name" | grep -iE "curl|sodium|ssl|crypto|stdc|gcc|winpthread|zlib|brotli|zstd|nghttp|idn|psl|ssh|iconv|intl"; then
             echo "FAIL: executable imports non-Windows runtime DLLs"
             exit 1
           else
@@ -188,9 +188,9 @@ jobs:
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
-            SRC="install/app.exe"
+            SRC="install/agentcpp.exe"
           else
-            SRC="install/app"
+            SRC="install/agentcpp"
           fi
           DST="${{ matrix.executable_name }}"
           cp "$SRC" "$DST"
