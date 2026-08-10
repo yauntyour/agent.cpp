@@ -90,38 +90,27 @@ endif()
 
 # ---------- libsodium ----------
 if(STATIC_BUILD)
+    # macOS 系统路径默认优先 .dylib,静态构建强制只搜 .a
     if(APPLE)
-        # macOS 无打包好的静态 libsodium，直接从源码构建
-        message(STATUS "libsodium: building static from source via FetchContent")
-        set(BUILD_SHARED_LIBS OFF)
-        FetchContent_Declare(
-            libsodium
-            GIT_REPOSITORY https://github.com/jedisct1/libsodium.git
-            GIT_TAG 1.0.20-RELEASE
-            GIT_SHALLOW TRUE
-        )
-        FetchContent_MakeAvailable(libsodium)
-        set(SODIUM_LIBRARIES "")
+        set(_sodium_orig_suffixes ${CMAKE_FIND_LIBRARY_SUFFIXES})
+        set(CMAKE_FIND_LIBRARY_SUFFIXES .a)
+    endif()
+
+    find_library(SODIUM_LIBRARY sodium
+        HINTS ${MSYS2_DIR}/mingw64/lib /mingw64/lib /opt/homebrew/lib /usr/local/lib /usr/lib)
+    find_path(SODIUM_INCLUDE_DIR sodium.h
+        HINTS ${MSYS2_DIR}/mingw64/include /mingw64/include /opt/homebrew/include /usr/local/include /usr/include)
+
+    if(APPLE)
+        set(CMAKE_FIND_LIBRARY_SUFFIXES ${_sodium_orig_suffixes})
+    endif()
+
+    if(SODIUM_LIBRARY AND SODIUM_INCLUDE_DIR)
+        message(STATUS "Found static libsodium: ${SODIUM_LIBRARY}")
+        set(SODIUM_INCLUDE_DIRS ${SODIUM_INCLUDE_DIR})
+        set(SODIUM_LIBRARIES ${SODIUM_LIBRARY})
     else()
-        # 优先使用系统静态库（Alpine libsodium-static / MSYS2 libsodium），
-        # 找不到时退回源码构建
-        find_library(SODIUM_LIBRARY sodium)
-        find_path(SODIUM_INCLUDE_DIR sodium.h)
-        if(SODIUM_LIBRARY AND SODIUM_INCLUDE_DIR)
-            message(STATUS "Found static libsodium: ${SODIUM_LIBRARY}")
-            set(SODIUM_INCLUDE_DIRS ${SODIUM_INCLUDE_DIR})
-            set(SODIUM_LIBRARIES ${SODIUM_LIBRARY})
-        else()
-            message(STATUS "libsodium not found on system, building from source via FetchContent")
-            FetchContent_Declare(
-                libsodium
-                GIT_REPOSITORY https://github.com/jedisct1/libsodium.git
-                GIT_TAG 1.0.20-RELEASE
-                GIT_SHALLOW TRUE
-            )
-            FetchContent_MakeAvailable(libsodium)
-            set(SODIUM_LIBRARIES "")
-        endif()
+        message(FATAL_ERROR "Static libsodium not found. Install it: Alpine 'libsodium-static', MSYS2 'mingw-w64-x86_64-libsodium', macOS 'brew install libsodium'")
     endif()
 else()
     find_package(PkgConfig QUIET)
@@ -159,14 +148,7 @@ else()
         set(SODIUM_LIBRARIES ${SODIUM_LIBRARY})
         message(STATUS "Found libsodium: ${SODIUM_LIBRARY}")
     else()
-        message(STATUS "libsodium not found on system, building from source via FetchContent")
-        FetchContent_Declare(
-            libsodium
-            GIT_REPOSITORY https://github.com/jedisct1/libsodium.git
-            GIT_TAG 1.0.20-RELEASE
-        )
-        FetchContent_MakeAvailable(libsodium)
-        set(SODIUM_LIBRARIES "")
+        message(FATAL_ERROR "libsodium not found on system, install it via package manager (brew/apt/vcpkg)")
     endif()
 endif()
 
