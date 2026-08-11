@@ -1201,6 +1201,29 @@ namespace net_unit
         curl_slist_free_all(header_list);
         return (res == CURLE_OK);
     }
+
+    bool CURL_stream_post(CURL *curl, const char *url, const std::string &post_data, const std::vector<std::string> &header_list, StreamCallback on_token)
+    {
+        if (!curl || !url)
+            return false;
+
+        curl_easy_setopt(curl, CURLOPT_URL, url);
+        curl_easy_setopt(curl, CURLOPT_NOPROXY, "localhost,127.0.0.1,::1"); // 本地服务不走系统代理
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_data.c_str());
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &on_token);
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 300L);
+        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+
+        struct curl_slist *headers = nullptr;
+        for (auto &header : header_list)
+            headers = curl_slist_append(headers, header.c_str());
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+
+        CURLcode res = curl_easy_perform(curl);
+        curl_slist_free_all(headers);
+        return (res == CURLE_OK);
+    }
 } // namespace net_unit
 
 // Forward declaration for run_unit functions used by tool_unit
@@ -2429,6 +2452,135 @@ namespace cs_unit
 
 namespace LLMProviders
 {
+    // ==================== 共享工具 ====================
+
+    // OpenAI 兼容请求头：无 API Key 时不发送 Authorization
+    std::vector<std::string> build_headers(const std::string &api_key)
+    {
+        std::vector<std::string> headers = {"Content-Type: application/json"};
+        if (!api_key.empty())
+            headers.push_back("Authorization: Bearer " + api_key);
+        return headers;
+    }
+
+    // 角色规范化：自定义 user_name / agent_name 映射为标准 user / assistant
+    void normalize_roles(nlohmann::json &request)
+    {
+        if (!request.contains("messages") || !request["messages"].is_array())
+            return;
+        auto user_name = run_unit::settings["user_name"].get_ref<const std::string &>();
+        auto agent_name = run_unit::settings["agent_name"].get_ref<const std::string &>();
+        for (auto &msg : request["messages"])
+        {
+            if (!msg.contains("role") || !msg["role"].is_string())
+                continue;
+            auto &role = msg["role"].get_ref<std::string &>();
+            if (role == user_name)
+                role = "user";
+            else if (role == agent_name)
+                role = "assistant";
+        }
+    }
+
+    // 请求规范化：角色映射 + 清理非通用参数。
+    // think 是部分网关专有参数，false 等同默认值，移除以免严格接口（如 OpenAI 官方）报 400
+    void sanitize_request(nlohmann::json &request)
+    {
+        normalize_roles(request);
+        if (request.contains("think") && request["think"].is_boolean() && !request["think"].get<bool>())
+            request.erase("think");
+    }
+
+    // 共享的 OpenAI 兼容 SSE 流式解析（OpenAI / Ollama / llama.cpp / 各类网关通用）
+    std::string stream_chat_completions(
+        CURL *curl,
+        const std::string &url,
+        const std::string &post_data,
+        const std::vector<std::string> &headers,
+        std::function<void(const std::string &)> on_token,
+        std::function<void(const std::string &)> on_thinking = nullptr)
+    {
+        std::string accumulated;
+        std::string buffer;
+
+        auto parse_sse = [&](const char *data, size_t len)
+        {
+            buffer.append(data, len);
+            size_t pos = 0;
+            while (true)
+            {
+                size_t nl = buffer.find('\n', pos);
+                if (nl == std::string::npos)
+                    break;
+                std::string line = buffer.substr(pos, nl - pos);
+                pos = nl + 1;
+
+                if (!line.empty() && line.back() == '\r')
+                    line.pop_back();
+
+                if (line.empty())
+                    continue;
+
+                if (line.find("data: ") == 0)
+                {
+                    std::string payload = line.substr(6);
+                    if (payload == "[DONE]")
+                        continue;
+                    try
+                    {
+                        auto j = nlohmann::json::parse(payload);
+                        if (!j.contains("choices") || j["choices"].empty())
+                            continue;
+                        auto &delta = j["choices"][0]["delta"];
+
+                        if (delta.contains("reasoning_content") && on_thinking)
+                        {
+                            std::string rc = delta["reasoning_content"].get<std::string>();
+                            if (!rc.empty())
+                                on_thinking(rc);
+                        }
+                        if (delta.contains("content"))
+                        {
+                            std::string c = delta["content"].get<std::string>();
+                            accumulated += c;
+                            if (on_token)
+                                on_token(c);
+                        }
+                    }
+                    catch (...)
+                    {
+                    }
+                }
+            }
+            buffer = buffer.substr(pos);
+        };
+
+        net_unit::CURL_stream_post(curl, url.c_str(), post_data, headers, parse_sse);
+        return accumulated;
+    }
+
+    // OpenAI 兼容 /v1/models 响应 → WebUI 需要的 {data:[{id,status}]} 格式
+    std::string normalize_models_response(const std::string &raw)
+    {
+        nlohmann::json data = nlohmann::json::array();
+        try
+        {
+            auto j = nlohmann::json::parse(raw);
+            nlohmann::json items = j.contains("data") ? j["data"] : j.value("models", nlohmann::json::array());
+            for (auto &item : items)
+            {
+                std::string id = item.value("id", item.value("model", ""));
+                if (id.empty())
+                    continue;
+                data.push_back({{"id", id}, {"status", {{"value", "loaded"}}}});
+            }
+        }
+        catch (...)
+        {
+        }
+        return nlohmann::json({{"data", data}}).dump();
+    }
+
     class LlamaClient
     {
     private:
@@ -2447,6 +2599,7 @@ namespace LLMProviders
                 curl_easy_cleanup(curl_);
         }
 
+        // llama.cpp 服务器模型管理接口：POST /models/unload
         bool unload_model(std::string &model)
         {
             std::string buf;
@@ -2457,14 +2610,13 @@ namespace LLMProviders
             return true;
         }
 
-        bool generate(const nlohmann::json &request, nlohmann::json &response)
+        // llama.cpp OpenAI 兼容接口：POST /v1/chat/completions
+        bool generate(nlohmann::json &request, nlohmann::json &response)
         {
+            sanitize_request(request);
             std::string buf;
-            std::string url = base_url_ + "/chat/completions";
-            std::string header = "Content-Type: application/json";
-            if (!api_key_.empty())
-                header = "Authorization: Bearer " + api_key_.str() + "\r\nContent-Type: application/json";
-            if (!net_unit::CURL_post(curl_, url.c_str(), request.dump(), buf, header))
+            std::string url = base_url_ + "/v1/chat/completions";
+            if (!net_unit::CURL_post(curl_, url.c_str(), request.dump(), buf, build_headers(api_key_.str())))
                 return false;
             try
             {
@@ -2477,15 +2629,27 @@ namespace LLMProviders
             }
         }
 
+        // llama.cpp 支持 OpenAI 兼容 SSE 流式生成
+        std::string stream_generate(
+            nlohmann::json &request,
+            std::function<void(const std::string &)> on_token,
+            std::function<void(const std::string &)> on_thinking = nullptr)
+        {
+            sanitize_request(request);
+            request["stream"] = true;
+            std::string url = base_url_ + "/v1/chat/completions";
+            return stream_chat_completions(curl_, url, request.dump(), build_headers(api_key_.str()),
+                                           on_token, on_thinking);
+        }
+
+        // llama.cpp OpenAI 兼容接口：GET /v1/models（仅列出已加载模型）
         std::string models()
         {
             std::string result;
             std::string url = base_url_ + "/v1/models";
-            std::string header = "Content-Type: application/json";
-            if (!api_key_.empty())
-                header = "Authorization: Bearer " + api_key_.str() + "\r\nContent-Type: application/json";
-            net_unit::CURL_get(curl_easy_init(), url.c_str(), result, header);
-            return result;
+            if (!net_unit::CURL_get(curl_, url.c_str(), result, build_headers(api_key_.str())))
+                return "{\"data\":[]}";
+            return normalize_models_response(result);
         }
     };
 
@@ -2507,14 +2671,13 @@ namespace LLMProviders
                 curl_easy_cleanup(curl_);
         }
 
-        bool generate(const nlohmann::json &request, nlohmann::json &response)
+        // Ollama OpenAI 兼容接口：POST /v1/chat/completions
+        bool generate(nlohmann::json &request, nlohmann::json &response)
         {
+            sanitize_request(request);
             std::string buf;
             std::string url = base_url_ + "/v1/chat/completions";
-            std::string header = "Content-Type: application/json";
-            if (!api_key_.empty())
-                header = "Authorization: Bearer " + api_key_.str() + "\r\nContent-Type: application/json";
-            if (!net_unit::CURL_post(curl_, url.c_str(), request.dump(), buf, header))
+            if (!net_unit::CURL_post(curl_, url.c_str(), request.dump(), buf, build_headers(api_key_.str())))
                 return false;
             try
             {
@@ -2527,18 +2690,58 @@ namespace LLMProviders
             }
         }
 
+        // Ollama OpenAI 兼容接口支持 SSE 流式生成
+        std::string stream_generate(
+            nlohmann::json &request,
+            std::function<void(const std::string &)> on_token,
+            std::function<void(const std::string &)> on_thinking = nullptr)
+        {
+            sanitize_request(request);
+            request["stream"] = true;
+            std::string url = base_url_ + "/v1/chat/completions";
+            return stream_chat_completions(curl_, url, request.dump(), build_headers(api_key_.str()),
+                                           on_token, on_thinking);
+        }
+
+        // Ollama 原生接口：GET /api/tags 列出全部本地模型，/api/ps 标注已加载状态
         std::string models()
         {
-            std::string result;
+            std::string tags;
             std::string url = base_url_ + "/api/tags";
-            net_unit::CURL_get(curl_easy_init(), url.c_str(), result);
-            nlohmann::json ollama_models = nlohmann::json::parse(result);
-            nlohmann::json data = nlohmann::json::array();
-            for (const auto &item : ollama_models["models"])
+            if (!net_unit::CURL_get(curl_, url.c_str(), tags))
+                return "{\"data\":[]}";
+
+            std::vector<std::string> loaded;
+            std::string ps;
+            if (net_unit::CURL_get(curl_, (base_url_ + "/api/ps").c_str(), ps))
             {
-                nlohmann::json id = {"id", item["model"]};
-                nlohmann::json status = {"status", {{"value", "loaded"}}};
-                data.push_back({id, status});
+                try
+                {
+                    auto psj = nlohmann::json::parse(ps);
+                    for (auto &m : psj.value("models", nlohmann::json::array()))
+                        loaded.push_back(m.value("model", ""));
+                }
+                catch (...)
+                {
+                }
+            }
+
+            nlohmann::json data = nlohmann::json::array();
+            try
+            {
+                auto tagsj = nlohmann::json::parse(tags);
+                for (auto &item : tagsj.value("models", nlohmann::json::array()))
+                {
+                    std::string id = item.value("model", item.value("name", ""));
+                    if (id.empty())
+                        continue;
+                    bool is_loaded = loaded.empty() ||
+                                     std::find(loaded.begin(), loaded.end(), id) != loaded.end();
+                    data.push_back({{"id", id}, {"status", {{"value", is_loaded ? "loaded" : "idle"}}}});
+                }
+            }
+            catch (...)
+            {
             }
             return nlohmann::json({{"data", data}}).dump();
         }
@@ -2552,7 +2755,7 @@ namespace LLMProviders
         CURL *curl_ = curl_easy_init();
 
     public:
-        explicit OpenAIClient(const std::string &base_url = "http://localhost:11434", const std::string &api_key = "")
+        explicit OpenAIClient(const std::string &base_url = "https://api.openai.com", const std::string &api_key = "")
             : base_url_(base_url), api_key_(api_key) {}
         void set_api_key(const std::string &api_key) { api_key_.set(api_key); }
         void set_base_url(const std::string &base_url) { base_url_ = base_url; }
@@ -2562,24 +2765,13 @@ namespace LLMProviders
                 curl_easy_cleanup(curl_);
         }
 
+        // OpenAI Chat Completions：POST /v1/chat/completions
         bool generate(nlohmann::json &request, nlohmann::json &response)
         {
+            sanitize_request(request);
             std::string buf;
             std::string url = base_url_ + "/v1/chat/completions";
-            auto user_name = run_unit::settings["user_name"].get_ref<const std::string &>();
-            auto agent_name = run_unit::settings["agent_name"].get_ref<const std::string &>();
-
-            for (auto &msg : request["messages"])
-            {
-                auto name = msg["role"].get_ref<std::string &>();
-                if (name == user_name)
-                    msg["role"] = "user";
-                else if (name == agent_name)
-                    msg["role"] = "assistant";
-            }
-
-            if (!net_unit::CURL_post(curl_, url.c_str(), request.dump(), buf,
-                                     {"Authorization: Bearer " + api_key_.str(), "Content-Type: application/json"}))
+            if (!net_unit::CURL_post(curl_, url.c_str(), request.dump(), buf, build_headers(api_key_.str())))
                 return false;
             try
             {
@@ -2592,98 +2784,27 @@ namespace LLMProviders
             }
         }
 
-        // 流式生成：on_token 接收内容增量，on_thinking 接收推理内容增量，返回完整累积文本
+        // 流式生成：OpenAI SSE（delta.content 内容增量，delta.reasoning_content 推理增量）
         std::string stream_generate(
             nlohmann::json &request,
             std::function<void(const std::string &)> on_token,
             std::function<void(const std::string &)> on_thinking = nullptr)
         {
+            sanitize_request(request);
             request["stream"] = true;
             std::string url = base_url_ + "/v1/chat/completions";
-            auto user_name = run_unit::settings["user_name"].get_ref<const std::string &>();
-            auto agent_name = run_unit::settings["agent_name"].get_ref<const std::string &>();
-
-            for (auto &msg : request["messages"])
-            {
-                auto name = msg["role"].get_ref<std::string &>();
-                if (name == user_name)
-                    msg["role"] = "user";
-                else if (name == agent_name)
-                    msg["role"] = "assistant";
-            }
-
-            std::string header = "Content-Type: application/json";
-            if (!api_key_.empty())
-                header = "Authorization: Bearer " + api_key_.str() + "\r\nContent-Type: application/json";
-
-            std::string accumulated;
-            std::string buffer;
-
-            auto parse_sse = [&](const char *data, size_t len)
-            {
-                buffer.append(data, len);
-                size_t pos = 0;
-                while (true)
-                {
-                    size_t nl = buffer.find('\n', pos);
-                    if (nl == std::string::npos)
-                        break;
-                    std::string line = buffer.substr(pos, nl - pos);
-                    pos = nl + 1;
-
-                    if (!line.empty() && line.back() == '\r')
-                        line.pop_back();
-
-                    if (line.empty())
-                        continue;
-
-                    if (line.find("data: ") == 0)
-                    {
-                        std::string payload = line.substr(6);
-                        if (payload == "[DONE]")
-                            continue;
-                        try
-                        {
-                            auto j = nlohmann::json::parse(payload);
-                            if (!j.contains("choices") || j["choices"].empty())
-                                continue;
-                            auto &delta = j["choices"][0]["delta"];
-
-                            if (delta.contains("reasoning_content") && on_thinking)
-                            {
-                                std::string rc = delta["reasoning_content"].get<std::string>();
-                                if (!rc.empty())
-                                    on_thinking(rc);
-                            }
-                            if (delta.contains("content"))
-                            {
-                                std::string c = delta["content"].get<std::string>();
-                                accumulated += c;
-                                if (on_token)
-                                    on_token(c);
-                            }
-                        }
-                        catch (...)
-                        {
-                        }
-                    }
-                }
-                buffer = buffer.substr(pos);
-            };
-
-            CURL *stream_curl = curl_easy_init();
-            std::string post_data = request.dump();
-            net_unit::CURL_stream_post(stream_curl, url.c_str(), post_data, header, parse_sse);
-            curl_easy_cleanup(stream_curl);
-            return accumulated;
+            return stream_chat_completions(curl_, url, request.dump(), build_headers(api_key_.str()),
+                                           on_token, on_thinking);
         }
 
+        // OpenAI Models：GET /v1/models
         std::string models()
         {
             std::string result;
-            std::string url = base_url_ + "/api/tags";
-            net_unit::CURL_get(curl_easy_init(), url.c_str(), result, "Authorization: Bearer " + api_key_.str());
-            return result;
+            std::string url = base_url_ + "/v1/models";
+            if (!net_unit::CURL_get(curl_, url.c_str(), result, build_headers(api_key_.str())))
+                return "{\"data\":[]}";
+            return normalize_models_response(result);
         }
     };
 } // namespace LLMProviders

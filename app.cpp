@@ -72,7 +72,7 @@ namespace app
             "has_key": false,
             "id": "openai-default",
             "name": "OpenAI",
-            "server_address": "http://localhost:11434",
+            "server_address": "https://api.openai.com",
             "type": "openai"
         }
     ],
@@ -177,23 +177,9 @@ namespace app
         case ProviderType::OpenAI:
             return openai_client.stream_generate(req, on_token, on_thinking);
         case ProviderType::Ollama:
+            return ollama_client.stream_generate(req, on_token, on_thinking);
         case ProviderType::Llama:
-        {
-            // Ollama/Llama 不支持流式，回退到非流式
-            nlohmann::json resp;
-            if (current_provider == ProviderType::Ollama)
-                ollama_client.generate(req, resp);
-            else
-                llama_client.generate(req, resp);
-            if (resp.contains("choices") && !resp["choices"].empty())
-            {
-                std::string content = resp["choices"][0]["message"]["content"].get<std::string>();
-                if (on_token)
-                    on_token(content);
-                return content;
-            }
-            return "";
-        }
+            return llama_client.stream_generate(req, on_token, on_thinking);
         }
         return "";
     }

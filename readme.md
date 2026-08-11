@@ -286,7 +286,7 @@ def print_tool_help():
             "id": "openai-default",              // 供应商唯一标识
             "type": "openai",                    // 供应商类型：openai / ollama / llama
             "name": "OpenAI",                    // 供应商显示名称
-            "server_address": "http://localhost:11434",  // LLM 服务地址（兼容 OpenAI API 格式）
+            "server_address": "https://api.openai.com",  // LLM 服务地址（兼容 OpenAI API 格式）
             "has_key": false                     // 是否已配置 API Key
         }
     ],

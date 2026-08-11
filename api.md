@@ -98,8 +98,21 @@
 
 * **路径**: `/api/models`
 * **方法**: `GET`
-* **描述**: 代理请求本地 Ollama 服务的 `/api/tags` 接口，返回所有可用模型。
-* **响应 (200 OK)**: Ollama 标准的 tags JSON 响应。
+* **描述**: 根据当前供应商（openai / ollama / llama）请求其模型列表接口，统一返回 OpenAI 格式。
+  * `openai` / `llama`：`GET /v1/models`（OpenAI 兼容接口）
+  * `ollama`：`GET /api/tags`（本地模型）+ `GET /api/ps`（加载状态）
+* **响应 (200 OK)**:
+
+```json
+{
+  "data": [
+    {
+      "id": "llama3.2:latest",
+      "status": { "value": "loaded" }
+    }
+  ]
+}
+```
 
 ### 2.2 接收用户输入并生成回复
 
