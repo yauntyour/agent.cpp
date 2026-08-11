@@ -2463,6 +2463,15 @@ namespace LLMProviders
         return headers;
     }
 
+    // 规范化 base_url：去掉末尾斜杠，避免拼出 "//v1/models" 双斜杠路径导致 404
+    std::string normalize_base_url(const std::string &base_url)
+    {
+        std::string url = base_url;
+        while (url.size() > 1 && url.back() == '/')
+            url.pop_back();
+        return url;
+    }
+
     // 角色规范化：自定义 user_name / agent_name 映射为标准 user / assistant
     void normalize_roles(nlohmann::json &request)
     {
@@ -2559,7 +2568,8 @@ namespace LLMProviders
         return accumulated;
     }
 
-    // OpenAI 兼容 /v1/models 响应 → WebUI 需要的 {data:[{id,status}]} 格式
+    // OpenAI 兼容 /v1/models 响应 → WebUI 需要的 {data:[{id,status}]} 格式。
+    // 服务端带真实 status 时忠实保留（如 llama.cpp 的 loaded/unloaded），否则默认 loaded
     std::string normalize_models_response(const std::string &raw)
     {
         nlohmann::json data = nlohmann::json::array();
@@ -2572,7 +2582,11 @@ namespace LLMProviders
                 std::string id = item.value("id", item.value("model", ""));
                 if (id.empty())
                     continue;
-                data.push_back({{"id", id}, {"status", {{"value", "loaded"}}}});
+                std::string status = "loaded";
+                if (item.contains("status") && item["status"].is_object() &&
+                    item["status"].contains("value") && item["status"]["value"].is_string())
+                    status = item["status"]["value"].get<std::string>();
+                data.push_back({{"id", id}, {"status", {{"value", status}}}});
             }
         }
         catch (...)
@@ -2590,9 +2604,9 @@ namespace LLMProviders
 
     public:
         explicit LlamaClient(const std::string &base_url = "http://localhost:8080", const std::string &api_key = "")
-            : base_url_(base_url), api_key_(api_key) {}
+            : base_url_(normalize_base_url(base_url)), api_key_(api_key) {}
         void set_api_key(const std::string &api_key) { api_key_.set(api_key); }
-        void set_base_url(const std::string &base_url) { base_url_ = base_url; }
+        void set_base_url(const std::string &base_url) { base_url_ = normalize_base_url(base_url); }
         ~LlamaClient()
         {
             if (curl_)
@@ -2662,9 +2676,9 @@ namespace LLMProviders
 
     public:
         explicit OllamaClient(const std::string &base_url = "http://localhost:11434", const std::string &api_key = "")
-            : base_url_(base_url), api_key_(api_key) {}
+            : base_url_(normalize_base_url(base_url)), api_key_(api_key) {}
         void set_api_key(const std::string &api_key) { api_key_.set(api_key); }
-        void set_base_url(const std::string &base_url) { base_url_ = base_url; }
+        void set_base_url(const std::string &base_url) { base_url_ = normalize_base_url(base_url); }
         ~OllamaClient()
         {
             if (curl_)
@@ -2756,9 +2770,9 @@ namespace LLMProviders
 
     public:
         explicit OpenAIClient(const std::string &base_url = "https://api.openai.com", const std::string &api_key = "")
-            : base_url_(base_url), api_key_(api_key) {}
+            : base_url_(normalize_base_url(base_url)), api_key_(api_key) {}
         void set_api_key(const std::string &api_key) { api_key_.set(api_key); }
-        void set_base_url(const std::string &base_url) { base_url_ = base_url; }
+        void set_base_url(const std::string &base_url) { base_url_ = normalize_base_url(base_url); }
         ~OpenAIClient()
         {
             if (curl_)
