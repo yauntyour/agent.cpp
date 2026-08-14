@@ -18,6 +18,30 @@
 
 ![文件系统](./assets/WebUI_2.png)
 
+### WebUI 输入栏指令系统
+
+在输入栏以 `/` 开头输入指令可快速控制系统（输入 `/` 即弹出指令补全，`Ctrl+K` 打开命令面板）：
+
+| 指令 | 功能 |
+| :--- | :--- |
+| `/help` | 显示全部指令帮助 |
+| `/new` | 新建会话 |
+| `/clear` | 清空当前会话上下文 |
+| `/memory` | 生成 / 更新记忆摘要 |
+| `/provider <id>` | 切换模型供应商 |
+| `/model <名称>` | 切换模型 |
+| `/think` | 切换深度思考模式 |
+| `/tools` | 打开工具管理面板 |
+| `/perm` | 打开工具权限管理 |
+| `/channels` | 管理频道 |
+| `/todos` | 打开任务面板 |
+| `/settings` | 打开系统设置 |
+| `/stats` | 查看使用统计 |
+| `/fs` | 切换文件浏览器 |
+| `/theme` | 切换深浅色主题 |
+| `/sessions` | 刷新会话列表 |
+| `/status` | 查看系统运行状态 |
+
 依赖需求：
 
 ```bash
@@ -50,6 +74,7 @@ rm -rf ./* && git clone --recurse-submodules https://github.com/yauntyour/agent.
 
 - **完整工具链**：通过 Python CLI 桥接方式，支持任意 Python 工具的原生链式调用，为伴侣赋予无限能力可能。
 - **轻量化扩展设计**：工具直接调用 Python CLI 脚本，避免加载臃肿的技能包描述，最大限度节省上下文 Token。
+- **工具权限系统**：`allow / deny / ask` 三级策略，高风险工具（`exec` / `write` / `edit` / `wget`）默认询问授权。WebUI 弹出授权窗口（支持记住选择、超时自动拒绝），规则持久化至 `workspace/permissions.json`，可在 WebUI 权限面板可视化管理。
 - **图片资产管理**：Base64 图片数据自动从会话记录中剥离并存储，支持图像生成等多媒体交互。
 
 ### 技术架构
@@ -58,7 +83,8 @@ rm -rf ./* && git clone --recurse-submodules https://github.com/yauntyour/agent.
 - **多供应商支持**：支持 OpenAI（标准接口）、Ollama、Llama.cpp 三种 LLM 供应商，支持 WebUI 运行时动态切换及多供应商配置并存，无需重启服务。
 - **工作区隔离**：所有用户资源（工具、系统脚本、会话、记忆、提示词）统一存放于 `workspace/` 目录下，结构与部署清晰。
 - **文件使用追踪**：系统自动追踪工具调用中访问过的文件，WebUI 实时展示文件使用状态，防止误操作。
-- **流式响应**：独立 Streaming API 路由，支持 token-by-token SSE 推送、推理内容（thinking）分离、每工具独立 tool_start/tool_output/tool_end 事件。
+- **流式响应**：独立 Streaming API 路由，支持 token-by-token SSE 推送、推理内容（thinking）分离、每工具独立 tool_start/tool_output/tool_end 事件、工具权限 permission_request/permission_result 事件。
+- **多线程事件循环**：权限授权等待期间，权限响应与其他 API 请求由工作线程并发处理，不阻塞整个服务。
 - **频道支持**：内置 Telegram 与 WeChat 频道驱动，支持多频道并发接入与独立会话记忆。
 - **会话记录热加载**：切换会话或频道时，记忆与聊天记录无缝动态加载，图片数据自动恢复。
 
@@ -85,6 +111,7 @@ rm -rf ./* && git clone --recurse-submodules https://github.com/yauntyour/agent.
     ├── agent.txt              # 系统提示词文件（100% 自定义）
     ├── webui.html             # WebUI 前端页面
     ├── webui.log              # WebUI 错误日志
+    ├── permissions.json       # 工具权限规则（allow / deny / ask，WebUI 权限面板管理）
     ├── sessions/              # 会话记录持久化（JSON，图片已剥离）
     ├── memorys/               # 会话记忆持久化
     ├── assets/                # 运行态资源
@@ -221,8 +248,9 @@ def print_tool_help():
 
 ## 安全与控制机制
 
-- **高风险操作需显式授权**：当 Agent 处于自主调用模式时，执行重启、关键文件写入等操作必须获得用户显式确认。通过主动指令触发的操作则无需二次确认（仍建议通过提示词约束 `shutdown` 等敏感行为）。
-- **工具状态实时反馈**：每次工具调用后，系统会以独立消息形式返回执行结果（成功或错误详情）。
+- **工具权限系统**：所有工具调用按「用户规则 → 默认策略」两级解析。内置高风险工具（`exec` / `write` / `edit` / `wget`）默认 `ask`（询问授权）：WebUI 会话弹出授权窗口，支持「允许 / 拒绝 / 记住选择」，超时（默认 120s，可配置）自动拒绝；频道等无交互上下文按 `channel_ask` 策略处理（默认拒绝）。
+- **权限可视化**：WebUI 权限面板（`/perm`）实时展示默认策略、用户规则与待审批队列，支持规则增删改，规则持久化至 `workspace/permissions.json`。
+- **工具状态实时反馈**：每次工具调用后，系统会以独立消息形式返回执行结果（成功或错误详情，权限拒绝时返回 `[PERMISSION_DENIED]` 原因）。
 - **开箱即用**：会话启动后即可使用全部工具，亦可随时通过 `<cs>tools_status</cs>` 查询可用工具列表。
 
 ## 会话管理
@@ -276,6 +304,14 @@ def print_tool_help():
     "stream": true,                              // 是否启用流式响应（SSE 逐 Token 输出）
     "max_mpc_rounds": 5,                         // 最大多轮工具调用轮次
     "max_context": 1048576,                      // 触发自动记忆摘要的上下文长度阈值（字节）
+    "permissions": {                             // 工具权限系统配置
+        "timeout_sec": 120,                      // 授权等待超时（秒），超时自动拒绝
+        "channel_ask": "deny",                   // 频道等无交互上下文的 ask 策略：deny / allow
+        "defaults": {                            // 默认策略（可被 permissions.json 用户规则覆盖）
+            "exec": "ask", "write": "ask", "edit": "ask", "wget": "ask",
+            "read": "allow", "Image": "allow", "*": "allow"
+        }
+    },
     "webui_password": "",                        // WebUI 登录密码（SHA3-256 哈希后存储）
     "filesystem": {
         "auto_expand": false                     // 是否自动展开文件系统面板

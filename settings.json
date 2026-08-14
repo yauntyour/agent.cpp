@@ -32,6 +32,19 @@
     "max_context": 1048576,
     "max_mpc_rounds": 5,
     "model": "uGemma4",
+    "permissions": {
+        "channel_ask": "deny",
+        "defaults": {
+            "*": "allow",
+            "Image": "allow",
+            "edit": "ask",
+            "exec": "ask",
+            "read": "allow",
+            "wget": "ask",
+            "write": "ask"
+        },
+        "timeout_sec": 120
+    },
     "prompt": "agent.txt",
     "providers": [
         {

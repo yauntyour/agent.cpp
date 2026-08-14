@@ -64,6 +64,19 @@ namespace app
     "current_provider": "openai-default",
     "max_context": 1048576,
     "max_mpc_rounds": 5,
+    "permissions": {
+        "timeout_sec": 120,
+        "channel_ask": "deny",
+        "defaults": {
+            "exec": "ask",
+            "write": "ask",
+            "edit": "ask",
+            "wget": "ask",
+            "read": "allow",
+            "Image": "allow",
+            "*": "allow"
+        }
+    },
     "model": "uGemma4",
     "webui_password": "a2aba198385559c15dc12398e197d556ef3cd6b45329d003b8886a0eecedec05",
     "prompt": "agent.txt",
@@ -125,6 +138,8 @@ namespace app
     // 全局聊天互斥锁：频道 bot 线程（tg_worker / wx_worker）现在直接进程内调用
     // channel_chat()，与主线程 HTTP 会话共享 LLM 客户端、会话管理器与工具队列，
     // 统一串行化这些共享状态的读写，避免并发竞争。
+    // 服务器采用多线程 io_context.run()：权限等待期间 /api/permission/respond
+    // 由其他工作线程并发处理，本锁保证聊天/会话状态不并发访问。
     static std::mutex chat_mutex;
 
     // ==================== 模型供应商支持 ====================
@@ -402,6 +417,9 @@ namespace app
                         run_unit::cs_prompt;
         replaceAll(system_prompt, "    ", "");
         replaceAll(system_prompt, "\r\n", "");
+
+        // 初始化工具权限系统（加载 workspace/permissions.json 规则与默认策略）
+        perm_unit::manager().init(run_unit::settings["workspace"].get<std::string>());
         return 0;
     }
 
@@ -595,8 +613,10 @@ namespace app
             }
 
             // 扫描工具/CS 调用
+            // 频道上下文无交互授权窗口：ask 策略的工具按 channel_ask 设置处理（默认拒绝）
             std::string sys_out;
-            auto [tools_called, tools_ok] = tool_unit::tools_scan(response_text, sys_out);
+            std::string ctx_id = channel.empty() ? sid : channel;
+            auto [tools_called, tools_ok] = tool_unit::tools_scan(response_text, sys_out, ctx_id);
             auto cs_called = cs_unit::cs_scan(response_text, sys_out);
 
             // 收集工具调用信息
@@ -739,6 +759,12 @@ namespace app
 
         int handle_tools_toggle(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
 
+        // ——— 工具权限系统 API ———
+        int handle_permissions_get(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+        int handle_permissions_set(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+        int handle_permissions_delete(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+        int handle_permission_respond(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
+
         int handle_fs_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
         int handle_fs_used(std::string &input, std::string &output, const std::map<std::string, std::string> &params);
 
@@ -778,6 +804,12 @@ namespace app
             router.on("/api/channel/start", handle_channel_start);           // POST — 运行时启动指定频道 Bot
             router.on("/api/tools", handle_tools_list);
             router.on("/api/tools/toggle", handle_tools_toggle);
+
+            // 工具权限系统 API
+            router.on("/api/permissions", handle_permissions_get);        // GET — 规则/默认策略/待审批队列
+            router.on("/api/permissions/set", handle_permissions_set);    // POST — 新增/更新规则
+            router.on("/api/permissions/delete", handle_permissions_delete); // POST — 删除规则
+            router.on("/api/permission/respond", handle_permission_respond); // POST — 响应待审批请求
             router.on("/api/fs/list", handle_fs_list);
             router.on("/api/fs/used", handle_fs_used);
             router.on("/api/todos", handle_todos_list);
@@ -811,6 +843,7 @@ namespace app
         }
         int handle_models(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
+            std::lock_guard<std::mutex> lk(chat_mutex);
             try
             {
                 output = build_http_response(200, "application/json", client_models());
@@ -1062,6 +1095,7 @@ namespace app
         // GET /api/providers → 返回所有供应商列表
         int handle_providers_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
+            std::lock_guard<std::mutex> lk(chat_mutex);
             try
             {
                 json resp = {
@@ -1302,6 +1336,7 @@ namespace app
         // 将 api_key 加密后存入 workspace/tokens/providers/<id>.enc
         int handle_provider_key_set(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
+            std::lock_guard<std::mutex> lk(chat_mutex);
             try
             {
                 size_t header_end = input.find("\r\n\r\n");
@@ -1355,6 +1390,7 @@ namespace app
         // GET /api/provider/key/:id  → 返回解密后的 {id, api_key}
         int handle_provider_key_get(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
+            std::lock_guard<std::mutex> lk(chat_mutex);
             try
             {
                 auto it = params.find("id");
@@ -1400,6 +1436,7 @@ namespace app
 
         int handle_channels_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
+            std::lock_guard<std::mutex> lk(chat_mutex);
             output = build_http_response(200, "application/json", run_unit::settings["channels"].dump());
             return rt::FLAG_DONE;
         }
@@ -1410,6 +1447,7 @@ namespace app
         // 将 token 加密后存入 workspace/tokens/<name>.enc
         int handle_channel_token_set(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
+            std::lock_guard<std::mutex> lk(chat_mutex);
             try
             {
                 size_t header_end = input.find("\r\n\r\n");
@@ -1464,6 +1502,7 @@ namespace app
         // Python 机器人启动时调用此接口获取 bot_token
         int handle_channel_token_get(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
+            std::lock_guard<std::mutex> lk(chat_mutex);
             try
             {
                 auto it = params.find("name");
@@ -1510,6 +1549,7 @@ namespace app
         // GET /api/channel/qr/:name → {name, state, detail, qr_svg(base64), qr_url, running}
         int handle_channel_qr(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
+            std::lock_guard<std::mutex> lk(chat_mutex);
             try
             {
                 auto it = params.find("name");
@@ -1533,6 +1573,7 @@ namespace app
         // GET /api/channel/status → 全部内置 Bot 运行状态
         int handle_channel_status(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
+            std::lock_guard<std::mutex> lk(chat_mutex);
             try
             {
                 output = build_http_response(200, "application/json", bot::channel_status_json().dump());
@@ -1550,6 +1591,7 @@ namespace app
         // 运行时按 settings.json channels 配置拉起指定频道的内置 Bot
         int handle_channel_start(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
+            std::lock_guard<std::mutex> lk(chat_mutex);
             try
             {
                 size_t header_end = input.find("\r\n\r\n");
@@ -1576,11 +1618,13 @@ namespace app
         }
         int handle_tools_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
+            std::lock_guard<std::mutex> lk(chat_mutex);
             output = build_http_response(200, "application/json", run_unit::tools_list.dump());
             return rt::FLAG_DONE;
         }
         int handle_tools_toggle(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
+            std::lock_guard<std::mutex> lk(chat_mutex);
             try
             {
                 size_t header_end = input.find("\r\n\r\n");
@@ -1624,8 +1668,110 @@ namespace app
                 return rt::FLAG_ERROR;
             }
         }
+
+        // ————— 工具权限系统 API —————
+        int handle_permissions_get(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+        {
+            try
+            {
+                json resp = {
+                    {"rules", perm_unit::manager().rules_json()},
+                    {"defaults", perm_unit::manager().defaults_json()},
+                    {"pending", perm_unit::manager().pending_json()},
+                    {"timeout_sec", perm_unit::manager().timeout_sec()}};
+                output = build_http_response(200, "application/json", resp.dump());
+                return rt::FLAG_DONE;
+            }
+            catch (const std::exception &e)
+            {
+                webui_log("ERROR", "handle_permissions_get", e.what());
+                output = build_http_response(500, "application/json", json{{"error", e.what()}}.dump());
+                return rt::FLAG_ERROR;
+            }
+        }
+        int handle_permissions_set(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+        {
+            try
+            {
+                size_t header_end = input.find("\r\n\r\n");
+                std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
+                json request = json::parse(body);
+                std::string tool = request.value("tool", "");
+                std::string pattern = request.value("pattern", "");
+                std::string policy = request.value("policy", "");
+                std::string err;
+                if (!perm_unit::manager().set_rule(tool, pattern, policy, err))
+                {
+                    output = build_http_response(400, "application/json", json{{"error", err}}.dump());
+                    return rt::FLAG_ERROR;
+                }
+                output = build_http_response(200, "application/json",
+                                             json{{"status", "OK"}, {"tool", tool}, {"pattern", pattern}, {"policy", policy}}.dump());
+                return rt::FLAG_DONE;
+            }
+            catch (const std::exception &e)
+            {
+                webui_log("ERROR", "handle_permissions_set", e.what());
+                output = build_http_response(500, "application/json", json{{"error", e.what()}}.dump());
+                return rt::FLAG_ERROR;
+            }
+        }
+        int handle_permissions_delete(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+        {
+            try
+            {
+                size_t header_end = input.find("\r\n\r\n");
+                std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
+                json request = json::parse(body);
+                std::string tool = request.value("tool", "");
+                std::string pattern = request.value("pattern", "");
+                std::string err;
+                if (!perm_unit::manager().delete_rule(tool, pattern, err))
+                {
+                    output = build_http_response(404, "application/json", json{{"error", err}}.dump());
+                    return rt::FLAG_ERROR;
+                }
+                output = build_http_response(200, "application/json",
+                                             json{{"status", "OK"}, {"tool", tool}, {"pattern", pattern}}.dump());
+                return rt::FLAG_DONE;
+            }
+            catch (const std::exception &e)
+            {
+                webui_log("ERROR", "handle_permissions_delete", e.what());
+                output = build_http_response(500, "application/json", json{{"error", e.what()}}.dump());
+                return rt::FLAG_ERROR;
+            }
+        }
+        int handle_permission_respond(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
+        {
+            try
+            {
+                size_t header_end = input.find("\r\n\r\n");
+                std::string body = (header_end != std::string::npos) ? input.substr(header_end + 4) : "";
+                json request = json::parse(body);
+                std::string id = request.value("id", "");
+                bool granted = request.value("granted", false);
+                bool remember = request.value("remember", false);
+                std::string err;
+                if (!perm_unit::manager().respond(id, granted, remember, err))
+                {
+                    output = build_http_response(404, "application/json", json{{"error", err}}.dump());
+                    return rt::FLAG_ERROR;
+                }
+                output = build_http_response(200, "application/json",
+                                             json{{"status", "OK"}, {"id", id}, {"granted", granted}, {"remember", remember}}.dump());
+                return rt::FLAG_DONE;
+            }
+            catch (const std::exception &e)
+            {
+                webui_log("ERROR", "handle_permission_respond", e.what());
+                output = build_http_response(500, "application/json", json{{"error", e.what()}}.dump());
+                return rt::FLAG_ERROR;
+            }
+        }
         int handle_fs_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
+            std::lock_guard<std::mutex> lk(chat_mutex);
             try
             {
                 size_t header_end = input.find("\r\n\r\n");
@@ -1695,6 +1841,7 @@ namespace app
         }
         int handle_fs_used(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
+            std::lock_guard<std::mutex> lk(chat_mutex);
             try
             {
                 auto used = run_unit::get_used_files();
@@ -1719,6 +1866,7 @@ namespace app
         }
         int handle_todos_list(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
+            std::lock_guard<std::mutex> lk(chat_mutex);
             try
             {
                 json::array_t todos = json::parse(tool_unit::readFile(
@@ -1741,6 +1889,7 @@ namespace app
         }
         int handle_todos_setting(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
+            std::lock_guard<std::mutex> lk(chat_mutex);
             try
             {
                 size_t header_end = input.find("\r\n\r\n");
@@ -1779,6 +1928,7 @@ namespace app
         }
         int handle_todos_delete(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
+            std::lock_guard<std::mutex> lk(chat_mutex);
             std::string id = params.count("id") ? params.at("id") : "unknown";
             json::array_t todos = json::parse(tool_unit::readFile(
                 run_unit::settings["workspace"].get_ref<const std::string &>() + "/sys/todos.json"));
@@ -1792,6 +1942,7 @@ namespace app
         }
         int handle_todos_new(std::string &input, std::string &output, const std::map<std::string, std::string> &params)
         {
+            std::lock_guard<std::mutex> lk(chat_mutex);
             try
             {
                 size_t header_end = input.find("\r\n\r\n");
@@ -1942,7 +2093,6 @@ namespace app
                             thinking_text += chunk;
                             sse({{"type", "thinking"}, {"content", chunk}});
                         });
-
                     if (think_mode && !thinking_text.empty())
                         thinkings.push_back(thinking_text);
 
@@ -1956,8 +2106,32 @@ namespace app
                     session_ptr->messages.push_back(agent_response);
 
                     // 扫描工具/CS 调用
+                    // 权限系统：ask 策略的工具推送 permission_request 事件到 WebUI，
+                    // 授权等待期间由事件循环的其他工作线程处理 /api/permission/respond
                     std::string sys_out;
-                    auto [tools_called, tools_ok] = tool_unit::tools_scan(response_text, sys_out);
+                    std::string ctx_id = sid.empty() ? (session_ptr ? session_ptr->session_id : "") : sid;
+                    auto [tools_called, tools_ok] = tool_unit::tools_scan(
+                        response_text, sys_out, ctx_id,
+                        [&](const perm_unit::PendingRequest &req, bool finished)
+                        {
+                            if (!finished)
+                            {
+                                sse({{"type", "permission_request"},
+                                     {"id", req.id},
+                                     {"session_id", req.session_id},
+                                     {"tool", req.tool},
+                                     {"args", req.args},
+                                     {"timeout", req.timeout_sec}});
+                            }
+                            else
+                            {
+                                sse({{"type", "permission_result"},
+                                     {"id", req.id},
+                                     {"granted", req.granted},
+                                     {"remember", req.remember},
+                                     {"timed_out", req.timed_out}});
+                            }
+                        });
                     auto cs_called = cs_unit::cs_scan(response_text, sys_out);
 
                     if (tools_called == 0 && cs_called == 0)
@@ -2179,8 +2353,27 @@ int main(int argc, char *argv[])
         bot::start_channels();
 
         std::cout << "http://localhost:" << port << std::endl;
+
+        // 多线程事件循环：流式会话在权限授权等待（最长 timeout_sec 秒）期间，
+        // /api/permission/respond 等请求仍由其他工作线程并发处理，不会阻塞整个服务。
+        // work_guard 保证 io_context 在无待处理任务时也不会让 run() 返回。
+        auto io_work = boost::asio::make_work_guard(io_context);
+        unsigned int worker_count = std::max(2u, std::thread::hardware_concurrency());
+        std::vector<std::thread> workers;
+        workers.reserve(worker_count - 1);
+        for (unsigned int i = 1; i < worker_count; ++i)
+        {
+            workers.emplace_back([&io_context]()
+                                 { io_context.run(); });
+        }
+
         servic::Server server(io_context, port);
-        server.run(router);
+        server.run(router); // 主线程同样参与事件循环（阻塞）
+
+        io_work.reset();
+        for (auto &w : workers)
+            if (w.joinable())
+                w.join();
     }
     catch (const std::exception &e)
     {

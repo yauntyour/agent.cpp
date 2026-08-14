@@ -348,3 +348,137 @@
 * **`GET/POST`** `/api/todos/:name` (查询或设置具体待办)
 * **`POST`** `/api/todos/new` (新增待办事项)
 * **`POST`** `/api/todos/delete` (删除待办事项)
+
+---
+
+## 6. 工具权限系统 (Tool Permission System)
+
+工具权限系统为 Agent 的工具调用提供三级策略：`allow`（放行）/ `deny`（拒绝）/ `ask`（询问用户）。
+
+* **策略解析顺序**：用户规则（`workspace/permissions.json`）→ 默认策略（`settings.json → permissions.defaults`）→ 兜底（内置：`exec/write/edit/wget` 为 `ask`，其余 `allow`）。
+* **授权等待**：命中 `ask` 的工具在 WebUI 流式会话中触发授权弹窗，等待期间由事件循环其他工作线程并发处理响应请求；超时（`permissions.timeout_sec`，默认 120 秒）自动拒绝。
+* **无交互上下文**（Telegram / WeChat 频道）：`ask` 按 `permissions.channel_ask` 处理（默认 `deny`，安全优先）。
+
+### 6.1 获取权限配置
+
+* **路径**: `/api/permissions`
+* **方法**: `GET`
+* **描述**: 返回当前权限规则、默认策略、待审批队列与超时配置。
+* **响应 (200 OK)**:
+
+```json
+{
+  "rules": [
+    {
+      "tool": "exec",
+      "pattern": "",
+      "policy": "allow",
+      "note": "user",
+      "created_at": 1786678973
+    }
+  ],
+  "defaults": {
+    "exec": "ask",
+    "write": "ask",
+    "edit": "ask",
+    "wget": "ask",
+    "read": "allow",
+    "Image": "allow",
+    "*": "allow"
+  },
+  "pending": [],
+  "timeout_sec": 120
+}
+```
+
+### 6.2 新增 / 更新规则
+
+* **路径**: `/api/permissions/set`
+* **方法**: `POST`
+* **描述**: 新增或更新一条权限规则。`tool` 为工具名（`*` 表示全部）；`pattern` 为参数匹配子串（空或 `*` 表示全部参数）；`policy` 取值 `allow` / `deny` / `ask`。
+* **请求 Body (JSON)**:
+
+```json
+{
+  "tool": "exec",
+  "pattern": "rm -rf",
+  "policy": "deny"
+}
+```
+
+* **响应 (200 OK)**: `{"status": "OK", "tool": "exec", "pattern": "rm -rf", "policy": "deny"}`
+
+### 6.3 删除规则
+
+* **路径**: `/api/permissions/delete`
+* **方法**: `POST`
+* **描述**: 删除指定工具 + 参数模式对应的规则。
+* **请求 Body (JSON)**: `{"tool": "exec", "pattern": "rm -rf"}`
+* **响应 (200 OK)**: `{"status": "OK", "tool": "exec", "pattern": "rm -rf"}`
+
+### 6.4 响应待审批请求
+
+* **路径**: `/api/permission/respond`
+* **方法**: `POST`
+* **描述**: 用户对授权弹窗做出决定。`remember` 为 `true` 时将该决定持久化为该工具的全局规则（后续调用不再询问）。
+* **请求 Body (JSON)**:
+
+```json
+{
+  "id": "42f3fbd0be611b832dd5ecd23cd890f2",
+  "granted": true,
+  "remember": false
+}
+```
+
+* **响应 (200 OK)**: `{"status": "OK", "id": "...", "granted": true, "remember": false}`
+
+### 6.5 流式 SSE 权限事件
+
+`/api/input/stream` 在工具调用命中 `ask` 策略时推送以下事件：
+
+* **`permission_request`**（授权请求到达，WebUI 弹出授权窗口）:
+
+```json
+{"type": "permission_request", "id": "...", "session_id": "...", "tool": "exec", "args": "echo hello", "timeout": 120}
+```
+
+* **`permission_result`**（授权结果：用户响应或超时）:
+
+```json
+{"type": "permission_result", "id": "...", "granted": true, "remember": false, "timed_out": false}
+```
+
+### 6.6 权限配置文件
+
+`workspace/permissions.json`（规则持久化，由 WebUI 权限面板 / API 管理）：
+
+```json
+[
+  {
+    "tool": "exec",
+    "pattern": "",
+    "policy": "allow",
+    "note": "user (remembered)",
+    "created_at": 1786678973
+  }
+]
+```
+
+`settings.json` 权限相关配置：
+
+```json
+"permissions": {
+    "timeout_sec": 120,
+    "channel_ask": "deny",
+    "defaults": {
+        "exec": "ask",
+        "write": "ask",
+        "edit": "ask",
+        "wget": "ask",
+        "read": "allow",
+        "Image": "allow",
+        "*": "allow"
+    }
+}
+```
