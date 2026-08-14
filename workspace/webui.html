@@ -233,6 +233,112 @@
             opacity: 1;
         }
 
+        /* 工具权限系统 UI */
+        .perm-count-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            color: #fbbf24;
+            background: rgba(251, 191, 36, 0.1);
+            border: 1px solid rgba(251, 191, 36, 0.25);
+            padding: 2px 8px;
+            border-radius: 999px;
+        }
+        .perm-badge {
+            display: inline-block;
+            font-size: 10px;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 999px;
+            letter-spacing: 0.03em;
+        }
+        .perm-badge-allow {
+            color: #4ade80;
+            background: rgba(74, 222, 128, 0.12);
+            border: 1px solid rgba(74, 222, 128, 0.3);
+        }
+        .perm-badge-ask {
+            color: #fbbf24;
+            background: rgba(251, 191, 36, 0.12);
+            border: 1px solid rgba(251, 191, 36, 0.3);
+        }
+        .perm-badge-deny {
+            color: #f87171;
+            background: rgba(248, 113, 113, 0.12);
+            border: 1px solid rgba(248, 113, 113, 0.3);
+        }
+        .perm-tool-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            color: #a5b4fc;
+            background: rgba(99, 102, 241, 0.12);
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            padding: 2px 10px;
+            border-radius: 999px;
+        }
+        .perm-card {
+            background: var(--bg-base);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 10px 12px;
+        }
+        .perm-args {
+            margin: 8px 0 0;
+            padding: 8px 10px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            font-size: 11px;
+            line-height: 1.5;
+            color: var(--text-muted);
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 160px;
+            overflow-y: auto;
+        }
+        .perm-btn {
+            border: none;
+            border-radius: var(--radius-sm);
+            padding: 6px 14px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            color: #fff;
+            transition: filter var(--transition-fast);
+        }
+        .perm-btn:hover {
+            filter: brightness(1.15);
+        }
+        .perm-btn-allow {
+            background: #16a34a;
+        }
+        .perm-btn-deny {
+            background: #dc2626;
+        }
+        .perm-btn-del {
+            background: transparent;
+            color: var(--text-dim);
+            padding: 2px 6px;
+            font-size: 11px;
+        }
+        .perm-btn-del:hover {
+            color: #f87171;
+        }
+        .perm-rule-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 8px;
+            background: var(--bg-base);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            font-size: 12px;
+        }
+
         /* 侧边栏 */
         .sidebar-header {
             padding: 14px 14px 12px;
@@ -2288,6 +2394,8 @@
                 <button class="overlay-tab active" data-otab="settings">配置</button>
                 <button class="overlay-tab" data-otab="providers">供应商</button>
                 <button class="overlay-tab" data-otab="tools">工具</button>
+                <button class="overlay-tab" data-otab="permissions">权限<span id="perm-tab-badge"
+                        class="perm-count-badge" style="display:none;margin-left:4px;padding:0 5px;font-size:10px;"></span></button>
                 <button class="overlay-tab" data-otab="todos">任务</button>
                 <button class="overlay-tab" data-otab="channels">频道</button>
                 <button class="overlay-tab" data-otab="logs">日志</button>
@@ -2321,6 +2429,45 @@
                             style="font-size:11px;color:var(--text-dim);background:var(--bg-base);padding:4px 10px;border-radius:var(--radius-sm);border:1px solid var(--border-color);white-space:nowrap;">0/0</span>
                     </div>
                     <div id="tools-toggle-list" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;"></div>
+                </div>
+                <div class="overlay-panel" id="opanel-permissions">
+                    <div id="perm-header-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+                        <span style="font-size:12px;color:var(--text-muted);font-weight:500;">工具权限管理</span>
+                        <span id="perm-pending-count" class="perm-count-badge" style="display:none;">0 待审批</span>
+                        <button class="save-btn" onclick="loadPermissions()" title="刷新"
+                            style="margin-left:auto;margin-top:0;padding:6px 10px;font-size:11px;background:var(--bg-elevated);"><i
+                                class="fa-solid fa-rotate"></i> 刷新</button>
+                    </div>
+                    <div class="setting-group">
+                        <div class="setting-group-title">待审批队列</div>
+                        <div id="perm-pending-list" style="display:grid;gap:8px;"></div>
+                    </div>
+                    <div class="setting-group">
+                        <div class="setting-group-title">用户规则（workspace/permissions.json）</div>
+                        <div id="perm-rules-list" style="display:grid;gap:6px;"></div>
+                        <div
+                            style="display:grid;grid-template-columns:1fr 1fr 110px auto;gap:6px;margin-top:10px;align-items:center;">
+                            <input type="text" id="perm-rule-tool" list="perm-tool-list" placeholder="工具名（如 exec / *）"
+                                style="background:var(--bg-base);border:1px solid var(--border-color);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text-main);font-size:12px;outline:none;">
+                            <datalist id="perm-tool-list"></datalist>
+                            <input type="text" id="perm-rule-pattern" placeholder="参数匹配（留空=全部）"
+                                style="background:var(--bg-base);border:1px solid var(--border-color);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text-main);font-size:12px;outline:none;">
+                            <select id="perm-rule-policy"
+                                style="background:var(--bg-base);border:1px solid var(--border-color);border-radius:var(--radius-sm);padding:7px 6px;color:var(--text-main);font-size:12px;outline:none;">
+                                <option value="allow">allow 放行</option>
+                                <option value="ask" selected>ask 询问</option>
+                                <option value="deny">deny 拒绝</option>
+                            </select>
+                            <button class="save-btn" onclick="addPermissionRule()"
+                                style="margin:0;padding:7px 12px;font-size:12px;background:var(--accent-color);white-space:nowrap;"><i
+                                    class="fa-solid fa-plus"></i> 新增</button>
+                        </div>
+                    </div>
+                    <div class="setting-group">
+                        <div class="setting-group-title">默认策略（settings.json → permissions.defaults）</div>
+                        <div id="perm-defaults-list" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+                        <div style="font-size:11px;color:var(--text-dim);margin-top:8px;">用户规则优先于默认策略；默认策略可在「配置」页修改，重启服务后生效。</div>
+                    </div>
                 </div>
                 <div class="overlay-panel" id="opanel-todos">
                     <div style="display:flex;gap:6px;margin-bottom:10px;">
@@ -2382,6 +2529,20 @@
         </div>
     </div>
 
+    <!-- 工具授权请求弹窗（居中模态） -->
+    <div id="perm-approve-overlay" class="qr-modal">
+        <div class="qr-modal-box" style="width:420px;">
+            <div class="overlay-header">
+                <h2><i class="fa-solid fa-shield-halved" style="color:#fbbf24;margin-right:6px;"></i>工具授权请求</h2>
+                <button class="icon-btn" id="close-perm-approve-btn" style="font-size:16px;"><i
+                        class="fa-solid fa-times"></i></button>
+            </div>
+            <div class="overlay-body" id="perm-approve-body">
+                <div style="padding:40px 20px;text-align:center;color:var(--text-dim);font-size:13px;">暂无待授权请求</div>
+            </div>
+        </div>
+    </div>
+
     <!-- 加载覆盖层 -->
     <div id="loading-overlay">
         <div class="loading-spinner">
@@ -2409,7 +2570,10 @@
             _scrollAtBottom: true,
             providers: [],
             currentProviderId: null,
-            theme: localStorage.getItem('theme') || 'dark'
+            theme: localStorage.getItem('theme') || 'dark',
+            // 工具权限系统
+            permRules: [], permDefaults: {}, permPending: [], permQueue: [],
+            permModalId: null, permTimeoutSec: 120
         };
         const API = '/api';
 
@@ -2434,6 +2598,11 @@
             imagePreviewContainer: $('#image-preview-container'),
             settingsFormContainer: $('#settings-form-container'), saveSettingsBtn: $('#save-settings-btn'),
             dataStatsBtn: $('#data-stats-btn'), toolsToggleList: $('#tools-toggle-list'),
+            permTabBadge: $('#perm-tab-badge'), permPendingList: $('#perm-pending-list'),
+            permRulesList: $('#perm-rules-list'), permDefaultsList: $('#perm-defaults-list'),
+            permToolList: $('#perm-tool-list'),
+            permApproveOverlay: $('#perm-approve-overlay'), permApproveBody: $('#perm-approve-body'),
+            permApproveCloseBtn: $('#close-perm-approve-btn'),
             settingsGearBtn: $('#settings-gear-btn'), closeSettingsBtn: $('#close-settings-btn'),
             settingsOverlay: $('#settings-overlay'), overlayBackdrop: $('#overlay-backdrop'),
             statsOverlay: $('#stats-overlay'), statsOverlayBody: $('#stats-overlay-body'),
@@ -2512,10 +2681,12 @@
             els.channelOverlay.classList.remove('open');
             els.overlayBackdrop.classList.remove('show');
             closeChannelQrLogin();
+            stopPermPoll();
         }
         els.settingsGearBtn.onclick = openOverlay;
         els.closeSettingsBtn.onclick = () => {
             els.settingsOverlay.classList.remove('open');
+            stopPermPoll();
             if (!els.statsOverlay.classList.contains('open') && !els.channelOverlay.classList.contains('open')) {
                 els.overlayBackdrop.classList.remove('show');
             }
@@ -2544,6 +2715,13 @@
                 btn.classList.add('active');
                 $$('.overlay-panel').forEach(p => p.classList.remove('active'));
                 $(`#opanel-${btn.dataset.otab}`).classList.add('active');
+                // 权限面板：打开时加载数据并轮询待审批队列
+                if (btn.dataset.otab === 'permissions') {
+                    loadPermissions();
+                    startPermPoll();
+                } else {
+                    stopPermPoll();
+                }
             };
         });
 
@@ -2879,6 +3057,31 @@
       <div class="setting-row check-row"><input type="checkbox" id="s-auto_expand" ${s.filesystem?.auto_expand !== false ? 'checked' : ''}><label for="s-auto_expand">文件浏览器自动展开（工具调用时）</label></div>
     </div>
     <div class="setting-group">
+      <div class="setting-group-title">权限策略</div>
+      <div class="setting-row"><label>审批超时（秒）</label><input type="number" id="s-perm-timeout" value="${s.permissions?.timeout_sec || 120}" min="5" max="3600"></div>
+      <div class="setting-row"><label>频道上下文审批策略（channel_ask，无交互上下文时使用）</label>
+        <select id="s-perm-channel-ask" style="width:100%;background:var(--bg-base);border:1px solid var(--border-color);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text-main);font-size:12px;outline:none;">
+          ${['deny', 'allow'].map(v => `<option value="${v}" ${(s.permissions?.channel_ask || 'deny') === v ? 'selected' : ''}>${v === 'allow' ? 'allow（自动放行）' : 'deny（自动拒绝，推荐）'}</option>`).join('')}
+        </select>
+      </div>
+      <div class="setting-row"><label>工具默认策略（defaults）</label>
+        ${(() => {
+          const d = (s.permissions && s.permissions.defaults) || {};
+          const labels = { exec: 'exec 执行命令', write: 'write 写入文件', edit: 'edit 编辑文件', wget: 'wget 网络下载', read: 'read 读取文件', Image: 'Image 图像', '*': '* 全部工具' };
+          const keys = ['exec', 'write', 'edit', 'wget', 'read', 'Image', '*'];
+          const extras = Object.keys(d).filter(k => !keys.includes(k));
+          return [...keys, ...extras].map(k => `
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            <span style="flex:1;font-size:12px;color:var(--text-main);font-family:'JetBrains Mono',monospace;">${esc(labels[k] || k)}</span>
+            <select data-perm-default="${esc(k)}" style="width:110px;background:var(--bg-base);border:1px solid var(--border-color);border-radius:var(--radius-sm);padding:5px 8px;color:var(--text-main);font-size:12px;outline:none;">
+              ${['allow', 'ask', 'deny'].map(v => `<option value="${v}" ${(d[k] || 'ask') === v ? 'selected' : ''}>${v}</option>`).join('')}
+            </select>
+          </div>`).join('');
+        })()}
+        <div style="font-size:11px;color:var(--text-dim);margin-top:4px;padding-left:4px;">用户规则（权限面板）优先于默认策略；默认策略修改需重启服务后生效</div>
+      </div>
+    </div>
+    <div class="setting-group">
       <div class="setting-group-title">频道配置</div>
       <div class="setting-row">
         <button class="save-btn" onclick="openChannelOverlay()" style="margin-top:0;background:var(--bg-elevated);font-size:12px;"><i class="fa-solid fa-sliders"></i> 打开频道管理器</button>
@@ -2904,6 +3107,15 @@
                 max_mpc_rounds: parseInt($('#s-max_mpc_rounds')?.value) || 5,
                 max_context: parseInt($('#s-max_context')?.value) || 128000,
                 auto_summary_threshold: parseInt($('#s-auto_summary_threshold')?.value) || 0,
+                permissions: {
+                    timeout_sec: parseInt($('#s-perm-timeout')?.value) || 120,
+                    channel_ask: $('#s-perm-channel-ask')?.value || 'deny',
+                    defaults: (() => {
+                        const d = {};
+                        document.querySelectorAll('[data-perm-default]').forEach(el => { d[el.dataset.permDefault] = el.value; });
+                        return d;
+                    })()
+                },
                 channels: state.settings.channels || []
             };
             state.settings = ns;
@@ -3698,6 +3910,30 @@
                     fb.refresh();
                     if (fb.autoExpand && !fb.visible) fb.show();
                     break;
+                // 权限系统：ask 策略工具发起授权请求 → 弹出授权窗口
+                case 'permission_request': {
+                    const pr = { id: ev.id, session_id: ev.session_id || '', tool: ev.tool || '', args: ev.args || '', created_at: ev.created_at || Math.floor(Date.now() / 1000), timeout: ev.timeout || 120 };
+                    if (!state.permPending.some(p => p.id === pr.id)) {
+                        state.permPending.push(pr);
+                        renderPermPending();
+                    }
+                    if (!state.permQueue.some(q => q.id === pr.id)) {
+                        state.permQueue.push(pr);
+                        toast(`🔔 工具 ${pr.tool} 请求授权`, 'info');
+                    }
+                    dequeuePermissionModal();
+                    break;
+                }
+                // 权限系统：授权结果（用户响应或超时）
+                case 'permission_result': {
+                    const pi = state.permPending.findIndex(p => p.id === ev.id);
+                    if (pi !== -1) { state.permPending.splice(pi, 1); renderPermPending(); }
+                    state.permQueue = state.permQueue.filter(q => q.id !== ev.id);
+                    if (state.permModalId === ev.id) hidePermissionModal();
+                    if (ev.timed_out) toast('审批超时，已自动拒绝', 'error');
+                    else toast(`工具授权已${ev.granted ? '通过' : '拒绝'}`, ev.granted ? 'success' : 'info');
+                    break;
+                }
                 case 'done':
                     updateAssistantMsg(msgId, { content: sb.content, _typing: false, _thinkings: sb.thinkings, _toolCalls: sb.toolOutputs, _usage: ev.usage });
                     // 更新上下文使用显示
@@ -3736,6 +3972,171 @@
                     break;
             }
         }
+
+        // ============ 工具权限系统（审批 + 规则管理） ============
+        let permPollTimer = null;
+        let permCountdownTimer = null;
+        function permPendingCount() { return (state.permPending || []).filter(p => !p._answered).length; }
+        function updatePermTabBadge() {
+            const n = permPendingCount();
+            els.permTabBadge.textContent = n > 0 ? String(n) : '';
+            els.permTabBadge.style.display = n > 0 ? 'inline-flex' : 'none';
+            const pc = document.getElementById('perm-pending-count');
+            if (pc) { pc.textContent = n > 0 ? n + ' 待审批' : ''; pc.style.display = n > 0 ? 'inline-flex' : 'none'; }
+        }
+        async function loadPermissions() {
+            try {
+                const r = await axios.get(API + '/permissions');
+                const d = r.data || {};
+                state.permRules = d.rules || [];
+                state.permDefaults = d.defaults || {};
+                state.permPending = d.pending || [];
+                state.permTimeoutSec = d.timeout_sec || 120;
+                renderPermissionPanel();
+            } catch (e) { log('加载权限数据失败: ' + (e.message || e), 'error'); }
+        }
+        function renderPermissionPanel() {
+            renderPermPending(); renderPermRules(); renderPermDefaults();
+            if (els.permToolList && state.tools?.length)
+                els.permToolList.innerHTML = state.tools.map(t => `<option value="${esc(t.name)}">`).join('');
+            updatePermTabBadge();
+        }
+        function renderPermPending() {
+            const items = (state.permPending || []).filter(p => !p._answered);
+            if (!items.length) {
+                els.permPendingList.innerHTML = '<div style="color:var(--text-dim);font-size:12px;text-align:center;padding:10px;">暂无待审批请求</div>';
+            } else {
+                els.permPendingList.innerHTML = items.map(p => `
+    <div class="perm-card">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span class="perm-tool-chip"><i class="fa-solid fa-screwdriver-wrench" style="font-size:10px;"></i>${esc(p.tool)}</span>
+            <span style="font-size:11px;color:var(--text-dim);">会话: ${esc(p.session_id || '-')}</span>
+            <span style="font-size:11px;color:var(--text-dim);margin-left:auto;">发起 ${new Date((p.created_at || 0) * 1000).toLocaleTimeString()} · 超时 ${p.timeout || 120}s</span>
+        </div>
+        <pre class="perm-args">${esc(p.args || '(无参数)')}</pre>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:8px;">
+            <label style="font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:5px;cursor:pointer;">
+                <input type="checkbox" id="perm-remember-${p.id}"> 记住该选择
+            </label>
+            <div style="margin-left:auto;display:flex;gap:6px;">
+                <button class="perm-btn perm-btn-deny" onclick="respondPermission('${p.id}', false)">拒绝</button>
+                <button class="perm-btn perm-btn-allow" onclick="respondPermission('${p.id}', true)">允许</button>
+            </div>
+        </div>
+    </div>`).join('');
+            }
+            updatePermTabBadge();
+        }
+        function renderPermRules() {
+            const rules = state.permRules || [];
+            if (!rules.length) {
+                els.permRulesList.innerHTML = '<div style="color:var(--text-dim);font-size:12px;text-align:center;padding:10px;">暂无用户规则，工具按默认策略执行</div>';
+                return;
+            }
+            els.permRulesList.innerHTML = rules.map((r, i) => `
+    <div class="perm-rule-row">
+        <span class="perm-tool-chip" style="font-size:11px;padding:1px 8px;">${esc(r.tool)}</span>
+        <code style="font-size:11px;color:var(--text-dim);">${esc(r.pattern || '*')}</code>
+        <span class="perm-badge perm-badge-${esc(r.policy)}">${esc(r.policy)}</span>
+        <span style="font-size:10px;color:var(--text-dim);margin-left:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:140px;">${esc(r.note || '')}</span>
+        <button class="perm-btn perm-btn-del" onclick="deletePermissionRule(${i})" title="删除规则"><i class="fa-solid fa-trash-can"></i></button>
+    </div>`).join('');
+        }
+        function renderPermDefaults() {
+            const d = state.permDefaults || {};
+            const keys = Object.keys(d);
+            if (!keys.length) { els.permDefaultsList.innerHTML = '<span style="font-size:12px;color:var(--text-dim);">无默认策略</span>'; return; }
+            els.permDefaultsList.innerHTML = keys.map(k => `<span class="perm-badge perm-badge-${esc(d[k])}">${esc(k)} → ${esc(d[k])}</span>`).join('');
+        }
+        async function addPermissionRule() {
+            const tool = $('#perm-rule-tool')?.value.trim();
+            if (!tool) { toast('请填写工具名', 'error'); return; }
+            const pattern = $('#perm-rule-pattern')?.value.trim() || '';
+            const policy = $('#perm-rule-policy')?.value || 'ask';
+            try {
+                await axios.post(API + '/permissions/set', { tool, pattern, policy });
+                toast(`规则已保存: ${tool} → ${policy}`, 'success');
+                $('#perm-rule-tool').value = ''; $('#perm-rule-pattern').value = '';
+                await loadPermissions();
+            } catch (e) { toast('保存规则失败: ' + (e.message || e), 'error'); log('权限规则保存失败: ' + (e.message || e), 'error'); }
+        }
+        async function deletePermissionRule(idx) {
+            const r = (state.permRules || [])[idx];
+            if (!r) return;
+            if (!confirm(`删除规则 ${r.tool}${r.pattern ? ':' + r.pattern : ''}？`)) return;
+            try {
+                await axios.post(API + '/permissions/delete', { tool: r.tool, pattern: r.pattern });
+                toast('规则已删除', 'success');
+                await loadPermissions();
+            } catch (e) { toast('删除失败: ' + (e.message || e), 'error'); log('权限规则删除失败: ' + (e.message || e), 'error'); }
+        }
+        async function respondPermission(id, granted) {
+            const remember = !!(document.getElementById('perm-remember-' + id)?.checked || document.getElementById('perm-modal-remember')?.checked);
+            try {
+                await axios.post(API + '/permission/respond', { id, granted, remember });
+                const p = (state.permPending || []).find(x => x.id === id);
+                if (p) p._answered = true;
+                toast(`已${granted ? '允许' : '拒绝'}工具 ${p ? p.tool : ''}${remember ? '（已记住）' : ''}`, granted ? 'success' : 'info');
+                renderPermPending();
+                if (state.permModalId === id) hidePermissionModal();
+            } catch (e) { toast('响应失败: ' + (e.message || e), 'error'); log('审批响应失败: ' + (e.message || e), 'error'); }
+        }
+        // ——— 授权弹窗 ———
+        function showPermissionModal(req) {
+            state.permModalId = req.id;
+            els.permApproveBody.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+        <span class="perm-tool-chip" style="font-size:13px;padding:3px 12px;"><i class="fa-solid fa-screwdriver-wrench" style="font-size:11px;"></i>${esc(req.tool)}</span>
+        <span style="font-size:11px;color:var(--text-dim);">会话: ${esc(req.session_id || '-')}</span>
+        <span style="font-size:11px;color:var(--text-dim);margin-left:auto;" id="perm-modal-countdown"></span>
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">调用参数</div>
+    <pre class="perm-args" style="max-height:220px;">${esc(req.args || '(无参数)')}</pre>
+    <div style="display:flex;align-items:center;gap:10px;margin-top:12px;">
+        <label style="font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:6px;cursor:pointer;">
+            <input type="checkbox" id="perm-modal-remember"> 记住该选择（写入规则）
+        </label>
+        <div style="margin-left:auto;display:flex;gap:8px;">
+            <button class="perm-btn perm-btn-deny" onclick="respondPermission('${req.id}', false)">拒绝</button>
+            <button class="perm-btn perm-btn-allow" onclick="respondPermission('${req.id}', true)">允许</button>
+        </div>
+    </div>`;
+            els.permApproveOverlay.classList.add('open');
+            startPermCountdown(req);
+        }
+        function startPermCountdown(req) {
+            if (permCountdownTimer) { clearInterval(permCountdownTimer); permCountdownTimer = null; }
+            const tick = () => {
+                const remain = (req.created_at || 0) + (req.timeout || 120) - Math.floor(Date.now() / 1000);
+                const el = document.getElementById('perm-modal-countdown');
+                if (el) el.textContent = remain > 0 ? `⏳ 剩余 ${remain}s` : '等待响应...';
+                if (remain <= 0 && permCountdownTimer) { clearInterval(permCountdownTimer); permCountdownTimer = null; }
+            };
+            tick();
+            permCountdownTimer = setInterval(tick, 1000);
+        }
+        function hidePermissionModal() {
+            if (permCountdownTimer) { clearInterval(permCountdownTimer); permCountdownTimer = null; }
+            els.permApproveOverlay.classList.remove('open');
+            state.permModalId = null;
+            dequeuePermissionModal();
+        }
+        function dequeuePermissionModal() {
+            if (state.permModalId) return;
+            const next = (state.permQueue || []).find(q => !q._handled);
+            if (next) { next._handled = true; showPermissionModal(next); }
+        }
+        els.permApproveCloseBtn.onclick = () => {
+            toast('已关闭授权弹窗，请求将在超时后自动拒绝', 'info');
+            if (permCountdownTimer) { clearInterval(permCountdownTimer); permCountdownTimer = null; }
+            els.permApproveOverlay.classList.remove('open');
+            const closedId = state.permModalId;
+            state.permModalId = null;
+            if (closedId) { const cur = state.permQueue.find(q => q.id === closedId); if (cur) cur._handled = true; }
+            dequeuePermissionModal();
+        };
+        function startPermPoll() { stopPermPoll(); permPollTimer = setInterval(loadPermissions, 3000); }
+        function stopPermPoll() { if (permPollTimer) { clearInterval(permPollTimer); permPollTimer = null; } }
 
         // ============ 工具/任务/频道 ============
         async function loadTools() {
@@ -4059,7 +4460,7 @@
             state.agentName = state.settings.agent_name || 'assistant';
             document.title = state.user + ' · Chat WebUI';
             state.contextUsage.max = state.settings.max_context || 128000;
-            await getModels(); await loadTools(); await loadTodos(); await loadChannels(); await loadSessions();
+            await getModels(); await loadTools(); await loadTodos(); await loadChannels(); await loadSessions(); await loadPermissions();
             // 初始化文件浏览器设置
             fb.autoExpand = state.settings.filesystem?.auto_expand !== false;
             fb.updateAutoToggleUI();
