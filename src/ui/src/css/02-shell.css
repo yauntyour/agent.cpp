@@ -1,0 +1,116 @@
+#app {
+  display: grid;
+  grid-template-columns: var(--rail) minmax(0, 1fr) var(--stage);
+  height: 100vh; height: 100dvh;
+  background:
+    radial-gradient(1100px 620px at 78% -12%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 62%),
+    linear-gradient(180deg, var(--bg-2), var(--bg) 42%);
+}
+
+/* ---------------- 左侧角色栏 ---------------- */
+#rail {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 10px; padding: 16px 0 14px;
+  border-right: 1px solid var(--line);
+  background: rgba(10, 10, 14, .55);
+  backdrop-filter: blur(8px);
+  z-index: 3;
+}
+.rail-mark { width: 38px; height: 38px; display: grid; place-items: center; color: var(--accent); margin-bottom: 6px; }
+.rail-mark svg { width: 30px; height: 30px; stroke-width: 1.4; }
+.rail-list { display: flex; flex-direction: column; gap: 10px; align-items: center; }
+.rail-gap { flex: 1; }
+
+.persona-dot {
+  position: relative; width: 46px; height: 46px; border-radius: 50%;
+  display: grid; place-items: center;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--text-2); font-weight: 600; letter-spacing: .02em;
+  transition: transform .18s var(--ease), border-color .18s, box-shadow .18s;
+  overflow: hidden;
+}
+.persona-dot img { width: 100%; height: 100%; object-fit: cover; }
+.persona-dot:hover { transform: translateY(-1px); border-color: var(--line-strong); }
+.persona-dot.on {
+  border-color: color-mix(in srgb, var(--accent) 70%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent),
+              0 6px 18px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.persona-dot .busy-dot {
+  position: absolute; right: -1px; bottom: -1px; width: 11px; height: 11px; border-radius: 50%;
+  background: var(--accent); border: 2px solid var(--bg); animation: pulse 1.4s infinite;
+}
+@keyframes pulse { 50% { opacity: .35; } }
+
+.rail-btn {
+  width: 40px; height: 40px; border-radius: 12px;
+  display: grid; place-items: center; color: var(--muted);
+  transition: background .16s, color .16s;
+}
+.rail-btn:hover { background: var(--card); color: var(--text); }
+.rail-btn.active { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+.rail-btn svg { width: 19px; height: 19px; }
+
+/* ---------------- 中间对话 ---------------- */
+#chat { display: flex; flex-direction: column; min-width: 0; position: relative; }
+
+#chat-head {
+  height: 60px; flex: 0 0 60px;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 22px 0 26px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(16, 16, 22, .86), rgba(16, 16, 22, .32));
+  backdrop-filter: blur(12px);
+  z-index: 2;
+}
+.head-main { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+#head-name { font-size: 15px; font-weight: 600; letter-spacing: .01em; }
+.head-status {
+  font-size: 12px; color: var(--muted);
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.head-status::before {
+  content: ""; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--ok); box-shadow: 0 0 8px color-mix(in srgb, var(--ok) 60%, transparent);
+}
+.head-status.busy::before { background: var(--accent); box-shadow: 0 0 10px var(--accent); animation: pulse 1.2s infinite; }
+.head-status.off::before { background: var(--faint); box-shadow: none; }
+.head-tools { display: flex; gap: 4px; }
+
+.ico-btn {
+  width: 34px; height: 34px; border-radius: 10px;
+  display: grid; place-items: center; color: var(--muted);
+  transition: background .16s, color .16s;
+}
+.ico-btn:hover { background: var(--card); color: var(--text); }
+.ico-btn.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.ico-btn svg { width: 17px; height: 17px; }
+
+/* ---------------- 右侧舞台 ---------------- */
+#stage {
+  position: relative;
+  display: flex; flex-direction: column; align-items: center;
+  padding: 34px 26px 22px;
+  border-left: 1px solid var(--line);
+  background:
+    radial-gradient(420px 320px at 50% 6%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 70%),
+    linear-gradient(180deg, rgba(18, 18, 25, .55), rgba(10, 10, 14, .2));
+  overflow: hidden;
+}
+.stage-glow {
+  position: absolute; inset: -20% -30% auto -30%; height: 62%;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 22%, transparent), transparent 72%);
+  filter: blur(28px); opacity: .55; pointer-events: none;
+  transition: background 1.2s var(--ease), opacity 1.2s var(--ease);
+}
+
+@media (max-width: 1120px) {
+  :root { --stage: 300px; }
+}
+@media (max-width: 920px) {
+  #app { grid-template-columns: 64px minmax(0, 1fr); }
+  #stage { display: none; }
+  :root { --rail: 64px; }
+  .persona-dot { width: 40px; height: 40px; }
+}

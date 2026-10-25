@@ -1,298 +1,204 @@
-cmake_minimum_required(VERSION 3.20)
-project(agentcpp LANGUAGES CXX VERSION 2.0.0)
+# agent.cpp — 陪伴型智能体（Cosplay Agent）的桌面外壳 + 本机服务
+# =============================================================================
+# 打包方式沿用 cell-app：
+#
+#   cmake -B build            # 配置 (Ninja / Makefiles)
+#   cmake --build build       # 编译   → build/agent[.exe]
+#
+# Windows 需要 MSYS2 UCRT64 工具链（g++ / windres），默认静态链接：
+# 产物只导入系统 DLL，WebView2 运行时由系统 Edge 提供。
+#
+# 选项：
+#   -DAGENT_STATIC=OFF         Windows：链接 MSYS2 运行时 DLL（默认静态）
+#   -DAGENT_CONSOLE=ON         Windows：保留控制台（调试）
+#   -DAGENT_BUILD_UI=OFF       沿用已提交的 src/agent-ui.hpp（不需要 Python）
+#   -DAGENT_CXX_STANDARD=23    不支持 -std=c++26 的编译器
+# =============================================================================
 
-set(CMAKE_CXX_STANDARD 20)
+cmake_minimum_required(VERSION 3.25)
+
+project(agent LANGUAGES CXX)
+
+# 智能体内核：cell.cpp（单文件库，作为子模块/副本放在源码树里）
+if(NOT EXISTS "${CMAKE_SOURCE_DIR}/cell.cpp/cell.cpp")
+    message(FATAL_ERROR
+        "cell.cpp/cell.cpp not found — initialize the submodule first:\n"
+        "  git submodule update --init --recursive")
+endif()
+
+# ---- options ----------------------------------------------------------------
+
+option(AGENT_STATIC "Windows only: link the runtime + libcurl/libsodium statically" ON)
+option(AGENT_CONSOLE "Windows only: keep a console window (debugging)" OFF)
+option(AGENT_BUILD_UI "Regenerate the embedded UI from src/ui/src before building" ON)
+
+set(AGENT_CXX_STANDARD "26" CACHE STRING
+    "C++ standard (26 by default; set 23 on compilers without -std=c++26)")
+
+# ---- artifacts land in <source>/build ---------------------------------------
+
+set(AGENT_OUTPUT_DIR "${CMAKE_SOURCE_DIR}/build" CACHE PATH
+    "Directory the built executable lands in")
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${AGENT_OUTPUT_DIR}")
+foreach(_agent_cfg DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${_agent_cfg} "${AGENT_OUTPUT_DIR}")
+endforeach()
+
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS Debug Release RelWithDebInfo MinSizeRel)
+endif()
+
+set(CMAKE_CXX_STANDARD "${AGENT_CXX_STANDARD}")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# ============================================================
-# 依赖策略
-#   STATIC_BUILD=ON （默认，发布产物）
-#       - Linux   : 全静态 musl 二进制（CI 用 Alpine 容器）
-#       - Windows : 全静态 MinGW exe（无任何 DLL）
-#       - macOS   : 静态链接 curl / libsodium，仅用系统框架
-#   STATIC_BUILD=OFF（本地开发）
-#       - 链接系统已安装的 curl / libsodium
-#
-#   第三方只剩三个：libcurl、libsodium、nlohmann_json。
-#   原先的 Boost.Asio 与 servic.cpp 子模块已由自带的 src/server/http_server
-#   取代，因此不再需要 Boost。
-# ============================================================
-option(STATIC_BUILD "Build a fully static, zero-runtime-dependency executable" ON)
-
-# 与 build.py 保持一致：可执行文件统一输出到源码树的 bin/
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bin)
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
-
-# MinGW 的 GNU ld 在目标文件节数较多时会静默失败（ld returned 5，无任何报错、
-# 产出截断的 exe），有 lld 就优先用它。
-if(MINGW)
-    find_program(LD_LLD ld.lld)
-    if(LD_LLD)
-        add_link_options(-fuse-ld=lld)
-    endif()
-endif()
-
-# ============================================================
-# WebView2（Windows 桌面外壳）
-#   头文件随仓库在 third_party/webview2/include，运行期动态加载
-#   third_party/webview2/x64/WebView2Loader.dll，不需要导入库。
-# ============================================================
-set(WEBVIEW2_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/webview2)
-
-# ============================================================
-# 内嵌资源：模板目录 + WebView2Loader.dll → C++ 头文件
-#   src/templates/webui      → src/server/webui_assets.hpp   （HTTP 静态资源）
-#   src/templates/workspace  → src/core/seed_assets.hpp      （首次启动写盘）
-#   third_party/webview2/x64 → src/desktop/loader_assets.hpp （免同目录 DLL）
-# 改前端 / 模板后重新 build 即可；也可手动运行：
-#   python tools/embed_assets.py --src ... --out ... --ns ... --guard ...
-# ============================================================
-find_package(Python3 QUIET COMPONENTS Interpreter)
-set(EMBED_TOOL ${CMAKE_CURRENT_SOURCE_DIR}/tools/embed_assets.py)
-set(WEBUI_ASSETS_HPP ${CMAKE_CURRENT_SOURCE_DIR}/src/server/webui_assets.hpp)
-set(SEED_ASSETS_HPP ${CMAKE_CURRENT_SOURCE_DIR}/src/core/seed_assets.hpp)
-set(LOADER_ASSETS_HPP ${CMAKE_CURRENT_SOURCE_DIR}/src/desktop/loader_assets.hpp)
-if(Python3_Interpreter_FOUND AND EXISTS ${EMBED_TOOL})
-    file(GLOB_RECURSE EMBED_SOURCES CONFIGURE_DEPENDS
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/templates/webui/*
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/templates/workspace/*)
-    add_custom_command(
-        OUTPUT ${WEBUI_ASSETS_HPP} ${SEED_ASSETS_HPP} ${LOADER_ASSETS_HPP}
-        COMMAND ${Python3_EXECUTABLE} ${EMBED_TOOL}
-                --src ${CMAKE_CURRENT_SOURCE_DIR}/src/templates/webui
-                --out ${WEBUI_ASSETS_HPP}
-                --ns webui::embedded --guard AGENTCPP_SERVER_WEBUI_ASSETS_HPP --index index.html
-        COMMAND ${Python3_EXECUTABLE} ${EMBED_TOOL}
-                --src ${CMAKE_CURRENT_SOURCE_DIR}/src/templates/workspace
-                --out ${SEED_ASSETS_HPP} --prefix workspace/
-                --ns config::seed --guard AGENTCPP_CORE_SEED_ASSETS_HPP
-        COMMAND ${Python3_EXECUTABLE} ${EMBED_TOOL}
-                --src ${WEBVIEW2_DIR}/x64
-                --out ${LOADER_ASSETS_HPP}
-                --ns desktop::embedded --guard AGENTCPP_DESKTOP_LOADER_ASSETS_HPP
-        DEPENDS ${EMBED_TOOL} ${EMBED_SOURCES} ${WEBVIEW2_DIR}/x64/WebView2Loader.dll
-        COMMENT "embedding webui / workspace templates / WebView2 loader"
-        VERBATIM)
-    add_custom_target(embed_assets DEPENDS ${WEBUI_ASSETS_HPP} ${SEED_ASSETS_HPP} ${LOADER_ASSETS_HPP})
-else()
-    add_custom_target(embed_assets)
-    message(WARNING "python3 not found: 请手动运行 python tools/embed_assets.py 生成内嵌资源")
-endif()
-
-include(FetchContent)
-
-# ---------- nlohmann_json (header-only) ----------
-# 优先用系统包，找不到再从源码拉（离线环境可先装 nlohmann-json3-dev）
-find_package(nlohmann_json 3.11 QUIET)
-if(NOT nlohmann_json_FOUND)
-    FetchContent_Declare(
-        nlohmann_json
-        GIT_REPOSITORY https://github.com/nlohmann/json.git
-        GIT_TAG v3.11.3
-        GIT_SHALLOW TRUE
-    )
-    FetchContent_MakeAvailable(nlohmann_json)
-endif()
-
-# ---------- libcurl ----------
-if(STATIC_BUILD)
-    if(NOT APPLE)
-        set(CMAKE_FIND_LIBRARY_SUFFIXES .a)
-    endif()
-
-    set(BUILD_CURL_EXE OFF CACHE BOOL "" FORCE)
-    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
-    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-    set(CURL_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
-    set(CURL_ENABLE_EXPORT_TARGET OFF CACHE BOOL "" FORCE)
-    set(HTTP_ONLY ON CACHE BOOL "" FORCE)
-    set(CURL_USE_OPENSSL OFF CACHE BOOL "" FORCE)
-    set(CURL_BROTLI OFF CACHE STRING "" FORCE)
-    set(CURL_ZSTD OFF CACHE STRING "" FORCE)
-    set(CURL_ZLIB OFF CACHE STRING "" FORCE)
-    set(USE_LIBIDN2 OFF CACHE BOOL "" FORCE)
-    set(CURL_USE_LIBPSL OFF CACHE BOOL "" FORCE)
-    set(CURL_USE_LIBSSH2 OFF CACHE BOOL "" FORCE)
-    set(CURL_USE_LIBSSH OFF CACHE BOOL "" FORCE)
-    set(CURL_USE_GSASL OFF CACHE BOOL "" FORCE)
-    set(CURL_USE_GSSAPI OFF CACHE BOOL "" FORCE)
-    set(CURL_USE_LIBUV OFF CACHE BOOL "" FORCE)
-    set(USE_NGHTTP2 OFF CACHE BOOL "" FORCE)
-    set(ENABLE_ARES OFF CACHE BOOL "" FORCE)
-    if(APPLE)
-        set(CURL_USE_SECTRANSP ON CACHE BOOL "" FORCE)
-    elseif(WIN32)
-        set(CURL_USE_SCHANNEL ON CACHE BOOL "" FORCE)
-    else()
-        set(CURL_USE_OPENSSL ON CACHE BOOL "" FORCE)
-        set(CURL_ZLIB ON CACHE STRING "" FORCE)
-    endif()
-    FetchContent_Declare(
-        curl
-        GIT_REPOSITORY https://github.com/curl/curl.git
-        GIT_TAG curl-8_12_1
-        GIT_SHALLOW TRUE
-    )
-    FetchContent_MakeAvailable(curl)
-
-    set(CURL_EXTRA_LIBS "")
-    if(APPLE)
-        set(CURL_EXTRA_LIBS
-            "-framework Security"
-            "-framework CoreFoundation"
-            "-framework CoreServices"
-            "-framework SystemConfiguration"
-        )
-    elseif(WIN32)
-        set(CURL_EXTRA_LIBS bcrypt crypt32 advapi32 secur32 iphlpapi)
-    else()
-        set(CURL_EXTRA_LIBS ssl crypto z)
-    endif()
-else()
-    find_package(CURL REQUIRED)
-endif()
-
-# ---------- libsodium ----------
-if(STATIC_BUILD)
-    set(SODIUM_DISABLE_TESTS ON CACHE BOOL "" FORCE)
-    FetchContent_Declare(
-        libsodium
-        GIT_REPOSITORY https://github.com/robinlinden/libsodium-cmake.git
-        GIT_TAG 9b2848dfc1b917a9410f0de9d81059b26cbfaa8d
-        GIT_SUBMODULES libsodium
-    )
-    FetchContent_MakeAvailable(libsodium)
-    set(SODIUM_LIBRARIES "")
-else()
-    find_package(PkgConfig QUIET)
-    if(PkgConfig_FOUND)
-        pkg_check_modules(SODIUM QUIET libsodium)
-    endif()
-    if(NOT SODIUM_FOUND)
-        find_package(Sodium CONFIG QUIET)
-    endif()
-
-    set(_sodium_hints
-        ${SODIUM_LIBRARY_DIRS}
-        ${MSYS2_DIR}/mingw64/lib
-        /mingw64/lib
-        /opt/homebrew/lib
-        /usr/local/lib
-        /usr/lib
-        /usr/lib/x86_64-linux-gnu
-    )
-    find_library(SODIUM_LIBRARY sodium HINTS ${_sodium_hints})
-    set(_sodium_include_hints
-        ${SODIUM_INCLUDE_DIRS}
-        ${MSYS2_DIR}/mingw64/include
-        /mingw64/include
-        /opt/homebrew/include
-        /usr/local/include
-        /usr/include
-    )
-    find_path(SODIUM_INCLUDE_DIR sodium.h HINTS ${_sodium_include_hints})
-
-    if(SODIUM_LIBRARY AND SODIUM_INCLUDE_DIR)
-        set(SODIUM_INCLUDE_DIRS ${SODIUM_INCLUDE_DIR})
-        set(SODIUM_LIBRARIES ${SODIUM_LIBRARY})
-        message(STATUS "Found libsodium: ${SODIUM_LIBRARY}")
-    else()
-        message(FATAL_ERROR "libsodium not found, install it via your package manager (brew/apt/pacman)")
-    endif()
-endif()
-
-# ============================================================
-# 源文件（按模块划分）
-# ============================================================
-set(AGENT_SOURCES
-    src/main.cpp
-
-    # core：路径 / 配置 / 日志 / 加密 / 文本 / 系统信息
-    src/core/paths.cpp
-    src/core/config.cpp
-    src/core/log.cpp
-
-    # net：HTTP 客户端与三家 LLM 供应商客户端
-    # （net/http_client.hpp、net/llm.hpp 为 header-only）
-
-    # agent：工具 / 权限 / 指令 / 会话 / 记忆 / 主循环 / 供应商
-    src/agent/providers.cpp
-    src/agent/memory.cpp
-    src/agent/runtime.cpp
-
-    # channels：频道驱动注册表（telegram / wechat / qq 为 header-only 驱动）
-    src/channels/manager.cpp
-
-    # desktop：Windows WebView2 桌面外壳
-    src/desktop/webview2.cpp
-
-    # server：HTTP 服务端 / 静态资源 / 路由
-    src/server/http_server.cpp
-    src/server/webui.cpp
-    src/server/routes.cpp
-)
-
-add_executable(agentcpp ${AGENT_SOURCES})
-
-target_include_directories(agentcpp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(agentcpp PRIVATE nlohmann_json::nlohmann_json)
-add_dependencies(agentcpp embed_assets)
+# ---- Windows: MSYS2 (MinGW) + windres for the icon --------------------------
 
 if(WIN32)
-    target_include_directories(agentcpp PRIVATE ${WEBVIEW2_DIR}/include)
-    target_link_libraries(agentcpp PRIVATE ole32 uuid shell32 user32 gdi32)
-endif()
-
-if(STATIC_BUILD)
-    target_link_libraries(agentcpp PRIVATE CURL::libcurl ${CURL_EXTRA_LIBS})
-    if(SODIUM_LIBRARIES)
-        target_link_libraries(agentcpp PRIVATE ${SODIUM_LIBRARIES})
-        target_include_directories(agentcpp PRIVATE ${SODIUM_INCLUDE_DIRS})
-    elseif(TARGET sodium)
-        target_link_libraries(agentcpp PRIVATE sodium)
+    if(NOT MINGW)
+        message(FATAL_ERROR
+            "Windows builds use the MSYS2 UCRT64 (MinGW) toolchain. Run CMake from the "
+            "MSYS2 UCRT64 shell, or point it at the toolchain explicitly, e.g.\n"
+            "  cmake -B build -G Ninja -DCMAKE_CXX_COMPILER=D:/x64/msys2/ucrt64/bin/g++.exe")
     endif()
-    if(WIN32 OR (UNIX AND NOT APPLE))
-        target_link_options(agentcpp PRIVATE -static)
-    endif()
-else()
-    target_link_libraries(agentcpp PRIVATE CURL::libcurl)
-    if(SODIUM_LIBRARIES)
-        target_link_libraries(agentcpp PRIVATE ${SODIUM_LIBRARIES})
-        if(SODIUM_INCLUDE_DIRS)
-            target_include_directories(agentcpp PRIVATE ${SODIUM_INCLUDE_DIRS})
+    if(NOT CMAKE_RC_COMPILER)
+        get_filename_component(_agent_bindir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+        if(EXISTS "${_agent_bindir}/windres.exe")
+            set(CMAKE_RC_COMPILER "${_agent_bindir}/windres.exe"
+                CACHE FILEPATH "Windows resource compiler")
         endif()
-    elseif(TARGET sodium)
-        target_link_libraries(agentcpp PRIVATE sodium)
     endif()
+    enable_language(RC)
 endif()
 
-if(WIN32)
-    target_link_libraries(agentcpp PRIVATE ws2_32 wsock32)
+# ---- the application --------------------------------------------------------
+
+add_executable(agent src/agent.cpp)
+
+target_include_directories(agent PRIVATE
+    "${CMAKE_SOURCE_DIR}/src"                  # agent-core.hpp, agent-voice.hpp, agent-ui.hpp
+    "${CMAKE_SOURCE_DIR}/third_party/include"  # webview/, servic.hpp, router/
+    "${CMAKE_SOURCE_DIR}")                     # "cell.cpp/cell.cpp"
+
+# ---- platform wiring --------------------------------------------------------
+
+if(NOT WIN32)
+    find_package(Threads REQUIRED)
 endif()
 
-if(MSVC)
-    target_compile_options(agentcpp PRIVATE /utf-8 /EHsc)
-else()
-    target_compile_options(agentcpp PRIVATE -finput-charset=UTF-8 -fexec-charset=UTF-8)
+if(WIN32)   # MSYS2 UCRT64 — WebView2 window
+
+    find_package(PkgConfig REQUIRED)
+
+    # libcurl via pkg-config；静态模式下把传递依赖（zlib/brotli/ssl/ssh2…）一并拉进来，
+    # 并用 -DCURL_STATICLIB 让 curl 头文件声明普通符号（否则链接报 __imp_curl_*）。
+    pkg_check_modules(CURL REQUIRED libcurl)
+    target_include_directories(agent PRIVATE ${CURL_INCLUDE_DIRS})
+    if(AGENT_STATIC)
+        target_compile_definitions(agent PRIVATE ${CURL_STATIC_CFLAGS_OTHER})
+        target_link_options(agent PRIVATE -static)
+        set(_agent_curl_libs ${CURL_STATIC_LIBRARIES})
+    else()
+        set(_agent_curl_libs ${CURL_LIBRARIES})
+    endif()
+
+    # crypt32: cell::net 的 CA 解析走 Windows ROOT 证书库（静态 curl 自带的
+    # CA 路径是 POSIX 路径，Windows 上必然 curl 60）。
+    # winmm: 原生录音（MCI waveaudio）。
+    # ole32/shell32/uuid: 托盘 + 原生文件夹选择器。
+    target_link_libraries(agent PRIVATE
+        ${_agent_curl_libs}
+        sodium
+        ole32 shell32 shlwapi uuid user32 version advapi32
+        gdi32 ws2_32 mswsock bcrypt crypt32 winmm)
+
+    if(AGENT_CONSOLE)
+        set_target_properties(agent PROPERTIES WIN32_EXECUTABLE OFF)
+    else()
+        set_target_properties(agent PROPERTIES WIN32_EXECUTABLE ON)
+    endif()
+
+    set(_agent_icon_rc "${CMAKE_SOURCE_DIR}/assets/icon.rc")
+    if(EXISTS "${_agent_icon_rc}")
+        target_sources(agent PRIVATE "${_agent_icon_rc}")
+        set_source_files_properties("${_agent_icon_rc}" PROPERTIES
+            INCLUDE_DIRECTORIES "${CMAKE_SOURCE_DIR}/assets")
+    else()
+        message(WARNING "assets/icon.rc not found — the exe keeps no embedded icon")
+    endif()
+
+elseif(APPLE)   # Cocoa + WKWebView
+
+    find_library(SODIUM_LIBRARY NAMES sodium HINTS /opt/homebrew/lib /usr/local/lib REQUIRED)
+    find_path(SODIUM_INCLUDE_DIR sodium.h HINTS /opt/homebrew/include /usr/local/include)
+    if(SODIUM_INCLUDE_DIR)
+        target_include_directories(agent PRIVATE "${SODIUM_INCLUDE_DIR}")
+    endif()
+    find_path(AGENT_BREW_INCLUDE_DIR boost/asio.hpp HINTS /opt/homebrew/include /usr/local/include)
+    if(AGENT_BREW_INCLUDE_DIR)
+        target_include_directories(agent PRIVATE "${AGENT_BREW_INCLUDE_DIR}")
+    endif()
+
+    target_link_libraries(agent PRIVATE
+        "-framework Cocoa" "-framework WebKit" "-framework AudioToolbox"
+        curl ${SODIUM_LIBRARY} Threads::Threads)
+
+else()          # Linux — GTK3 + WebKitGTK
+
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(GTK REQUIRED IMPORTED_TARGET gtk+-3.0)
+    pkg_check_modules(WEBKIT IMPORTED_TARGET webkit2gtk-4.1)
+    if(NOT WEBKIT_FOUND)
+        pkg_check_modules(WEBKIT IMPORTED_TARGET webkit2gtk-4.0)
+    endif()
+    if(NOT WEBKIT_FOUND)
+        message(FATAL_ERROR
+            "WebKitGTK development package not found. Install:\n"
+            "  webkit2gtk-4.1-dev + libgtk-3-dev  (Debian/Ubuntu)\n"
+            "  webkit2gtk4.1-devel + gtk3-devel   (Fedora)")
+    endif()
+
+    find_package(CURL REQUIRED)
+    find_library(SODIUM_LIBRARY NAMES sodium REQUIRED)
+
+    target_link_libraries(agent PRIVATE
+        PkgConfig::GTK PkgConfig::WEBKIT
+        CURL::libcurl ${SODIUM_LIBRARY} Threads::Threads)
 endif()
 
-# ============================================================
-# 安装：exe 放根目录，模板资源放 .agent/
-# ============================================================
-install(TARGETS agentcpp RUNTIME DESTINATION .)
+# ---- embedded UI ------------------------------------------------------------
+# src/ui/src/{index.html,css/*.css,js/*.js}  →  src/agent-ui.hpp（C++ 唯一需要的产物）
+#                                              + src/ui/index.html（--ui 开发模式直接服务）
+# 声明 agent-ui.hpp 为 OUTPUT，让编译依赖跟着重建；build_ui.py 只在内容变化时写盘。
 
-
-# ---------- CPack ----------
-set(CPACK_PACKAGE_NAME ${PROJECT_NAME})
-set(CPACK_PACKAGE_VENDOR "release")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "C++ AI companion runtime with multi-platform channels")
-set(CPACK_RESOURCE_FILE_LICENSE ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE)
-set(CPACK_GENERATOR "ZIP;TGZ")
-if(WIN32)
-    set(CPACK_GENERATOR "ZIP")
+if(AGENT_BUILD_UI)
+    if(DEFINED ENV{PYTHON} AND NOT Python3_EXECUTABLE)
+        set(Python3_EXECUTABLE "$ENV{PYTHON}")
+    endif()
+    find_package(Python3 COMPONENTS Interpreter QUIET)
 endif()
-set(CPACK_PACKAGE_FILE_NAME "${PROJECT_NAME}-${CMAKE_SYSTEM_NAME}")
 
-include(CPack)
+if(AGENT_BUILD_UI AND Python3_Interpreter_FOUND)
+    file(GLOB_RECURSE AGENT_UI_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/ui/src/*")
+    set(AGENT_UI_HPP "${CMAKE_SOURCE_DIR}/src/agent-ui.hpp")
+    add_custom_command(
+        OUTPUT "${AGENT_UI_HPP}"
+        BYPRODUCTS "${CMAKE_SOURCE_DIR}/src/ui/index.html"
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/build_ui.py"
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        DEPENDS "${CMAKE_SOURCE_DIR}/build_ui.py" ${AGENT_UI_SOURCES}
+        COMMENT "Embedding the UI (src/ui/src → src/agent-ui.hpp)"
+        VERBATIM)
+    add_custom_target(agent-ui DEPENDS "${AGENT_UI_HPP}")
+    add_dependencies(agent agent-ui)
+elseif(AGENT_BUILD_UI)
+    message(WARNING
+        "Python 3 not found — keeping the committed src/agent-ui.hpp. "
+        "Pass -DPython3_EXECUTABLE=... or set the PYTHON environment variable.")
+endif()
+
+# ---- summary ----------------------------------------------------------------
+
+message(STATUS "agent: C++${AGENT_CXX_STANDARD}, executable lands in ${AGENT_OUTPUT_DIR}")

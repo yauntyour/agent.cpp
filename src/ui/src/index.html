@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>agent</title>
+<style>/*@css*/</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ================= 左侧角色栏 ================= -->
+  <aside id="rail">
+    <div class="rail-mark" title="agent">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="13" cy="12" r="6.4" fill="url(#g)"/>
+        <path d="M5.4 9.2a4.6 4.6 0 0 0 0 5.6M3 7.6a7.8 7.8 0 0 0 0 8.8" stroke="currentColor" stroke-width="1.25" fill="none" stroke-linecap="round"/>
+        <defs><linearGradient id="g" x1="8" y1="7" x2="19" y2="18" gradientUnits="userSpaceOnUse">
+          <stop stop-color="#c9c2ff"/><stop offset="1" stop-color="#7c6cff"/></linearGradient></defs>
+      </svg>
+    </div>
+    <div class="rail-list" id="persona-list"></div>
+    <button class="rail-btn" id="btn-new-persona" title="新建角色">
+      <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+    </button>
+    <div class="rail-gap"></div>
+    <button class="rail-btn" id="btn-memory" title="记忆">
+      <svg viewBox="0 0 24 24"><path d="M12 20s-7-4.3-7-9.2A3.8 3.8 0 0 1 12 8a3.8 3.8 0 0 1 7 2.8C19 15.7 12 20 12 20Z"/></svg>
+    </button>
+    <button class="rail-btn" id="btn-settings" title="设置">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.2a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.2a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.2a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.2a1.6 1.6 0 0 0-1.4 1Z"/></svg>
+    </button>
+  </aside>
+
+  <!-- ================= 中间对话 ================= -->
+  <main id="chat">
+    <header id="chat-head">
+      <div class="head-main">
+        <span id="head-name">—</span>
+        <span class="head-status" id="head-status">连接中</span>
+      </div>
+      <div class="head-tools">
+        <button class="ico-btn" id="btn-sessions" title="会话记录">
+          <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+        </button>
+        <button class="ico-btn" id="btn-voice" title="朗读回复">
+          <svg viewBox="0 0 24 24"><path d="M11 5 6.5 9H3v6h3.5L11 19V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18 6a8.5 8.5 0 0 1 0 12"/></svg>
+        </button>
+        <button class="ico-btn" id="btn-new-session" title="新会话">
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <div id="stream" aria-live="polite"></div>
+
+    <div id="typing" class="typing hidden">
+      <span class="tdot"></span><span class="tdot"></span><span class="tdot"></span>
+      <span id="typing-label">正在想</span>
+    </div>
+
+    <footer id="composer">
+      <div class="composer-box">
+        <button class="mic-btn" id="btn-mic" title="点击开始 / 结束录音">
+          <span class="mic-lvl"></span>
+          <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"/></svg>
+          <span class="mic-ring"></span>
+        </button>
+        <textarea id="input" rows="1" placeholder="说点什么…（Enter 发送，Shift+Enter 换行）"></textarea>
+        <button class="send-btn" id="btn-send" title="发送">
+          <svg viewBox="0 0 24 24" class="i-send"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+          <svg viewBox="0 0 24 24" class="i-stop"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>
+        </button>
+      </div>
+      <div class="composer-hint" id="composer-hint"></div>
+    </footer>
+  </main>
+
+  <!-- ================= 右侧角色舞台 ================= -->
+  <aside id="stage">
+    <div class="stage-glow" id="stage-glow"></div>
+    <div class="orb-wrap">
+      <div class="orb-ring"></div>
+      <div class="orb-ring r2"></div>
+      <div class="orb" id="orb" data-emo="neutral">
+        <img id="avatar" alt="" class="hidden">
+        <div class="face" id="face">
+          <div class="brow l"></div><div class="brow r"></div>
+          <div class="eye l"></div><div class="eye r"></div>
+          <div class="blush l"></div><div class="blush r"></div>
+          <div class="mouth"></div>
+        </div>
+        <div class="orb-sheen"></div>
+      </div>
+      <div class="voice-bars" id="voice-bars"><i></i><i></i><i></i><i></i><i></i></div>
+    </div>
+
+    <div class="stage-name" id="stage-name">—</div>
+    <div class="stage-sub" id="stage-sub"></div>
+    <div class="stage-mood"><span class="dot" id="mood-dot"></span><span id="mood-text">平静</span></div>
+
+    <div class="stage-act" id="stage-act"></div>
+
+    <div class="stage-stats">
+      <button class="stat" id="btn-proactive">
+        <span class="stat-k">主动关怀</span>
+        <span class="stat-v" id="proactive-v">关</span>
+      </button>
+      <button class="stat" id="btn-edit-persona">
+        <span class="stat-k">角色设定</span>
+        <span class="stat-v">编辑</span>
+      </button>
+    </div>
+
+    <div class="stage-mem" id="stage-mem">记忆 0 条</div>
+  </aside>
+</div>
+
+<!-- ================= 抽屉：设置 / 记忆 / 角色编辑 / 会话 ================= -->
+<div id="scrim" class="hidden"></div>
+<section id="drawer" class="hidden" aria-modal="true">
+  <header class="drawer-head">
+    <div id="drawer-title">设置</div>
+    <button class="ico-btn" id="btn-drawer-close"><svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </header>
+  <div class="drawer-body" id="drawer-body"></div>
+</section>
+
+<div id="toasts"></div>
+<input type="file" id="avatar-file" accept="image/png,image/jpeg,image/webp,image/gif" class="hidden">
+<input type="file" id="audio-file" accept="audio/*" class="hidden">
+
+<script>/*@js*/</script>
+</body>
+</html>

@@ -1,0 +1,75 @@
+#composer {
+  flex: 0 0 auto;
+  padding: 10px clamp(16px, 5vw, 64px) 18px;
+  background: linear-gradient(180deg, transparent, rgba(10, 10, 14, .65) 45%);
+}
+.composer-box {
+  display: flex; align-items: flex-end; gap: 8px;
+  padding: 7px 7px 7px 8px;
+  background: linear-gradient(180deg, var(--card), #17171f);
+  border: 1px solid var(--line-strong);
+  border-radius: 20px;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, .38), inset 0 1px 0 rgba(255, 255, 255, .045);
+  transition: border-color .2s, box-shadow .2s;
+}
+.composer-box:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, .38), 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+#input {
+  flex: 1; min-height: 38px; max-height: 168px; resize: none;
+  background: transparent; border: 0; outline: none;
+  padding: 8px 2px; font-size: 14.5px; line-height: 1.55; color: var(--text);
+}
+#input::placeholder { color: var(--faint); }
+
+.mic-btn, .send-btn {
+  position: relative; flex: 0 0 38px; width: 38px; height: 38px; border-radius: 50%;
+  display: grid; place-items: center;
+  transition: background .16s, color .16s, transform .12s;
+}
+.mic-btn { color: var(--muted); }
+.mic-btn:hover { background: rgba(255, 255, 255, .05); color: var(--text); }
+.mic-btn svg { width: 17px; height: 17px; position: relative; z-index: 1; }
+.mic-btn.rec { color: #fff; background: color-mix(in srgb, var(--err) 80%, #000); }
+.mic-btn.rec .mic-ring {
+  position: absolute; inset: 0; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--err) 70%, transparent);
+  animation: mic-pulse 1.5s ease-out infinite;
+}
+/* 实时电平：--mic-lvl 由页面按 RMS 写入（0..1），这里只负责表现 */
+.mic-lvl {
+  position: absolute; inset: -3px; border-radius: 50%;
+  background: radial-gradient(circle,
+    color-mix(in srgb, var(--err) 65%, transparent) 0%,
+    color-mix(in srgb, var(--err) 30%, transparent) 55%,
+    transparent 72%);
+  opacity: 0; transform: scale(1); pointer-events: none;
+  transition: opacity .09s linear, transform .09s linear;
+}
+.mic-btn.rec .mic-lvl {
+  opacity: calc(.12 + var(--mic-lvl, 0) * .88);
+  transform: scale(calc(1 + var(--mic-lvl, 0) * .55));
+}
+@keyframes mic-pulse { from { transform: scale(1); opacity: .9; } to { transform: scale(1.55); opacity: 0; } }
+.mic-btn:disabled { opacity: .35; cursor: not-allowed; }
+
+.send-btn {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 92%, #fff), var(--accent));
+  color: var(--accent-ink);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.send-btn:hover { transform: translateY(-1px); }
+.send-btn:active { transform: translateY(0) scale(.97); }
+.send-btn:disabled { opacity: .4; box-shadow: none; cursor: not-allowed; transform: none; }
+.send-btn .i-stop { display: none; }
+.send-btn.stop { background: var(--card-2); color: var(--text); box-shadow: none; border: 1px solid var(--line-strong); }
+.send-btn.stop .i-send { display: none; }
+.send-btn.stop .i-stop { display: block; }
+
+.composer-hint {
+  margin-top: 8px; min-height: 16px;
+  font-size: 11.5px; color: var(--faint); text-align: center; letter-spacing: .02em;
+  transition: color .2s;
+}
+.composer-hint.rec { color: color-mix(in srgb, var(--err) 80%, #fff); }

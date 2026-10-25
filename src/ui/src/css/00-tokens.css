@@ -1,0 +1,39 @@
+/* 设计令牌：近黑的分层表面 + 单一强调色（由角色卡覆盖 --accent）。
+   组件只引用变量，换角色 = 换 --accent，不改任何组件样式。 */
+:root {
+  --bg: #0a0a0e;
+  --bg-2: #101016;
+  --panel: #14141b;
+  --card: #1a1a22;
+  --card-2: #20202a;
+  --line: rgba(255, 255, 255, .07);
+  --line-strong: rgba(255, 255, 255, .13);
+  --text: #ecebf3;
+  --text-2: #b7b5c4;
+  --muted: #82808f;
+  --faint: #5c5a69;
+
+  --accent: #8b7cff;
+  --accent-2: #e874c6;
+  --accent-ink: #0d0b16;
+  --ok: #64d6a4;
+  --warn: #e8bb63;
+  --err: #f0777f;
+
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 18px;
+  --r-xl: 26px;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, .35);
+  --shadow-2: 0 12px 32px rgba(0, 0, 0, .45);
+  --shadow-glow: 0 0 60px color-mix(in srgb, var(--accent) 26%, transparent);
+
+  --font: "Inter", "SF Pro Text", -apple-system, "Segoe UI", "Microsoft YaHei UI",
+          "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif;
+  --mono: "JetBrains Mono", "Cascadia Code", ui-monospace, Consolas, monospace;
+
+  --rail: 74px;
+  --stage: 348px;
+  --ease: cubic-bezier(.22, .61, .36, 1);
+}

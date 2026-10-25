@@ -1,0 +1,130 @@
+#stream {
+  flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  padding: 26px clamp(20px, 5vw, 72px) 8px;
+  scroll-behavior: smooth;
+}
+#stream::-webkit-scrollbar { width: 8px; }
+
+/* 空状态：角色先开口 */
+.welcome {
+  max-width: 560px; margin: 12vh auto 0; text-align: center;
+  animation: fade-up .5s var(--ease) both;
+}
+.welcome .hi { font-size: 13px; color: var(--faint); letter-spacing: .18em; text-transform: uppercase; }
+.welcome .say {
+  margin: 16px auto 0; max-width: 460px;
+  font-size: 17px; line-height: 1.8; color: var(--text);
+}
+.welcome .hint { margin-top: 22px; font-size: 12.5px; color: var(--faint); }
+@keyframes fade-up { from { opacity: 0; transform: translateY(10px); } }
+
+/* ---------------- 消息 ---------------- */
+.msg { display: flex; gap: 12px; margin-bottom: 22px; animation: msg-in .28s var(--ease) both; }
+@keyframes msg-in { from { opacity: 0; transform: translateY(6px); } }
+
+.msg .ava {
+  flex: 0 0 30px; width: 30px; height: 30px; border-radius: 50%; margin-top: 2px;
+  background: linear-gradient(140deg, color-mix(in srgb, var(--accent) 70%, #fff), var(--accent));
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 26%, transparent);
+  overflow: hidden; display: grid; place-items: center;
+  font-size: 12px; font-weight: 700; color: var(--accent-ink);
+}
+.msg .ava img { width: 100%; height: 100%; object-fit: cover; }
+.msg .body { min-width: 0; max-width: min(680px, 82%); }
+.msg .meta { display: flex; align-items: baseline; gap: 8px; margin-bottom: 3px; }
+.msg .who { font-size: 12.5px; font-weight: 600; color: var(--text-2); }
+.msg .time { font-size: 11px; color: var(--faint); }
+
+.msg .text {
+  font-size: 14.5px; line-height: 1.78; color: var(--text);
+  white-space: pre-wrap; word-break: break-word;
+}
+.msg .text.streaming::after {
+  content: ""; display: inline-block; width: 2px; height: 1.05em;
+  margin-left: 2px; vertical-align: -2px; background: var(--accent);
+  animation: caret 1s steps(2) infinite;
+}
+@keyframes caret { 50% { opacity: 0; } }
+
+/* 动作描写（*抱住你*）低饱和斜体，不抢正文 */
+.msg .text .act {
+  color: color-mix(in srgb, var(--accent) 72%, var(--muted));
+  font-style: italic; opacity: .92;
+}
+
+/* 用户消息 */
+.msg.user { justify-content: flex-end; }
+.msg.user .body { max-width: min(600px, 78%); }
+.msg.user .bubble {
+  background: linear-gradient(180deg, var(--card-2), var(--card));
+  border: 1px solid var(--line-strong);
+  padding: 10px 15px; border-radius: 16px 16px 4px 16px;
+  font-size: 14.5px; white-space: pre-wrap; word-break: break-word;
+  box-shadow: var(--shadow-1);
+}
+
+/* 推理折叠 */
+.reason {
+  margin: 2px 0 8px; border-left: 2px solid var(--line-strong);
+  padding-left: 10px;
+}
+.reason summary {
+  list-style: none; cursor: pointer; font-size: 12px; color: var(--faint);
+  display: flex; align-items: center; gap: 6px; user-select: none;
+}
+.reason summary::-webkit-details-marker { display: none; }
+.reason summary::before { content: "▸"; transition: transform .2s; }
+.reason[open] summary::before { transform: rotate(90deg); }
+.reason .rbody {
+  margin-top: 6px; font-size: 12.5px; line-height: 1.7; color: var(--faint);
+  white-space: pre-wrap; max-height: 240px; overflow: auto;
+}
+
+/* 一条消息的操作 */
+.msg .actions { display: flex; gap: 4px; margin-top: 6px; opacity: 0; transition: opacity .18s; }
+.msg:hover .actions, .msg .actions.pin { opacity: 1; }
+.act-btn {
+  font-size: 11.5px; color: var(--faint); padding: 3px 8px; border-radius: 7px;
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.act-btn:hover { background: var(--card); color: var(--text-2); }
+.act-btn svg { width: 13px; height: 13px; }
+.act-btn.speaking { color: var(--accent); }
+
+/* 时间分隔 */
+.day-sep { text-align: center; font-size: 11px; color: var(--faint); margin: 8px 0 24px; letter-spacing: .12em; }
+
+/* ---------------- 等待指示 ---------------- */
+.typing {
+  display: flex; align-items: center; gap: 7px;
+  padding: 0 clamp(20px, 5vw, 72px) 10px;
+  font-size: 12.5px; color: var(--muted);
+}
+.typing .tdot {
+  width: 5px; height: 5px; border-radius: 50%; background: var(--accent);
+  animation: bob 1.2s infinite;
+}
+.typing .tdot:nth-child(2) { animation-delay: .15s; }
+.typing .tdot:nth-child(3) { animation-delay: .3s; }
+@keyframes bob { 0%, 60%, 100% { transform: translateY(0); opacity: .45; } 30% { transform: translateY(-4px); opacity: 1; } }
+
+/* ---------------- Markdown ---------------- */
+.md p { margin: 0 0 .6em; }
+.md p:last-child { margin-bottom: 0; }
+.md strong { color: #fff; font-weight: 600; }
+.md em { font-style: italic; }
+.md code {
+  font-family: var(--mono); font-size: .88em;
+  background: rgba(255, 255, 255, .06); padding: 1.5px 5px; border-radius: 5px;
+  border: 1px solid var(--line);
+}
+.md pre {
+  background: var(--bg-2); border: 1px solid var(--line);
+  padding: 12px 14px; border-radius: var(--r-md); overflow: auto; margin: .6em 0;
+}
+.md pre code { background: none; border: 0; padding: 0; font-size: 12.5px; line-height: 1.6; }
+.md ul, .md ol { margin: .4em 0 .6em; padding-left: 1.3em; }
+.md li { margin: .18em 0; }
+.md a { color: var(--accent); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
+.md blockquote { margin: .6em 0; padding: 2px 0 2px 12px; border-left: 2px solid var(--line-strong); color: var(--text-2); }
+.md h1, .md h2, .md h3 { font-size: 1em; margin: .8em 0 .4em; }

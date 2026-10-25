@@ -1,6 +1,6 @@
 # ---- 构建产物 ----
+/build/
 /bin/
-build
 install
 _CPack_Packages
 *.exe
@@ -10,10 +10,14 @@ _CPack_Packages
 *.dylib
 *.o
 *.zip
-agentcpp
 
 # ---- 运行期数据：全部落在 <exeDir>/.agent ----
 .agent/
+
+# ---- 开发期的临时东西（截图、脚本化模型、CDP profile）----
+/_scratch/
+/_shots/
+/_prev/
 
 # ---- 编辑器 / 工具 ----
 .vscode
