@@ -179,7 +179,9 @@ function paintAll() {
   paintHead();
   paintPersonas();
   paintStage();
-  if (typeof paintHistory === 'function') paintHistory();
+  // 回合进行中别重建历史：服务端这时返回的是空历史，重建会把正在流式渲染的
+  // 那一段抹掉（正在说的字会跳回开头）。回合结束后由 finishLive 收尾。
+  if (typeof paintHistory === 'function' && !S.busy) paintHistory();
   if (typeof paintComposer === 'function') paintComposer();
   if (typeof paintDrawer === 'function' && !$('#drawer').classList.contains('hidden')) paintDrawer();
 }

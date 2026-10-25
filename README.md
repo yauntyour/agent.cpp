@@ -20,7 +20,7 @@
 
 由此带来的三个设计约束，贯穿整份代码：
 
-1. **演出优先**。模型输出不是最终产物，是「剧本」：情绪标记驱动表情与语音音色，星号里的动作只演不念，正文按句切给 TTS。
+1. **演出优先**。模型输出不是最终产物，是「剧本」：情绪标记驱动表情与语音音色，星号里的动作只演不念，正文按句切给 TTS。接了 Live2D 之后，`[[motion:]]` / `[[expr:]]` 还能直接指挥身体。
 2. **服务可插拔**。TTS / ASR 各是一份配置（`openai` / `http` / `command` / `off`），界面里改完即时生效，不重新编译。
 3. **传输层无特权**。桌面窗口和浏览器打开的是同一个页面、同一条 HTTP + SSE 通道，没有「只有窗口能调」的私有接口。
 
@@ -46,6 +46,9 @@ src/ui/src/**            页面源码（css / js 分层，按文件名顺序拼�
 | `src/agent-voice.hpp` | 语音服务 | 四种 `kind`，全部走 libcurl + `cell::net::ca_bundle()`；宿主录音是兜底 |
 | `src/agent-http.hpp` | 本机服务 | `servic.hpp` + `router`，SSE 每条事件一个 `data:` 行 |
 | `src/agent-ui.hpp` | 内嵌页面 | 生成物，不进版本库手工改 |
+| `src/ui/src/js/07-live2d.js` | 舞台 | 运行时加载、模型、动作 / 表情 / 口型 |
+| `src/ui/src/js/08-triggers.js` | 触发器引擎 | 事件 → 动作序列，含冷却与内置默认规则 |
+| `src/ui/src/js/09-stage-panel.js` | 舞台面板 | 换模型、情绪映射、规则编辑器 |
 | `build_ui.py` | 装配器 | 骨架 + css/* + js/* → 单页 HTML + C++ 字符串；`@asset(路径)` 换成 data URI |
 
 ### 一次对话怎么走完
@@ -164,6 +167,9 @@ build/agent.exe --headless 8787 --ui src/ui/index.html
 ├── sessions/             cell.cpp 的会话存储（每个角色一个 cwd key）
 ├── audio/                TTS 成品（保留两天）
 ├── mic/                  录音与上传的音频（保留两天）
+├── live2d/
+│   ├── runtime/          运行时库（pixi / Cubism Core / pixi-live2d-display）
+│   └── models/<任意>/     模型（model3.json 及其贴图、动作、物理）
 ├── config.json           模型供应商与当前模型（cell.cpp 的配置）
 ├── agent.json            语音服务、界面偏好、上次会话
 ├── .crypt / .key         加密库：所有 API Key 只在这里
@@ -250,6 +256,7 @@ WebView2 就是 Chromium，`http://127.0.0.1:8899` 属于可信来源（`isSecur
 | 会话 | `session.new` `sessions.list` `session.select` `session.delete` |
 | 记忆 | `memory.list` `memory.add` `memory.forget` `memory.clear` |
 | 语音 | `voice.record.start` `voice.record.stop`（宿主录音，兜底） `voice.transcribe` `voice.speak` `voice.stop` |
+| 舞台 | `live2d.scan` `live2d.open_dir` |
 | 服务 | `service.set` `service.test` |
 | 模型 | `providers.add` `providers.rm` `providers.select` `provider.set_key` `models.fetch` `model.set` `think.set` |
 | 杂项 | `ui.pref` `open.data_dir` `app.quit` |
@@ -269,9 +276,10 @@ curl -sN http://127.0.0.1:8899/api/events    # SSE：一条事件一行 data:
 | `GET /api/events` | SSE 事件流 |
 | `GET /api/audio/<file>` | TTS 成品（文件名白名单，防目录穿越） |
 | `GET /api/avatar/<id>` | 角色头像 |
+| `GET /api/live2d/<…>` | 舞台资源（运行时库 + 模型文件，逐段白名单） |
 | `POST /api/cmd/<name>` | 命令总线 |
 
-事件：`hello` `turn_begin` `answer_begin` `answer` `reason` `status` `progress` `error` `emo` `act` `round` `turn_end` `voice` `voice_error` `voice_stop` `memory` `asr` `voice_state` `quit`。除 `hello` 外每条都带 `persona`，页面按角色分流。
+事件：`hello` `turn_begin` `answer_begin` `answer` `reason` `status` `progress` `error` `emo` `act` `motion` `expr` `round` `turn_end` `voice` `voice_error` `voice_stop` `memory` `asr` `voice_state` `quit`。除 `hello` 外每条都带 `persona`，页面按角色分流。
 
 ---
 
@@ -282,11 +290,115 @@ curl -sN http://127.0.0.1:8899/api/events    # SSE：一条事件一行 data:
 | 标记 | 含义 | 去向 |
 | --- | --- | --- |
 | `[[emo:happy]]` | 情绪：`neutral / happy / sad / angry / shy / surprised / thinking / affection` | 头像表情 + 语音音色 + 徽标 |
+| `[[motion:TapBody]]` | 模型动作组（装了 Live2D 才有） | 画布 |
+| `[[expr:f01]]` | 模型表情（装了 Live2D 才有） | 画布 |
 | `*轻轻抱住你*` | 动作 / 神态 | 舞台字幕，**不朗读** |
 | `[[remember]]一句话事实[[/remember]]` | 值得长期记住的事 | `memory.jsonl`，下一轮进入 system prompt |
 | `[[idle]]`（用户侧注入） | 主动开口的时刻 | 触发一次「她先说话」 |
 
 流式输出会把标记切碎，所以 `marker_stream` 做增量解析：遇到可能的标记前缀就按住不放，确定不是标记再原样吐出来。回合结束时正文会被改写成「干净版」，标记不进入下一轮上下文，刷新页面也看不到。
+
+---
+
+## 舞台：Live2D 与触发器
+
+舞台右侧原来是一枚光球（情绪由颜色、眼睛、嘴形共同表达）。接入 Live2D 之后同一个位置换成一块画布；**没接模型时自动退回光球**，两种形态共用同一份情绪、动作和触发器。面板入口是情绪徽标右边那个旋钮图标。
+
+### 接一个模型
+
+```text
+.agent/live2d/
+├── runtime/
+│   ├── manifest.json            可选：{"scripts":["pixi.min.js","live2dcubismcore.min.js","cubism4.min.js"]}
+│   ├── pixi.min.js
+│   ├── live2dcubismcore.min.js
+│   └── cubism4.min.js
+└── models/
+    └── hiyori/
+        ├── Hiyori.model3.json
+        ├── Hiyori.moc3
+        ├── Hiyori.2048/texture_00.png …
+        └── motions/*.motion3.json
+```
+
+- **运行时库不随 exe 分发**（Cubism Core 的许可不允许再分发），由你自己放进 `runtime/`。本地没有时可以在面板里打开「运行时走 CDN」，从 unpkg 现取 —— 只适合先看效果，长期用还是放本地。
+- 模型放好后：旋钮图标 →「扫描资源」→ 选模型 → 保存并加载。模型加载完会把动作组 / 表情名写回角色卡（`live2d.groups` / `live2d.expressions`），拼提示词时会列出来，模型才知道自己有哪些动作可用。
+- **自定义动作模组**：`motion3.json` 放进模型目录，在 `model3.json` 的 `FileReferences.Motions` 里给它一个组名（Cubism 的标准做法）。组名就是面板里能选、触发器里能挂、提示词里能写的那个名字 —— 换一套动作不需要改一行代码。
+- 资源走 `GET /api/live2d/<…>`，逐段白名单 + 规范化路径校验，只认 `.agent/live2d/` 里面的文件。
+
+角色卡里的字段：
+
+| 字段 | 作用 |
+| --- | --- |
+| `live2d.model` | 相对 `.agent/live2d/` 的路径；空 = 用光球 |
+| `live2d.scale` `x` `y` | 缩放与偏移（偏移是画布宽/高的比例，`0.1` = 10%） |
+| `live2d.emo` | 情绪 → `{expr, motion}`；`expr` 可以是序号也可以是表情名 |
+| `live2d.groups` `expressions` | 加载后自动写回，供提示词引用 |
+
+### 模型直接演
+
+装了模型以后 `compose_prompt` 会多一段「舞台」约定，于是模型可以自己指挥身体：
+
+| 标记 | 含义 | 去向 |
+| --- | --- | --- |
+| `[[motion:TapBody]]` | 播放动作组 | `motion` 事件 → 画布 |
+| `[[motion:TapBody/2]]` | 指定第几个 | 同上 |
+| `[[expr:f01]]` | 切表情 | `expr` 事件 → 画布 |
+
+`[[emo:…]]` 仍然管情绪：它同时驱动光球配色、语音音色，以及 `live2d.emo` 里的表情 / 动作映射。
+
+### 触发器：事件 → 动作
+
+一条规则（存在角色卡 `triggers` 数组里）：
+
+```jsonc
+{
+  "id": "poke-head",          // 唯一名，冷却按它算
+  "on": "click",              // 什么时候触发
+  "when": { "zone": "head" }, // 条件，全部满足才算命中；留空 = 不限制
+  "do": [                     // 按顺序执行
+    { "a": "motion", "group": "TapHead" },
+    { "a": "say", "text": "别、别摸头…" },
+    { "a": "emo", "name": "shy" }
+  ],
+  "cd": 5,                    // 冷却秒数
+  "once": false,              // 本次页面会话只触发一次
+  "off": false
+}
+```
+
+**事件**（`on`）：`click` 舞台点击 · `emotion` 情绪变化 · `act` 星号动作 · `motion` 模型动作 · `expr` 模型表情 · `reply` 回复正文命中文字 · `user` 你发出的消息 · `idle` 安静太久 · `turn_begin` / `turn_end` · `boot` 舞台就绪。
+
+**条件**（`when`）：`zone`（点击区域，模型声明了 HitAreas 时是区域名，否则 `head` / `body` / `hand`）· `emotion` · `act` · `group` · `expr` · `text`（子串或 `/正则/`）· `not_text` · `min_idle`（安静多少秒才触发）。字符串或数组都行。
+
+**动作**（`do`）：
+
+| `a` | 参数 | 作用 |
+| --- | --- | --- |
+| `motion` | `group` `index` | 播放动作组 |
+| `expr` | `id` | 切表情（序号或名字） |
+| `param` | `id` `to` `ms` | 补间一个模型参数，例如 `ParamAngleZ` |
+| `emo` | `name` | 走一遍情绪链路（光球 + 语音音色 + 映射表情） |
+| `say` | `text` `ms` | 舞台台词气泡，不朗读 |
+| `speak` | `text` | 交给 TTS 念出来 |
+| `send` | `text` | **交回回合管线，她真的会回你** |
+| `idle` | — | 让她主动开口一次 |
+| `fx` | `name` `ms` | 画面效果：`pulse` / `shake` / `flash` / `dim` |
+| `sound` | `url` `volume` | 放一个音效 |
+| `toast` | `text` | 右下角提示 |
+| `wait` | `ms` | 等一会儿（串起多段演出） |
+
+两个方向都是通的：
+
+```text
+AI 回复 ──[[emo:]] / [[act:]] / [[motion:]]──► SSE ──► 触发器 ──► 动作 / 表情 / 台词
+你戳一下 ──► 画布命中区域 ──► 触发器 ──► send ──► /api/cmd/send ──► 她回你一句
+```
+
+- 触发器跑在页面里，因为点击、口型、冷却本来就是界面状态；规则存在角色卡里，**换角色 = 换一套演出**。
+- 角色卡里还没有触发器时用内置默认（摸头会躲、戳手臂会回话、开心换姿势、安静久了动一下、说到晚安就困）。改任意一条就会写进角色卡；面板里可以「恢复内置默认」。
+- 同一次触发里最多只放行一个 `send` / `idle`，避免一条规则组把好几轮对话同时点着。
+- 面板的规则编辑器是表单式的（事件 → 条件 → 动作列表），右上角「JSON 编辑」是逃生舱口：整份数组直接改，保存前做语法检查。
 
 ---
 

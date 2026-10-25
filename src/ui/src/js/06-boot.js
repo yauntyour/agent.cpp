@@ -52,6 +52,9 @@ async function mockCmd(name, args) {
 (async function boot() {
   wireGlobal();
   applyAccent('#8b7cff');
+  // 触发器的状态对象在 08-triggers.js 里，这里只是脚本还没解析到那一层：
+  // 放到下一轮事件循环再开静默计时，别在初始化顺序上打架。
+  setTimeout(() => TRIG.startIdle(), 0);
   if (MOCK) {
     S.connected = false;
     await refreshState();

@@ -1,11 +1,21 @@
 /* 角色舞台：一枚会呼吸、会看人、会说话的光球。
    没有立绘也不空——情绪由光球的颜色、眼睛、嘴形和光晕共同表达；
-   角色卡提供了头像时，头像浮在光球里，表情层自动隐藏。 */
+   角色卡提供了头像时，头像浮在光球里，表情层自动隐藏。
+
+   接入 Live2D 模型后（data-mode="l2d"）光球整块让位给画布，
+   两者是同一个舞台的两种形态，共用情绪、动作、触发器。 */
+
+.stage-frame {
+  position: relative; width: 100%;
+  display: grid; place-items: center;
+  margin-top: 6px; flex: 0 0 auto;
+}
+.stage-frame[data-mode="l2d"] .orb-wrap { display: none; }
+.stage-frame[data-mode="orb"] .l2d-wrap { display: none; }
 
 .orb-wrap {
   position: relative; width: 214px; height: 214px;
   display: grid; place-items: center;
-  margin-top: 6px;
   flex: 0 0 auto;
 }
 .orb-ring {
@@ -141,9 +151,10 @@
 }
 
 .voice-bars {
-  position: absolute; bottom: -14px; left: 50%; transform: translateX(-50%);
+  position: absolute; bottom: -6px; left: 50%; transform: translateX(-50%);
   display: flex; align-items: flex-end; gap: 3px; height: 22px;
   opacity: 0; transition: opacity .25s;
+  pointer-events: none;
 }
 .voice-bars.on { opacity: 1; }
 .voice-bars i {
@@ -171,6 +182,28 @@
   transition: background .4s, border-color .4s;
 }
 .stage-mood .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+.stage-mood-row { margin-top: 14px; display: flex; align-items: center; gap: 8px; }
+.stage-mood-row .stage-mood { margin-top: 0; }
+.stage-tune {
+  width: 26px; height: 26px; border-radius: 50%;
+  display: grid; place-items: center; color: var(--faint);
+  border: 1px solid transparent;
+  transition: color .16s, border-color .16s, background .16s, transform .3s var(--ease);
+}
+.stage-tune:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 34%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent); transform: rotate(45deg); }
+.stage-tune svg { width: 14px; height: 14px; }
+
+/* 没有模型时的一行小字：点开面板接入 */
+.stage-hint {
+  margin-top: 12px; max-width: 100%;
+  padding: 3px 9px; border-radius: 999px;
+  font-size: 10.5px; color: var(--faint); letter-spacing: .02em;
+  border: 1px dashed var(--line-strong);
+  transition: color .16s, border-color .16s;
+}
+.stage-hint:hover { color: var(--text-2); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.stage-frame[data-mode="l2d"] .stage-hint { display: none; }
 
 .stage-act {
   margin-top: 18px; min-height: 40px; max-width: 260px;

@@ -227,12 +227,22 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 
 /* 角色舞台：一枚会呼吸、会看人、会说话的光球。
    没有立绘也不空——情绪由光球的颜色、眼睛、嘴形和光晕共同表达；
-   角色卡提供了头像时，头像浮在光球里，表情层自动隐藏。 */
+   角色卡提供了头像时，头像浮在光球里，表情层自动隐藏。
+
+   接入 Live2D 模型后（data-mode="l2d"）光球整块让位给画布，
+   两者是同一个舞台的两种形态，共用情绪、动作、触发器。 */
+
+.stage-frame {
+  position: relative; width: 100%;
+  display: grid; place-items: center;
+  margin-top: 6px; flex: 0 0 auto;
+}
+.stage-frame[data-mode="l2d"] .orb-wrap { display: none; }
+.stage-frame[data-mode="orb"] .l2d-wrap { display: none; }
 
 .orb-wrap {
   position: relative; width: 214px; height: 214px;
   display: grid; place-items: center;
-  margin-top: 6px;
   flex: 0 0 auto;
 }
 .orb-ring {
@@ -368,9 +378,10 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 }
 
 .voice-bars {
-  position: absolute; bottom: -14px; left: 50%; transform: translateX(-50%);
+  position: absolute; bottom: -6px; left: 50%; transform: translateX(-50%);
   display: flex; align-items: flex-end; gap: 3px; height: 22px;
   opacity: 0; transition: opacity .25s;
+  pointer-events: none;
 }
 .voice-bars.on { opacity: 1; }
 .voice-bars i {
@@ -398,6 +409,28 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   transition: background .4s, border-color .4s;
 }
 .stage-mood .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+.stage-mood-row { margin-top: 14px; display: flex; align-items: center; gap: 8px; }
+.stage-mood-row .stage-mood { margin-top: 0; }
+.stage-tune {
+  width: 26px; height: 26px; border-radius: 50%;
+  display: grid; place-items: center; color: var(--faint);
+  border: 1px solid transparent;
+  transition: color .16s, border-color .16s, background .16s, transform .3s var(--ease);
+}
+.stage-tune:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 34%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent); transform: rotate(45deg); }
+.stage-tune svg { width: 14px; height: 14px; }
+
+/* 没有模型时的一行小字：点开面板接入 */
+.stage-hint {
+  margin-top: 12px; max-width: 100%;
+  padding: 3px 9px; border-radius: 999px;
+  font-size: 10.5px; color: var(--faint); letter-spacing: .02em;
+  border: 1px dashed var(--line-strong);
+  transition: color .16s, border-color .16s;
+}
+.stage-hint:hover { color: var(--text-2); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.stage-frame[data-mode="l2d"] .stage-hint { display: none; }
 
 .stage-act {
   margin-top: 18px; min-height: 40px; max-width: 260px;
@@ -776,6 +809,161 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 }
 .swatch:hover { transform: scale(1.08); }
 .swatch.on { border-color: #fff; box-shadow: 0 0 0 2px rgba(0, 0, 0, .5); }
+
+/* ==== css/07-live2d.css =============================================== */
+
+/* Live2D 舞台：一块画布、一条台词气泡、几个演出用的临时效果。
+   画布尺寸跟着舞台列走（--stage），比例按 3:4 留出头顶与脚底。 */
+
+.l2d-wrap {
+  position: relative; width: 100%;
+  height: clamp(260px, 44vh, 400px);
+  display: grid; place-items: center;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  /* 模型后面那层柔光：不抢戏，但让角色不是浮在空气里 */
+  background:
+    radial-gradient(70% 55% at 50% 74%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 72%),
+    radial-gradient(60% 40% at 50% 12%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 70%);
+  transition: background 1s var(--ease);
+}
+.l2d-wrap canvas {
+  display: block; width: 100%; height: 100%;
+  touch-action: manipulation; cursor: pointer;
+  filter: drop-shadow(0 18px 26px rgba(0, 0, 0, .42));
+}
+.l2d-wrap.loading canvas { opacity: 0; }
+.l2d-wrap.ready canvas { animation: l2d-in .55s var(--ease) both; }
+@keyframes l2d-in { from { opacity: 0; transform: translateY(8px) scale(.985); } }
+
+/* 加载中 / 出错时压在画布上的状态行 */
+.l2d-status {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  display: none; align-items: center; gap: 7px;
+  padding: 6px 12px; border-radius: 999px;
+  font-size: 11.5px; color: var(--text-2);
+  background: rgba(10, 10, 14, .72);
+  border: 1px solid var(--line-strong);
+  backdrop-filter: blur(6px);
+  max-width: 90%; text-align: center; line-height: 1.5;
+}
+.l2d-wrap.loading .l2d-status,
+.l2d-wrap.error .l2d-status { display: inline-flex; }
+.l2d-wrap.loading .l2d-status::before {
+  content: ""; width: 9px; height: 9px; border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-top-color: var(--accent);
+  animation: spin .8s linear infinite;
+}
+.l2d-wrap.error .l2d-status { color: var(--err); border-color: color-mix(in srgb, var(--err) 34%, transparent); }
+
+/* ---------------- 台词气泡 ----------------
+   舞台这一列只有 ~300px，气泡放哪都会压到人，所以干脆做成「字幕条」：
+   贴着画布底部、圆角胶囊、没有小尾巴，读起来是她说的一句旁白。 */
+.stage-bubble {
+  position: absolute; left: 50%; bottom: 10px; transform: translate(-50%, 6px);
+  max-width: 92%; padding: 8px 14px;
+  font-size: 12.5px; line-height: 1.55; color: var(--text);
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+  border: 1px solid var(--line-strong); border-radius: 999px;
+  box-shadow: var(--shadow-2);
+  backdrop-filter: blur(10px);
+  opacity: 0; pointer-events: none;
+  transition: opacity .3s var(--ease), transform .3s var(--ease);
+  z-index: 3;
+}
+.stage-bubble.on { opacity: 1; transform: translate(-50%, 0); }
+
+/* ---------------- 演出效果（触发器可以挂） ---------------- */
+.fx-shake { animation: fx-shake .5s var(--ease); }
+@keyframes fx-shake {
+  0%, 100% { transform: translateX(0); }
+  22% { transform: translateX(-6px) rotate(-.6deg); }
+  48% { transform: translateX(5px) rotate(.5deg); }
+  74% { transform: translateX(-3px); }
+}
+.fx-pulse .l2d-wrap, .fx-pulse .orb { animation: fx-pulse .7s var(--ease); }
+@keyframes fx-pulse {
+  40% { filter: brightness(1.16) drop-shadow(0 0 26px color-mix(in srgb, var(--accent) 55%, transparent)); }
+}
+.fx-dim .l2d-wrap { filter: brightness(.82) saturate(.9); transition: filter .6s var(--ease); }
+.fx-dim.off .l2d-wrap { filter: none; }
+.stage-frame.fx-flash::before {
+  content: ""; position: absolute; inset: 0; z-index: 4; pointer-events: none;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 46%, transparent), transparent 76%);
+  animation: fx-flash .6s ease-out both;
+}
+@keyframes fx-flash { from { opacity: 0; } 30% { opacity: 1; } to { opacity: 0; } }
+
+/* 舞台发起的那条消息（戳一下、摸头）比手打的淡一档 */
+.msg.from-stage .bubble {
+  background: transparent; border: 1px dashed var(--line-strong);
+  color: var(--muted); font-style: italic;
+}
+
+/* ---------------- 面板 ---------------- */
+.tip code {
+  font-family: var(--mono); font-size: 10.5px;
+  padding: 1px 4px; border-radius: 4px;
+  background: var(--bg-2); border: 1px solid var(--line);
+  color: var(--text-2);
+}
+.field textarea.mono { font-family: var(--mono); font-size: 11.5px; line-height: 1.55; }
+
+/* 情绪映射 */
+.map-row {
+  display: grid; grid-template-columns: 58px 1fr 1fr; gap: 8px; align-items: center;
+  margin-bottom: 7px;
+}
+.map-k { font-size: 12px; color: var(--muted); }
+.map-row select {
+  width: 100%; padding: 6px 8px; font-size: 11.5px;
+  background: var(--bg-2); border: 1px solid var(--line-strong); border-radius: 8px;
+  color: var(--text-2); outline: none;
+}
+.map-row select:disabled { opacity: .45; }
+.map-row select:focus { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+
+/* 触发器列表 */
+.trig-row {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 10px 0; border-bottom: 1px solid var(--line);
+}
+.trig-row.off { opacity: .45; }
+.trig-main { flex: 1; min-width: 0; }
+.trig-t { display: flex; align-items: center; gap: 7px; }
+.trig-on {
+  font-size: 10px; padding: 1px 7px; border-radius: 999px; white-space: nowrap;
+  color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+.trig-name { font-size: 12.5px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trig-sub { font-size: 11px; color: var(--faint); margin-top: 4px; word-break: break-all; }
+.trig-sub2 { font-size: 11px; color: var(--muted); margin-top: 2px; word-break: break-all; }
+.trig-tools { display: flex; gap: 2px; flex: 0 0 auto; }
+.trig-tools button {
+  width: 22px; height: 22px; border-radius: 6px; font-size: 11px;
+  color: var(--muted); transition: color .14s, background .14s;
+}
+.trig-tools button:hover { color: var(--text); background: var(--card-2); }
+
+/* 动作编辑器 */
+.acts { display: flex; flex-direction: column; gap: 8px; }
+.act-row {
+  border: 1px solid var(--line); border-radius: 10px;
+  padding: 8px 10px 4px; background: rgba(255, 255, 255, .014);
+}
+.act-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.act-head select {
+  flex: 1; padding: 5px 8px; font-size: 11.5px; font-family: var(--mono);
+  background: var(--bg-2); border: 1px solid var(--line-strong); border-radius: 7px;
+  color: var(--text-2);
+}
+.act-head .del { color: var(--faint); width: 20px; height: 20px; border-radius: 5px; }
+.act-head .del:hover { color: var(--err); }
+.act-body .field { margin-bottom: 8px; }
+.act-body .field > label { font-size: 10.5px; }
+.act-body .field input, .act-body .field select, .act-body .field textarea { font-size: 12px; padding: 6px 9px; }
 </style>
 </head>
 <body>
@@ -846,25 +1034,43 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   <!-- ================= 右侧角色舞台 ================= -->
   <aside id="stage">
     <div class="stage-glow" id="stage-glow"></div>
-    <div class="orb-wrap">
-      <div class="orb-ring"></div>
-      <div class="orb-ring r2"></div>
-      <div class="orb" id="orb" data-emo="neutral">
-        <img id="avatar" alt="" class="hidden">
-        <div class="face" id="face">
-          <div class="brow l"></div><div class="brow r"></div>
-          <div class="eye l"></div><div class="eye r"></div>
-          <div class="blush l"></div><div class="blush r"></div>
-          <div class="mouth"></div>
-        </div>
-        <div class="orb-sheen"></div>
+
+    <div class="stage-frame" id="stage-frame" data-mode="orb">
+      <!-- Live2D：模型画在这块画布上。没有模型 / 运行时的时候退回光球，
+           光球的表情层仍然跟着 emo 事件走，两种形态共用同一套触发器。 -->
+      <div class="l2d-wrap" id="l2d-wrap">
+        <canvas id="l2d-canvas"></canvas>
+        <div class="l2d-status" id="l2d-status"></div>
       </div>
+
+      <div class="orb-wrap" id="orb-wrap">
+        <div class="orb-ring"></div>
+        <div class="orb-ring r2"></div>
+        <div class="orb" id="orb" data-emo="neutral">
+          <img id="avatar" alt="" class="hidden">
+          <div class="face" id="face">
+            <div class="brow l"></div><div class="brow r"></div>
+            <div class="eye l"></div><div class="eye r"></div>
+            <div class="blush l"></div><div class="blush r"></div>
+            <div class="mouth"></div>
+          </div>
+          <div class="orb-sheen"></div>
+        </div>
+      </div>
+
       <div class="voice-bars" id="voice-bars"><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="stage-bubble" id="stage-bubble"></div>
+      <button class="stage-hint" id="stage-hint"></button>
     </div>
 
     <div class="stage-name" id="stage-name">—</div>
     <div class="stage-sub" id="stage-sub"></div>
-    <div class="stage-mood"><span class="dot" id="mood-dot"></span><span id="mood-text">平静</span></div>
+    <div class="stage-mood-row">
+      <div class="stage-mood"><span class="dot" id="mood-dot"></span><span id="mood-text">平静</span></div>
+      <button class="stage-tune" id="btn-stage" title="Live2D 与触发器">
+        <svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 12h4M12 12h8M4 17h12M20 17h0"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="17" r="2"/></svg>
+      </button>
+    </div>
 
     <div class="stage-act" id="stage-act"></div>
 
@@ -1080,7 +1286,9 @@ function paintAll() {
   paintHead();
   paintPersonas();
   paintStage();
-  if (typeof paintHistory === 'function') paintHistory();
+  // 回合进行中别重建历史：服务端这时返回的是空历史，重建会把正在流式渲染的
+  // 那一段抹掉（正在说的字会跳回开头）。回合结束后由 finishLive 收尾。
+  if (typeof paintHistory === 'function' && !S.busy) paintHistory();
   if (typeof paintComposer === 'function') paintComposer();
   if (typeof paintDrawer === 'function' && !$('#drawer').classList.contains('hidden')) paintDrawer();
 }
@@ -1381,6 +1589,8 @@ onEvent((m) => {
       hideTyping();
       LIVE.raw += m.d || '';
       renderLive();
+      // 正文末尾一小段交给触发器匹配关键词（「晚安」「抱抱」之类）
+      TRIG.fire('reply', { text: LIVE.raw.slice(-160) });
       break;
     case 'reason':
       if (!LIVE.node) ensureLiveNode();
@@ -1426,6 +1636,12 @@ onEvent((m) => {
     case 'act':
       showAct(m.name || '');
       break;
+    case 'motion':
+      l2dPlayMotion(m.group || m.name || '', m.index);
+      break;
+    case 'expr':
+      l2dSetExpression(m.name || '');
+      break;
     case 'quit':
       window.close();
       break;
@@ -1449,6 +1665,7 @@ async function sendCurrent() {
   LIVE.raw = '';
   pinned = true;
   stick(true);
+  TRIG.fire('user', { text });
   try {
     await cmd('send', { text });
   } catch (e) {
@@ -1504,6 +1721,7 @@ AUDIO.el.addEventListener('error', () => { AUDIO.playing = false; playNext(); })
 function setSpeaking(on) {
   $('#orb').classList.toggle('speaking', on);
   $('#voice-bars').classList.toggle('on', on);
+  l2dSetSpeaking(on);
 }
 
 function playNext() {
@@ -1783,6 +2001,8 @@ function setEmotion(name, fromVoice) {
   S.emotion = emo;
   $('#orb').dataset.emo = emo;
   $('#mood-text').textContent = EMO_ZH[emo] || emo;
+  // 光球和 Live2D 是同一个情绪的两张脸：表情映射写在角色卡 live2d.emo 里
+  l2dSetEmotion(emo);
   if (!fromVoice) {
     if (moodTimer) clearTimeout(moodTimer);
     // 情绪是回合内的状态：过一会儿回到平静，但保留当前值到下一句
@@ -1790,6 +2010,7 @@ function setEmotion(name, fromVoice) {
       if (!AUDIO.playing) {
         $('#orb').dataset.emo = 'neutral';
         $('#mood-text').textContent = EMO_ZH.neutral;
+        l2dSetEmotion('neutral');
       }
     }, 14000);
   }
@@ -1815,6 +2036,9 @@ function paintStage() {
   pro.classList.toggle('on', !!p.proactive);
   $('#proactive-v').textContent = p.proactive ? `每 ${p.idle_minutes || 30} 分钟` : '关';
   if (!document.querySelector('#orb').classList.contains('speaking')) setSpeaking(false);
+  // 舞台形态跟着角色卡走：配了模型就换 Live2D，没配就是光球
+  trigRefresh();
+  l2dApply();
 }
 
 /* ---------------- 事件 ---------------- */
@@ -1823,9 +2047,7 @@ onEvent((m) => {
   else if (m.t === 'voice_stop') stopAudio();
   else if (m.t === 'voice_error') toast('语音合成失败：' + (m.d || ''), 'err', 5000);
   else if (m.t === 'turn_begin') {
-    S.emotion = 'thinking';
-    $('#orb').dataset.emo = 'thinking';
-    $('#mood-text').textContent = '思索';
+    setEmotion('thinking', true);
   }
 });
 
@@ -1855,6 +2077,8 @@ function buildDrawer() {
 }
 function paintDrawer() {
   if ($('#drawer').classList.contains('hidden')) return;
+  // 舞台面板的规则编辑器里正在填表：状态广播来了也别把它冲掉
+  if (DRAWER.current === 'stage' && typeof STAGE_VIEW !== 'undefined' && STAGE_VIEW.kind !== 'list') return;
   buildDrawer();
 }
 function closeDrawer() {
@@ -2138,6 +2362,8 @@ function wireGlobal() {
   $('#btn-settings').onclick = openSettings;
   $('#btn-edit-persona').onclick = () => openPersonaEditor(false);
   $('#btn-new-persona').onclick = () => openPersonaEditor(true);
+  $('#btn-stage').onclick = () => openStagePanel();
+  $('#stage-hint').onclick = () => openStagePanel();
   $('#btn-proactive').onclick = async () => {
     const p = S.persona || {};
     try {
@@ -2493,6 +2719,9 @@ async function mockCmd(name, args) {
 (async function boot() {
   wireGlobal();
   applyAccent('#8b7cff');
+  // 触发器的状态对象在 08-triggers.js 里，这里只是脚本还没解析到那一层：
+  // 放到下一轮事件循环再开静默计时，别在初始化顺序上打架。
+  setTimeout(() => TRIG.startIdle(), 0);
   if (MOCK) {
     S.connected = false;
     await refreshState();
@@ -2515,6 +2744,1313 @@ onEvent((m) => {
     setTimeout(() => toast('还没有接入模型服务，点左下角齿轮配置', '', 5000), 600);
   }
 });
+
+/* ==== js/07-live2d.js ================================================ */
+
+'use strict';
+/* =====================================================================
+   07-live2d —— 舞台：Live2D 模型
+   =====================================================================
+   三件事，都只在页面里做，服务端只管发文件：
+
+   1. 运行时：从 .agent/live2d/runtime/ 按 manifest.json 的清单加载
+      （默认 pixi.min.js → live2dcubismcore.min.js → cubism4.min.js）。
+      也可以让它走 CDN（面板里的「从 CDN 加载」），适合先看效果。
+   2. 模型：.agent/live2d/models/ 下面任意 model3.json，路径写在角色卡
+      live2d.model 里。加载完把动作组 / 表情名回报给角色卡，供提示词引用。
+   3. 演出：动作、表情、参数、口型。表情与动作的对应关系是数据（live2d.emo），
+      不是代码 —— 换模型不用改 JS。
+
+   没有模型时整个舞台退回光球，情绪 / 动作 / 触发器照常工作。
+   ===================================================================== */
+
+const L2D = {
+  mode: 'orb',            // orb | l2d
+  status: 'idle',         // idle | loading | ready | error
+  app: null, model: null, canvas: null,
+  scan: null,             // live2d.scan 的结果
+  runtimeFrom: '',        // local | cdn
+  groups: [],             // 动作组名
+  expressions: [],        // 表情名
+  params: [],             // 正在补间的参数
+  cfg: {},                // 角色卡的 live2d 对象
+  mouth: 0, speaking: false,
+  hitFired: false,
+  tick: 0,
+  _loading: null,
+};
+
+/* 面板里可以改这两个地址；只影响「从 CDN 加载」这一条路 */
+const L2D_CDN = [
+  'https://unpkg.com/pixi.js@6.5.10/dist/browser/pixi.min.js',
+  'https://unpkg.com/live2dcubismcore@1.0.2/live2dcubismcore.min.js',
+  'https://unpkg.com/pixi-live2d-display@0.4.0/dist/cubism4.min.js',
+];
+
+/* 情绪 → 表情 / 动作。expr 可以是序号（0 起）也可以是表情名，
+   具体含义由模型决定，所以这一份只是「常见样本模型的合理默认」，
+   面板里可以逐条改写，写进角色卡 live2d.emo。 */
+const L2D_EMO_DEFAULT = {
+  neutral: { expr: 0 },
+  happy: { expr: 1 },
+  sad: { expr: 2 },
+  angry: { expr: 3 },
+  shy: { expr: 4 },
+  surprised: { expr: 5 },
+  thinking: { expr: 6 },
+  affection: { expr: 7 },
+};
+
+function l2dCfg() {
+  const c = (S.persona && S.persona.live2d) || {};
+  return c && typeof c === 'object' ? c : {};
+}
+
+function l2dSetStatus(kind, text) {
+  const wrap = $('#l2d-wrap');
+  const st = $('#l2d-status');
+  wrap.classList.toggle('loading', kind === 'loading');
+  wrap.classList.toggle('error', kind === 'error');
+  wrap.classList.toggle('ready', kind === 'ready');
+  if (st) st.textContent = text || '';
+  const hint = $('#stage-hint');
+  if (hint && kind !== 'ready') hint.textContent = text || 'Live2D 未接入 · 点这里接入';
+}
+
+function l2dSetMode(mode) {
+  L2D.mode = mode;
+  $('#stage-frame').dataset.mode = mode;
+  if (mode === 'l2d') {
+    $('#stage-hint').textContent = '';
+    $('#stage-hint').classList.add('hidden');
+  } else {
+    $('#stage-hint').classList.remove('hidden');
+  }
+}
+
+/* ---------------- 运行时 ---------------- */
+function loadScript(url) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = url;
+    s.async = false; // 顺序就是依赖顺序：pixi → core → display
+    s.onload = () => resolve(url);
+    s.onerror = () => reject(new Error('脚本加载失败：' + url));
+    document.head.appendChild(s);
+  });
+}
+
+async function l2dLoadRuntime() {
+  if (window.PIXI && PIXI.live2d && window.Live2DCubismCore) return 'cached';
+  const useCdn = localStorage.getItem('agent.l2d.cdn') === '1';
+  let list, from;
+  if (useCdn) {
+    list = L2D_CDN; from = 'cdn';
+  } else {
+    const scripts = (L2D.scan && L2D.scan.runtime && L2D.scan.runtime.scripts) || [];
+    if (!scripts.length || (L2D.scan.runtime && !L2D.scan.runtime.ok))
+      throw new Error('运行时库不全：把 Cubism Core 等放进 .agent/live2d/runtime/');
+    list = scripts.filter(s => s.ok !== false).map(s => '/api/live2d/runtime/' + encodeURIComponent(s.name));
+    from = 'local';
+  }
+  for (const url of list) await loadScript(url);
+  if (!window.PIXI || !PIXI.live2d || !window.Live2DCubismCore)
+    throw new Error('运行时加载了但没有注册 PIXI.live2d');
+  L2D.runtimeFrom = from;
+  return from;
+}
+
+/* ---------------- 模型 ---------------- */
+function l2dModelUrl(path) {
+  return '/api/live2d/' + String(path).split('/').map(encodeURIComponent).join('/');
+}
+
+function l2dCollectInfo() {
+  const defs = (L2D.model.internalModel.motionManager &&
+    L2D.model.internalModel.motionManager.definitions) || {};
+  L2D.groups = Object.keys(defs);
+  const settings = L2D.model.internalModel.settings || {};
+  L2D.expressions = (settings.expressions || []).map(e => e.Name).filter(Boolean);
+}
+
+function l2dFit() {
+  const app = L2D.app, model = L2D.model;
+  if (!app || !model) return;
+  const res = app.renderer.resolution || 1;
+  const W = app.renderer.width / res;
+  const H = app.renderer.height / res;
+  const cfg = L2D.cfg;
+  const iw = model.internalModel.width || 1;
+  const ih = model.internalModel.height || 1;
+  const scale = Math.min(W / iw, H / ih) * (Number(cfg.scale) || 1) * 1.02;
+  model.scale.set(scale);
+  model.anchor.set(0.5, 0.5);
+  model.x = W * (0.5 + (Number(cfg.x) || 0));
+  model.y = H * (0.5 + (Number(cfg.y) || 0));
+}
+
+function l2dDestroy() {
+  try { if (L2D.app) L2D.app.destroy(false, { children: true, texture: true, baseTexture: true }); } catch { }
+  L2D.app = null;
+  L2D.model = null;
+  L2D.groups = [];
+  L2D.expressions = [];
+  L2D.params = [];
+  // 一个 canvas 只能有一个 WebGL 上下文，destroy 之后它会失效：
+  // 换一块干净的画布，比想办法复活旧上下文省事得多。
+  const old = $('#l2d-canvas');
+  if (old) {
+    const fresh = document.createElement('canvas');
+    fresh.id = 'l2d-canvas';
+    old.replaceWith(fresh);
+    L2D.canvas = fresh;
+  }
+}
+
+async function l2dMount(force) {
+  if (L2D._loading && !force) return L2D._loading;
+  const job = l2dMountInner(force);
+  L2D._loading = job;
+  try {
+    return await job;
+  } finally {
+    // 只有自己那一份还挂着时才清；换模型时可能已经换成新的加载了
+    if (L2D._loading === job) L2D._loading = null;
+  }
+}
+
+async function l2dMountInner(force) {
+  const cfg = l2dCfg();
+  L2D.cfg = cfg;
+  const path = (cfg.model || '').trim();
+  if (MOCK) { l2dSetStatus('error', '演示模式没有后端，接不上模型'); l2dSetMode('orb'); return; }
+  if (!path) {
+    l2dDestroy();
+    L2D.status = 'idle';
+    l2dSetStatus('idle', 'Live2D 未接入 · 点这里接入');
+    l2dSetMode('orb');
+    return;
+  }
+  try {
+    l2dSetStatus('loading', '加载运行时…');
+    if (L2D.mode !== 'l2d') l2dSetMode('l2d');
+    await l2dLoadRuntime();
+    l2dSetStatus('loading', '加载模型…');
+    l2dDestroy();
+    L2D.canvas = $('#l2d-canvas');
+    const rect = L2D.canvas.getBoundingClientRect();
+    L2D.app = new PIXI.Application({
+      view: L2D.canvas,
+      width: Math.max(2, Math.round(rect.width)),
+      height: Math.max(2, Math.round(rect.height)),
+      backgroundAlpha: 0,
+      antialias: true,
+      autoDensity: true,
+      resolution: Math.min(2, window.devicePixelRatio || 1),
+    });
+    const model = await PIXI.live2d.Live2DModel.from(l2dModelUrl(path), { autoInteract: true });
+    L2D.model = model;
+    L2D.app.stage.addChild(model);
+    l2dCollectInfo();
+    l2dFit();
+    L2D.status = 'ready';
+    l2dSetMode('l2d');
+    l2dSetStatus('ready', '');
+    l2dBindPointer();
+    l2dStartTicker();
+    if (window.ResizeObserver && !L2D._ro) {
+      L2D._ro = new ResizeObserver(() => l2dScheduleResize());
+      L2D._ro.observe($('#l2d-wrap'));
+    }
+    // 把可用清单回报给角色卡：提示词里要写清楚能播哪些动作
+    l2dReportInfo();
+    if (typeof TRIG !== 'undefined') TRIG.fire('boot', {});
+  } catch (e) {
+    console.warn('live2d mount failed:', e);
+    L2D.status = 'error';
+    l2dSetMode('orb');
+    l2dSetStatus('error', '模型没起来：' + (e && e.message ? e.message : e));
+  }
+}
+
+/* 模型里有什么，角色卡里就记什么：下次拼提示词时能列出动作组 */
+let l2dReportTimer = null;
+function l2dReportInfo() {
+  if (l2dReportTimer) clearTimeout(l2dReportTimer);
+  l2dReportTimer = setTimeout(async () => {
+    const p = S.persona || {};
+    if (!p.id) return;
+    if (S.busy) { l2dReportInfo(); return; }   // 回合中写角色卡会打断状态，等它说完
+    const cur = l2dCfg();
+    const same = JSON.stringify(cur.groups || []) === JSON.stringify(L2D.groups) &&
+      JSON.stringify(cur.expressions || []) === JSON.stringify(L2D.expressions);
+    if (same) return;
+    try {
+      const next = Object.assign({}, cur, { groups: L2D.groups, expressions: L2D.expressions });
+      await cmd('persona.save', { id: p.id, patch: { live2d: next } });
+      S.persona.live2d = next;
+      L2D.cfg = next;
+    } catch (e) { console.warn('report live2d info failed', e); }
+  }, 1200);
+}
+
+/* ---------------- 演出 ---------------- */
+function l2dPlayMotion(group, index) {
+  const m = L2D.model;
+  if (!m || !group) return false;
+  const idx = Number.isFinite(Number(index)) && index !== '' && index != null ? Number(index) : undefined;
+  if (L2D.groups.length && !L2D.groups.includes(group)) {
+    console.info('live2d: 模型里没有动作组', group, '可用：', L2D.groups);
+    return false;
+  }
+  try {
+    m.motion(group, idx, 3); // 3 = FORCE，触发器的意图比待机动作优先
+    return true;
+  } catch (e) { console.warn('motion failed', e); return false; }
+}
+
+function l2dSetExpression(id) {
+  const m = L2D.model;
+  if (!m || id === undefined || id === null || id === '') return false;
+  try {
+    if (typeof id === 'number' || /^\d+$/.test(String(id))) {
+      const list = (m.internalModel.settings && m.internalModel.settings.expressions) || [];
+      const i = Number(id);
+      if (i < 0 || i >= list.length) return false;
+      m.expression(i);
+    } else {
+      m.expression(String(id));
+    }
+    return true;
+  } catch (e) { console.warn('expression failed', e); return false; }
+}
+
+function l2dSetParam(id, to, ms) {
+  if (!L2D.model || !id) return;
+  const core = L2D.model.internalModel.coreModel;
+  let from = Number(to);
+  try { from = core.getParameterValueById(id); } catch { }
+  L2D.params = L2D.params.filter(p => p.id !== id);
+  L2D.params.push({ id, from, to: Number(to), t0: performance.now(), ms: Math.max(0, Number(ms) || 0) });
+}
+
+function l2dEmotionMap(name) {
+  const map = l2dCfg().emo;
+  const table = map && typeof map === 'object' ? map : L2D_EMO_DEFAULT;
+  return table[name] || (table === L2D_EMO_DEFAULT ? L2D_EMO_DEFAULT.neutral : null);
+}
+
+function l2dSetEmotion(name) {
+  if (L2D.status !== 'ready') return;
+  const hit = l2dEmotionMap((name || 'neutral').toLowerCase());
+  if (!hit) return;
+  if (hit.expr !== undefined && hit.expr !== null && hit.expr !== '') l2dSetExpression(hit.expr);
+  if (hit.motion) {
+    const g = Array.isArray(hit.motion) ? hit.motion[0] : hit.motion;
+    const i = Array.isArray(hit.motion) ? hit.motion[1] : undefined;
+    l2dPlayMotion(g, i);
+  }
+}
+
+function l2dSetSpeaking(on) {
+  L2D.speaking = !!on;
+}
+
+function l2dStartTicker() {
+  const app = L2D.app;
+  if (!app || app.__l2dTick) return;
+  app.__l2dTick = true;
+  app.ticker.add(() => {
+    const m = L2D.model;
+    if (!m) return;
+    L2D.tick += 1 / 60;
+    // 口型：说话时给一个 3~5Hz 的包络，比随机数像人
+    const t = L2D.tick;
+    const target = L2D.speaking
+      ? 0.18 + 0.55 * Math.abs(Math.sin(t * 7.4) * Math.sin(t * 2.1 + 0.7))
+      : 0;
+    L2D.mouth += (target - L2D.mouth) * 0.28;
+    try {
+      const core = m.internalModel.coreModel;
+      core.setParameterValueById('ParamMouthOpenY', L2D.mouth);
+    } catch { }
+    // 参数补间（触发器里的 param 动作用得上）
+    if (L2D.params.length) {
+      const now = performance.now();
+      L2D.params = L2D.params.filter(p => {
+        const k = p.ms <= 0 ? 1 : Math.min(1, (now - p.t0) / p.ms);
+        const e = 1 - Math.pow(1 - k, 3);
+        const v = p.from + (p.to - p.from) * e;
+        try { m.internalModel.coreModel.setParameterValueById(p.id, v); } catch { return false; }
+        return k < 1;
+      });
+    }
+  });
+}
+
+/* ---------------- 点哪里算哪里 ---------------- */
+function l2dZoneFromPoint(cx, cy) {
+  const rect = L2D.canvas.getBoundingClientRect();
+  const y = (cy - rect.top) / Math.max(1, rect.height);
+  if (y < 0.34) return 'head';
+  if (y < 0.78) return 'body';
+  return 'hand';
+}
+
+function l2dBindPointer() {
+  const c = L2D.canvas;
+  if (!c || c.__l2dBound) return;
+  c.__l2dBound = true;
+  // 模型自己声明了 HitAreas 就听它的；否则按画布高度切三段
+  if (L2D.model) {
+    try {
+      L2D.model.on('hit', (names) => {
+        L2D.hitFired = true;
+        const zone = (names && names[0] ? String(names[0]) : 'body').toLowerCase();
+        if (typeof TRIG !== 'undefined') TRIG.fire('click', { zone, names });
+      });
+    } catch (e) { console.warn('hit binding failed', e); }
+  }
+  c.addEventListener('pointerdown', () => { L2D.hitFired = false; });
+  c.addEventListener('pointerup', (e) => {
+    const x = e.clientX, y = e.clientY;
+    // 库的 hit 走的是 pointertap（pointerup 上发），等它先出手再兜底
+    setTimeout(() => {
+      if (L2D.hitFired) return;
+      if (typeof TRIG !== 'undefined') TRIG.fire('click', { zone: l2dZoneFromPoint(x, y) });
+    }, 40);
+  });
+}
+
+/* 画布尺寸跟着布局走：窗口拉伸、抽屉开关都会变 */
+let l2dRoTimer = null;
+function l2dScheduleResize() {
+  if (l2dRoTimer) clearTimeout(l2dRoTimer);
+  l2dRoTimer = setTimeout(() => {
+    if (!L2D.app || !L2D.model || !L2D.canvas) return;
+    const rect = L2D.canvas.getBoundingClientRect();
+    if (rect.width < 2 || rect.height < 2) return;
+    L2D.app.renderer.resize(Math.round(rect.width), Math.round(rect.height));
+    l2dFit();
+  }, 140);
+}
+window.addEventListener('resize', l2dScheduleResize);
+
+/* ---------------- 入口 ---------------- */
+async function l2dApply(force) {
+  const cfg = l2dCfg();
+  const path = (cfg.model || '').trim();
+  // 同一个模型不重复加载；换角色 / 换模型才重建
+  if (!force && L2D.status === 'ready' && L2D.model && L2D._path === path) {
+    L2D.cfg = cfg;
+    l2dFit();
+    return;
+  }
+  L2D._path = path;
+  if (!L2D.scan && !MOCK) {
+    try { L2D.scan = await cmd('live2d.scan'); } catch { }
+  }
+  await l2dMount(force);
+}
+
+async function l2dReload() {
+  l2dDestroy();
+  L2D.status = 'idle';
+  L2D._path = '';
+  await l2dApply(true);
+}
+
+function l2dUseCdn(on) {
+  localStorage.setItem('agent.l2d.cdn', on ? '1' : '0');
+  l2dReload();
+}
+
+/* ==== js/08-triggers.js ============================================== */
+
+'use strict';
+/* =====================================================================
+   08-triggers —— 触发器：事件 → 动作序列
+   =====================================================================
+   一条规则长这样（存在角色卡 persona.json 的 triggers 数组里）：
+
+     { "id": "poke-head", "on": "click", "when": { "zone": "head" },
+       "do": [ {"a":"motion","group":"TapHead"}, {"a":"say","text":"别摸头…"} ],
+       "cd": 5, "once": false, "off": false }
+
+   on    事件：boot / turn_begin / turn_end / reply / user / emotion / act /
+              motion / expr / click / idle
+   when  条件（全部满足才触发）：zone / emotion / act / group / expr /
+              text / min_idle；字符串或数组都行，text 支持 /正则/
+   do    动作：motion expr param say speak send idle toast fx sound wait emo
+   cd    冷却（秒）；once 只触发一次（本次页面会话）
+
+   两个方向都是通的：
+   - AI → 舞台：回复里的 [[emo:]] / [[act:]] / [[motion:]] 事件直接进 fire()
+   - 舞台 → AI：动作里的 send / idle 会把一条消息交回回合管线，她真的回你
+   ===================================================================== */
+
+const TRIG = {
+  list: [],           // 当前生效的规则
+  builtin: false,     // 是否在用内置默认（角色卡里没写）
+  last: {},           // id -> 上次触发时间
+  onceDone: {},       // id -> true
+  depth: 0,           // 防止 emo 动作自己触发自己
+  lastKind: {},
+  idleTimer: null,
+  lastInput: Date.now(),
+  input: 0,
+};
+
+/* 内置默认规则：没有配过触发器的角色先用这一套，戳一下就有反应 */
+const TRIG_DEFAULT = [
+  {
+    id: 'touch-head', on: 'click', when: { zone: ['head', 'touchhead'] }, cd: 5,
+    note: '摸头会躲',
+    do: [{ a: 'motion', group: 'TapHead' }, { a: 'say', text: '别、别摸头…' }, { a: 'emo', name: 'shy' }],
+  },
+  {
+    id: 'poke-body', on: 'click', when: { zone: ['body', 'touchbody'] }, cd: 12,
+    note: '戳一下，她会回你',
+    do: [{ a: 'motion', group: 'TapBody' }, { a: 'send', text: '（你戳了戳她的手臂）' }],
+  },
+  {
+    id: 'act-respond', on: 'act', when: { act: ['hug', 'headpat', 'lean', 'wave'] }, cd: 4,
+    note: '星号里的动作 → 模型动作',
+    do: [{ a: 'motion', group: 'TapBody', index: 0 }],
+  },
+  {
+    id: 'emo-happy', on: 'emotion', when: { emotion: ['happy', 'affection'] }, cd: 4,
+    note: '开心时换姿势',
+    do: [{ a: 'motion', group: 'Idle' }],
+  },
+  {
+    id: 'idle-shift', on: 'idle', when: { min_idle: 75 }, cd: 80,
+    note: '安静久了动一下',
+    do: [{ a: 'motion', group: 'Idle' }, { a: 'fx', name: 'pulse', ms: 700 }],
+  },
+  {
+    id: 'goodnight', on: 'reply', when: { text: '晚安' }, cd: 30,
+    note: '说到晚安就困了',
+    do: [{ a: 'emo', name: 'affection' }, { a: 'say', text: '晚安…做个好梦' }],
+  },
+];
+
+function trigClone(x) { return JSON.parse(JSON.stringify(x)); }
+
+function trigRefresh() {
+  const mine = (S.persona && Array.isArray(S.persona.triggers)) ? S.persona.triggers : [];
+  TRIG.builtin = mine.length === 0;
+  const list = mine.length ? mine : trigClone(TRIG_DEFAULT);
+  const sig = JSON.stringify(list);
+  if (sig === TRIG._sig) return;   // 状态广播很频繁，规则没变就别清冷却
+  TRIG._sig = sig;
+  TRIG.list = list;
+  TRIG.last = {};
+  TRIG.onceDone = {};
+}
+
+/* ---------------- 条件 ---------------- */
+function trigAny(cond, value) {
+  if (cond == null) return true;
+  if (Array.isArray(cond)) return cond.some(c => String(c).toLowerCase() === String(value).toLowerCase());
+  return String(cond).toLowerCase() === String(value).toLowerCase();
+}
+
+function trigText(text, cond) {
+  if (!cond) return true;
+  const t = String(text || '');
+  const m = /^\/(.*)\/([gimsuy]*)$/.exec(String(cond));
+  if (m) {
+    try { return new RegExp(m[1], m[2]).test(t); } catch { return false; }
+  }
+  return t.indexOf(String(cond)) >= 0;
+}
+
+function trigMatch(rule, ctx) {
+  const w = rule.when || rule.match || {};
+  if (w.zone != null && !trigAny(w.zone, ctx.zone)) return false;
+  if (w.emotion != null && !trigAny(w.emotion, ctx.emotion || S.emotion)) return false;
+  if (w.act != null && !trigAny(w.act, ctx.act)) return false;
+  if (w.group != null && !trigAny(w.group, ctx.group)) return false;
+  if (w.expr != null && !trigAny(w.expr, ctx.name)) return false;
+  if (w.text != null && !trigText(ctx.text, w.text)) return false;
+  if (w.not_text && trigText(ctx.text, w.not_text)) return false;
+  if (w.min_idle != null && Number(ctx.idle || 0) < Number(w.min_idle)) return false;
+  return true;
+}
+
+/* ---------------- 动作 ---------------- */
+function trigFx(name, ms) {
+  const frame = $('#stage-frame');
+  if (!frame || !name) return;
+  const cls = 'fx-' + String(name).replace(/[^a-z0-9_-]/gi, '');
+  frame.classList.add(cls);
+  setTimeout(() => frame.classList.remove(cls), Math.max(200, Number(ms) || 600));
+}
+
+function trigBubble(text, ms) {
+  const b = $('#stage-bubble');
+  if (!b) return;
+  if (!text) { b.classList.remove('on'); return; }
+  b.textContent = text;
+  b.classList.add('on');
+  if (trigBubble.t) clearTimeout(trigBubble.t);
+  trigBubble.t = setTimeout(() => b.classList.remove('on'), Math.max(1200, Number(ms) || 4200));
+}
+
+/* 舞台发起的用户消息：和手打的走同一条 send 命令，只是渲染得淡一点 */
+async function stageSend(text, opts = {}) {
+  const t = String(text || '').trim();
+  if (!t) return;
+  if (S.busy) { toast('她还在回应，等一下', '', 1600); return; }
+  if (!opts.hidden) {
+    const stream = $('#stream');
+    if ($('.welcome', stream)) stream.innerHTML = '';
+    const node = msgUser(t);
+    node.classList.add('from-stage');
+    stream.appendChild(node);
+    S.history.push({ role: 'user', kind: 'user', text: t });
+    pinned = true;
+    stick(true);
+    LIVE.node = null; LIVE.body = null; LIVE.raw = '';
+  }
+  try { await cmd('send', { text: t }); }
+  catch (e) { toast(e.message, 'err'); }
+}
+
+async function trigAct(act, ctx, state) {
+  if (!act || typeof act !== 'object') return;
+  const a = act.a || act.type;
+  switch (a) {
+    case 'motion':
+      l2dPlayMotion(act.group, act.index);
+      break;
+    case 'expr':
+      l2dSetExpression(act.id != null ? act.id : act.name);
+      break;
+    case 'param':
+      l2dSetParam(act.id, act.to, act.ms);
+      break;
+    case 'say':
+      trigBubble(act.text, act.ms);
+      break;
+    case 'speak':
+      speakText(act.text);
+      break;
+    case 'send':
+      if (!state.sent) { state.sent = true; await stageSend(act.text); }
+      break;
+    case 'idle':
+      if (!state.sent) { state.sent = true; await stageSend('[[idle]]', { hidden: true }); }
+      break;
+    case 'emo':
+      // 走一遍正常链路，光球 / 语音音色也跟着变；深度护栏防止自激
+      if (TRIG.depth < 3) {
+        TRIG.depth += 1;
+        try { setEmotion(act.name || 'neutral'); } finally { TRIG.depth -= 1; }
+      }
+      break;
+    case 'toast':
+      toast(act.text || '');
+      break;
+    case 'fx':
+      trigFx(act.name, act.ms);
+      break;
+    case 'sound':
+      if (act.url) {
+        const au = new Audio(act.url);
+        au.volume = act.volume == null ? 0.7 : Number(act.volume);
+        au.play().catch(() => { });
+      }
+      break;
+    case 'wait':
+      await new Promise(r => setTimeout(r, Math.max(0, Math.min(20000, Number(act.ms) || 200))));
+      break;
+    default:
+      console.info('trigger: 未知动作', a);
+  }
+}
+
+async function trigRun(actions, ctx, state) {
+  for (const act of actions || []) {
+    try { await trigAct(act, ctx, state); }
+    catch (e) { console.warn('trigger action failed', act, e); }
+  }
+}
+
+/* ---------------- 触发 ---------------- */
+TRIG.fire = function fire(kind, ctx) {
+  if (!kind) return;
+  const now = Date.now();
+  const c = Object.assign({ kind }, ctx || {});
+  // reply 是流式里每来一段就查一次，压一下频率，别让一条回复触发好几遍
+  const minGap = kind === 'reply' ? 600 : 0;
+  if (minGap && now - (TRIG.lastKind[kind] || 0) < minGap) return;
+  TRIG.lastKind[kind] = now;
+
+  const hits = TRIG.list.filter(r => r && !r.off && (r.on || r.event) === kind && trigMatch(r, c));
+  if (!hits.length) return;
+  const state = { sent: false };
+  for (const r of hits) {
+    const id = r.id || ('r' + TRIG.list.indexOf(r));
+    if (TRIG.onceDone[id]) continue;
+    const cd = Math.max(0, Number(r.cd != null ? r.cd : r.cooldown) || 0) * 1000;
+    if (cd && now - (TRIG.last[id] || 0) < cd) continue;
+    TRIG.last[id] = now;
+    if (r.once) TRIG.onceDone[id] = true;
+    trigRun(r.do || r.actions, c, state);
+  }
+};
+
+/* 手动跑一条（面板里的「试一下」） */
+TRIG.test = function test(rule) {
+  if (!rule) return;
+  trigRun(rule.do || rule.actions, { kind: 'test', text: '', idle: 999 }, { sent: false });
+};
+
+/* 保存：整份列表写回角色卡 */
+TRIG.save = async function save(list) {
+  const p = S.persona || {};
+  if (!p.id) throw new Error('还没有打开角色');
+  await cmd('persona.save', { id: p.id, patch: { triggers: list } });
+  S.persona.triggers = list;
+  trigRefresh();
+};
+
+/* ---------------- 静默计时 ----------------
+   任何一个操作都算「你在」；安静到规则里的 min_idle 就触发一次 idle。 */
+function trigTouch() {
+  TRIG.lastInput = Date.now();
+  TRIG.input += 1;
+}
+
+TRIG.startIdle = function startIdle() {
+  if (TRIG.idleTimer) clearInterval(TRIG.idleTimer);
+  TRIG.lastInput = Date.now();
+  TRIG.idleTimer = setInterval(() => {
+    const idle = (Date.now() - TRIG.lastInput) / 1000;
+    if (idle < 30) return;
+    TRIG.fire('idle', { idle });
+  }, 5000);
+};
+
+/* ---------------- 接线 ---------------- */
+onEvent((m) => {
+  switch (m.t) {
+    case 'turn_begin':
+      trigTouch();
+      TRIG.fire('turn_begin', {});
+      break;
+    case 'turn_end':
+      TRIG.fire('turn_end', {});
+      break;
+    case 'emo':
+      TRIG.fire('emotion', { emotion: (m.name || 'neutral').toLowerCase() });
+      break;
+    case 'act':
+      TRIG.fire('act', { act: (m.name || '').toLowerCase(), text: m.name });
+      break;
+    case 'motion':
+      TRIG.fire('motion', { group: m.group, index: m.index });
+      break;
+    case 'expr':
+      TRIG.fire('expr', { name: m.name });
+      break;
+  }
+});
+
+document.addEventListener('pointerdown', trigTouch, true);
+document.addEventListener('keydown', trigTouch, true);
+
+/* ==== js/09-stage-panel.js =========================================== */
+
+'use strict';
+/* =====================================================================
+   09-stage-panel —— 舞台面板：模型、情绪映射、触发器
+   =====================================================================
+   这个面板是「演出」的控制台，三件事都能在这里改完即时生效：
+   换模型（扫描 .agent/live2d/models/）、情绪→表情/动作映射、触发器规则。
+   规则编辑器是表单式的，JSON 编辑是逃生舱口。
+   ===================================================================== */
+
+let STAGE_VIEW = { kind: 'list' };
+
+function openStagePanel() {
+  STAGE_VIEW = { kind: 'list' };
+  openDrawer('舞台', 'stage', (body) => buildStagePanel(body));
+}
+
+function stageGo(view) {
+  STAGE_VIEW = view || { kind: 'list' };
+  buildDrawer();
+  const body = $('#drawer-body');
+  if (body) body.scrollTop = 0;   // 换视图时别把上一屏的滚动位置带过来
+}
+
+function buildStagePanel(body) {
+  if (STAGE_VIEW.kind === 'rule') return buildTriggerEditor(body, STAGE_VIEW.rule, STAGE_VIEW.isNew);
+  if (STAGE_VIEW.kind === 'json') return buildTriggerJson(body);
+  body.appendChild(stageStatusSection());
+  body.appendChild(stageModelSection());
+  body.appendChild(stageEmoSection());
+  body.appendChild(stageTriggerSection());
+}
+
+/* ---------------- 状态 ---------------- */
+function stageStatusSection() {
+  const s = el('div', 'sect');
+  s.appendChild(el('div', 'sect-h', '舞台形态'));
+
+  const card = el('div', 'card' + (L2D.status === 'ready' ? ' on' : ''));
+  const top = el('div', 'card-top');
+  const title = L2D.status === 'ready' ? 'Live2D' : (L2D.status === 'loading' ? 'Live2D · 加载中' : '光球');
+  top.appendChild(el('div', 'card-name', title));
+  const badge = el('span', 'badge ' + (L2D.status === 'ready' ? 'ok' : (L2D.status === 'error' ? 'warn' : '')),
+    L2D.status === 'ready' ? '运行中' : (L2D.status === 'error' ? '出错' : '待接入'));
+  top.appendChild(badge);
+  card.appendChild(top);
+
+  const model = (l2dCfg().model || '').trim();
+  const sub = el('div', 'card-sub');
+  if (model) sub.textContent = model;
+  else sub.textContent = '还没有选模型。把模型目录放进 .agent/live2d/models/，然后在上面的列表里选一个。';
+  card.appendChild(sub);
+
+  const rt = el('div', 'card-sub');
+  if (L2D.status === 'ready') {
+    rt.textContent = `运行时：${L2D.runtimeFrom === 'cdn' ? 'CDN' : '本地'} · 动作组 ${L2D.groups.length} 个 · 表情 ${L2D.expressions.length} 个`;
+  } else {
+    const r = L2D.scan && L2D.scan.runtime;
+    rt.textContent = r && r.ok ? '运行时：本地已就绪' : '运行时：缺失（' + ((r && r.missing) || []).join(', ') + '）';
+  }
+  card.appendChild(rt);
+  s.appendChild(card);
+
+  const row = el('div', 'btn-row');
+  row.appendChild(actionBtn('重新加载', async () => { await l2dReload(); buildDrawer(); }, 'btn sm'));
+  row.appendChild(actionBtn('扫描资源', async () => {
+    L2D.scan = await cmd('live2d.scan');
+    toast(`找到 ${(L2D.scan.models || []).length} 个模型`, 'ok');
+    buildDrawer();
+  }, 'btn sm'));
+  row.appendChild(actionBtn('打开资源目录', async () => { await cmd('live2d.open_dir'); }, 'btn sm ghost'));
+  s.appendChild(row);
+
+  const cdnRow = el('div', 'switch-row');
+  const left = el('div');
+  left.appendChild(el('div', 'k', '运行时走 CDN'));
+  left.appendChild(el('div', 'd', '本地没有放 Cubism Core 时，从 unpkg 现取（要联网）。'));
+  const sw = el('button', 'switch' + (localStorage.getItem('agent.l2d.cdn') === '1' ? ' on' : ''));
+  sw.onclick = () => {
+    const on = !sw.classList.contains('on');
+    sw.classList.toggle('on', on);
+    l2dUseCdn(on);
+    setTimeout(() => buildDrawer(), 900);
+  };
+  cdnRow.append(left, sw);
+  s.appendChild(cdnRow);
+
+  const tip = el('div', 'tip');
+  tip.innerHTML = '目录约定：<code>.agent/live2d/runtime/</code>（pixi.min.js、live2dcubismcore.min.js、cubism4.min.js，'
+    + '可用 manifest.json 指定清单）、<code>.agent/live2d/models/&lt;任意&gt;/</code>（model3.json 及其资源）。';
+  s.appendChild(tip);
+  return s;
+}
+
+/* ---------------- 模型 ---------------- */
+function stageModelSection() {
+  const s = el('div', 'sect');
+  s.appendChild(el('div', 'sect-h', '模型'));
+  const cfg = l2dCfg();
+  const models = (L2D.scan && L2D.scan.models) || [];
+
+  const sel = document.createElement('select');
+  const opt0 = document.createElement('option');
+  opt0.value = '';
+  opt0.textContent = models.length ? '— 选一个模型 —' : '（models/ 下还没有模型）';
+  sel.appendChild(opt0);
+  for (const m of models) {
+    const o = document.createElement('option');
+    o.value = m.path;
+    o.textContent = m.name + '  ·  ' + m.dir;
+    if (m.path === cfg.model) o.selected = true;
+    sel.appendChild(o);
+  }
+  s.appendChild(field('扫描到的模型', sel, '选完点下面的「保存」；也可以直接手填路径。'));
+
+  const path = textInput(cfg.model || '', 'models/hiyori/hiyori.model3.json');
+  s.appendChild(field('模型路径', path, '相对 .agent/live2d/ 的路径，区分大小写。'));
+
+  const scale = textInput(cfg.scale == null ? 1 : cfg.scale, '1', 'number');
+  const ox = textInput(cfg.x == null ? 0 : cfg.x, '0', 'number');
+  const oy = textInput(cfg.y == null ? 0 : cfg.y, '0', 'number');
+  const row = el('div', 'row');
+  row.append(field('缩放', scale), field('水平偏移', ox));
+  s.appendChild(row);
+  s.appendChild(field('垂直偏移', oy, '缩放 1 = 尽量填满画布；偏移是画布宽/高的比例（0.1 = 10%）。'));
+
+  sel.onchange = () => { if (sel.value) path.value = sel.value; };
+
+  s.appendChild(el('div', 'btn-row',
+    actionBtn('保存并加载', async () => {
+      const next = Object.assign({}, cfg, {
+        model: path.value.trim(),
+        scale: Number(scale.value) || 1,
+        x: Number(ox.value) || 0,
+        y: Number(oy.value) || 0,
+      });
+      await cmd('persona.save', { id: (S.persona || {}).id, patch: { live2d: next } });
+      S.persona.live2d = next;
+      L2D.cfg = next;
+      L2D._path = '';
+      await l2dReload();
+      toast(next.model ? '模型已加载' : '已切回光球', 'ok');
+      buildDrawer();
+    }, 'btn primary sm'),
+    actionBtn('切回光球', async () => {
+      const next = Object.assign({}, cfg, { model: '' });
+      await cmd('persona.save', { id: (S.persona || {}).id, patch: { live2d: next } });
+      S.persona.live2d = next;
+      L2D.cfg = next;
+      L2D._path = '';
+      await l2dReload();
+      buildDrawer();
+    }, 'btn sm ghost')
+  ));
+  return s;
+}
+
+/* ---------------- 情绪映射 ---------------- */
+function stageEmoSection() {
+  const s = el('div', 'sect');
+  s.appendChild(el('div', 'sect-h', '情绪 → 表情 / 动作'));
+  const cfg = l2dCfg();
+  const table = cfg.emo && typeof cfg.emo === 'object' ? cfg.emo : trigClone(L2D_EMO_DEFAULT);
+  const exprs = L2D.expressions || [];
+  const groups = L2D.groups || [];
+
+  const draft = {};
+  for (const name of Object.keys(EMO_ZH)) {
+    const cur = table[name] || {};
+    draft[name] = { expr: cur.expr == null ? '' : String(cur.expr), motion: Array.isArray(cur.motion) ? cur.motion[0] : (cur.motion || '') };
+    const row = el('div', 'map-row');
+    row.appendChild(el('span', 'map-k', EMO_ZH[name]));
+
+    const exprSel = document.createElement('select');
+    const e0 = document.createElement('option');
+    e0.value = '';
+    e0.textContent = '表情：不改';
+    exprSel.appendChild(e0);
+    exprs.forEach((n, i) => {
+      const o = document.createElement('option');
+      o.value = String(i);
+      o.textContent = '表情：' + n;
+      if (String(draft[name].expr) === String(i) || String(draft[name].expr) === n) o.selected = true;
+      exprSel.appendChild(o);
+    });
+    if (!exprs.length) exprSel.disabled = true;
+    exprSel.onchange = () => { draft[name].expr = exprSel.value; };
+
+    const moSel = document.createElement('select');
+    const m0 = document.createElement('option');
+    m0.value = '';
+    m0.textContent = '动作：不改';
+    moSel.appendChild(m0);
+    for (const g of groups) {
+      const o = document.createElement('option');
+      o.value = g;
+      o.textContent = '动作：' + g;
+      if (g === draft[name].motion) o.selected = true;
+      moSel.appendChild(o);
+    }
+    moSel.onchange = () => { draft[name].motion = moSel.value; };
+
+    row.append(exprSel, moSel);
+    s.appendChild(row);
+  }
+
+  s.appendChild(el('div', 'btn-row',
+    actionBtn('保存映射', async () => {
+      const emo = {};
+      for (const k of Object.keys(draft)) {
+        const one = {};
+        if (draft[k].expr !== '') one.expr = /^\d+$/.test(draft[k].expr) ? Number(draft[k].expr) : draft[k].expr;
+        if (draft[k].motion) one.motion = draft[k].motion;
+        if (Object.keys(one).length) emo[k] = one;
+      }
+      const next = Object.assign({}, cfg, { emo });
+      await cmd('persona.save', { id: (S.persona || {}).id, patch: { live2d: next } });
+      S.persona.live2d = next;
+      L2D.cfg = next;
+      toast('映射已保存', 'ok');
+    }, 'btn primary sm'),
+    actionBtn('逐个试', async () => {
+      for (const k of Object.keys(EMO_ZH)) {
+        setEmotion(k, true);
+        await new Promise(r => setTimeout(r, 900));
+      }
+    }, 'btn sm ghost')
+  ));
+  if (!L2D.expressions.length)
+    s.appendChild(el('div', 'tip', L2D.status === 'ready'
+      ? '这个模型没有表情数据（有些样本模型只有动作组），那就只挂动作。'
+      : '模型还没加载，加载后这里会列出真实的表情名。'));
+  return s;
+}
+
+/* ---------------- 触发器 ---------------- */
+function trigSummary(rule) {
+  const w = rule.when || rule.match || {};
+  const bits = [];
+  if (w.zone != null) bits.push('区域=' + [].concat(w.zone).join('/'));
+  if (w.emotion != null) bits.push('情绪=' + [].concat(w.emotion).join('/'));
+  if (w.act != null) bits.push('动作=' + [].concat(w.act).join('/'));
+  if (w.group != null) bits.push('组=' + [].concat(w.group).join('/'));
+  if (w.text != null) bits.push('文字≈' + w.text);
+  if (w.min_idle != null) bits.push('静默>' + w.min_idle + 's');
+  return bits.join(' · ') || '无条件';
+}
+
+function trigDoSummary(rule) {
+  const acts = rule.do || rule.actions || [];
+  return acts.map(a => {
+    const t = a.a || a.type;
+    if (t === 'motion') return '动作 ' + (a.group || '?');
+    if (t === 'expr') return '表情 ' + (a.id != null ? a.id : a.name);
+    if (t === 'say') return '台词「' + String(a.text || '').slice(0, 10) + '」';
+    if (t === 'send') return '让她回话';
+    if (t === 'idle') return '主动开口';
+    if (t === 'speak') return '朗读';
+    if (t === 'emo') return '情绪 ' + (a.name || '');
+    if (t === 'wait') return '等 ' + (a.ms || 0) + 'ms';
+    return t || '?';
+  }).join(' → ');
+}
+
+const TRIG_EVENTS = [
+  ['click', '戳一下（舞台点击）'],
+  ['emotion', '情绪变化'],
+  ['act', '星号动作 [[act:]]'],
+  ['motion', '模型动作 [[motion:]]'],
+  ['expr', '模型表情 [[expr:]]'],
+  ['reply', '回复正文命中文字'],
+  ['user', '你发出的消息'],
+  ['idle', '安静太久'],
+  ['turn_begin', '回合开始'],
+  ['turn_end', '回合结束'],
+  ['boot', '舞台就绪'],
+];
+
+function stageTriggerSection() {
+  const s = el('div', 'sect');
+  const head = el('div', 'sect-h', '触发器');
+  s.appendChild(head);
+  const list = TRIG.list;
+  if (TRIG.builtin) {
+    s.appendChild(el('div', 'tip', '现在用的是内置默认规则（角色卡里还没有存过触发器）。改任何一条都会写进角色卡。'));
+  }
+  if (!list.length) s.appendChild(el('div', 'empty', '还没有规则'));
+
+  list.forEach((rule, i) => {
+    const row = el('div', 'trig-row' + (rule.off ? ' off' : ''));
+    const main = el('div', 'trig-main');
+    const t1 = el('div', 'trig-t');
+    t1.appendChild(el('span', 'trig-on', (TRIG_EVENTS.find(e => e[0] === rule.on) || [rule.on, rule.on])[1]));
+    t1.appendChild(el('span', 'trig-name', rule.note || rule.id || ''));
+    main.appendChild(t1);
+    main.appendChild(el('div', 'trig-sub', trigSummary(rule)));
+    main.appendChild(el('div', 'trig-sub2', trigDoSummary(rule)));
+    row.appendChild(main);
+
+    const tools = el('div', 'trig-tools');
+    const run = el('button', 'del', '试');
+    run.title = '试一下这条规则';
+    run.onclick = () => { TRIG.test(rule); toast('试了一次：' + (rule.note || rule.id || ''), '', 1600); };
+    const edit = el('button', 'del', '改');
+    edit.title = '编辑';
+    edit.onclick = () => stageGo({ kind: 'rule', rule: trigClone(rule), isNew: false, index: i });
+    const del = el('button', 'del', '×');
+    del.title = '删除';
+    del.onclick = async () => {
+      const next = trigClone(TRIG.list);
+      next.splice(i, 1);
+      try { await TRIG.save(next); toast('已删除', 'ok'); buildDrawer(); }
+      catch (e) { toast(e.message, 'err'); }
+    };
+    tools.append(run, edit, del);
+    row.appendChild(tools);
+    s.appendChild(row);
+  });
+
+  s.appendChild(el('div', 'btn-row',
+    actionBtn('新建规则', () => stageGo({ kind: 'rule', rule: trigNewRule(), isNew: true }), 'btn primary sm'),
+    actionBtn('JSON 编辑', () => stageGo({ kind: 'json' }), 'btn sm ghost'),
+    actionBtn('恢复内置默认', async () => {
+      if (!confirm('清掉角色卡里的触发器，回到内置默认？')) return;
+      try { await TRIG.save([]); toast('已恢复默认', 'ok'); buildDrawer(); }
+      catch (e) { toast(e.message, 'err'); }
+    }, 'btn sm danger')
+  ));
+  return s;
+}
+
+/* ---------------- 规则编辑器 ---------------- */
+function trigNewRule() {
+  return {
+    id: 'rule' + Date.now().toString(36).slice(-4),
+    on: 'click',
+    when: { zone: 'head' },
+    do: [{ a: 'motion', group: (L2D.groups[0] || 'TapHead') }, { a: 'say', text: '' }],
+    cd: 5,
+  };
+}
+
+function buildTriggerEditor(body, rule, isNew) {
+  const r = trigClone(rule || trigNewRule());
+  r.when = r.when || r.match || {};
+  r.do = r.do || r.actions || [];
+  if (!r.do.length) r.do = [{ a: 'motion' }];
+
+  const back = el('div', 'btn-row');
+  back.appendChild(actionBtn('← 回到列表', () => stageGo({ kind: 'list' }), 'btn sm ghost'));
+  body.appendChild(back);
+
+  // 动作 / 表情的候选：从模型里读到的真实名字，输入框里直接补全
+  const dlG = document.createElement('datalist');
+  dlG.id = 'l2d-groups';
+  for (const g of (L2D.groups || [])) {
+    const o = document.createElement('option');
+    o.value = g;
+    dlG.appendChild(o);
+  }
+  const dlE = document.createElement('datalist');
+  dlE.id = 'l2d-exprs';
+  for (const e of (L2D.expressions || [])) {
+    const o = document.createElement('option');
+    o.value = e;
+    dlE.appendChild(o);
+  }
+  body.append(dlG, dlE);
+
+  const s1 = el('div', 'sect');
+  s1.appendChild(el('div', 'sect-h', isNew ? '新规则' : '编辑规则'));
+  const note = textInput(r.note || '', '例如：摸头会躲');
+  s1.appendChild(field('名字（给自己看的）', note));
+  const onSel = document.createElement('select');
+  for (const [v, label] of TRIG_EVENTS) {
+    const o = document.createElement('option');
+    o.value = v;
+    o.textContent = label;
+    if (v === r.on) o.selected = true;
+    onSel.appendChild(o);
+  }
+  onSel.onchange = () => {
+    r.on = onSel.value;
+    // 换事件时把这条事件用不上的条件清掉：留着「点击区域=head」的回复规则
+    // 永远不会命中，比清空更让人困惑
+    const keep = {
+      click: ['zone'], emotion: ['emotion'], act: ['act'], motion: ['group'],
+      expr: ['expr'], reply: ['text'], user: ['text'], idle: ['min_idle'],
+    }[r.on] || [];
+    const drop = (key, input) => { if (!keep.includes(key)) input.value = ''; };
+    drop('zone', zone); drop('emotion', emotion); drop('act', act);
+    drop('group', group); drop('text', text); drop('min_idle', minIdle);
+  };
+  s1.appendChild(field('什么时候触发', onSel));
+  body.appendChild(s1);
+
+  const s2 = el('div', 'sect');
+  s2.appendChild(el('div', 'sect-h', '条件（留空 = 不限制）'));
+  const zone = textInput(joinCond(r.when.zone), 'head, body, hand');
+  const emotion = textInput(joinCond(r.when.emotion), 'happy, shy');
+  const act = textInput(joinCond(r.when.act), 'hug, headpat');
+  const group = textInput(joinCond(r.when.group), 'TapHead');
+  const text = textInput(r.when.text || '', '晚安 或 /晚安|睡了/');
+  const minIdle = textInput(r.when.min_idle == null ? '' : r.when.min_idle, '60', 'number');
+  s2.append(
+    field('点击区域 zone', zone, '模型声明了 HitAreas 时是区域名；否则 head / body / hand。'),
+    field('情绪 emotion', emotion, '命中 [[emo:…]] 的名字，逗号分隔。'),
+    field('星号动作 act', act, '命中 *抱住你* 这类动作，逗号分隔。'),
+    field('动作组 group', group, '命中模型播放的动作组，逗号分隔。'),
+    field('正文 text', text, '子串，或写成 /正则/ 形式。'),
+    field('静默秒数 min_idle', minIdle, '只对「安静太久」有意义：安静超过这么多秒才触发。')
+  );
+  body.appendChild(s2);
+
+  const s3 = el('div', 'sect');
+  s3.appendChild(el('div', 'sect-h', '动作（按顺序执行）'));
+  const actsBox = el('div', 'acts');
+  const rows = [];
+  const addActRow = (act) => {
+    const row = el('div', 'act-row');
+    const head = el('div', 'act-head');
+    const sel = document.createElement('select');
+    for (const t of ['motion', 'expr', 'param', 'emo', 'say', 'speak', 'send', 'idle', 'fx', 'sound', 'toast', 'wait']) {
+      const o = document.createElement('option');
+      o.value = t;
+      o.textContent = t;
+      if ((act.a || act.type) === t) o.selected = true;
+      sel.appendChild(o);
+    }
+    const rm = el('button', 'del', '×');
+    rm.title = '删掉这个动作';
+    rm.onclick = () => {
+      const i = rows.indexOf(entry);
+      if (i >= 0) { rows.splice(i, 1); row.remove(); }
+    };
+    head.append(sel, rm);
+    const bodyBox = el('div', 'act-body');
+    const entry = { act, sel, body: bodyBox, row };
+    rows.push(entry);
+
+    const render = () => {
+      const t = sel.value;
+      act.a = t;
+      delete act.type;
+      bodyBox.innerHTML = '';
+      if (t === 'motion') {
+        const g = textInput(act.group || '', 'TapHead');
+        g.setAttribute('list', 'l2d-groups');
+        const idx = textInput(act.index == null ? '' : act.index, '0', 'number');
+        g.oninput = () => { act.group = g.value; };
+        idx.oninput = () => { act.index = idx.value === '' ? undefined : Number(idx.value); };
+        bodyBox.append(field('动作组', g), field('第几个（可空）', idx));
+      } else if (t === 'expr') {
+        const id = textInput(act.id != null ? act.id : (act.name || ''), '0 或 F01');
+        id.setAttribute('list', 'l2d-exprs');
+        id.oninput = () => { act.id = id.value; delete act.name; };
+        bodyBox.append(field('表情（序号或名字）', id));
+      } else if (t === 'param') {
+        const id = textInput(act.id || '', 'ParamAngleZ');
+        const to = textInput(act.to == null ? 0 : act.to, '15', 'number');
+        const ms = textInput(act.ms == null ? 400 : act.ms, '400', 'number');
+        id.oninput = () => { act.id = id.value; };
+        to.oninput = () => { act.to = Number(to.value) || 0; };
+        ms.oninput = () => { act.ms = Number(ms.value) || 0; };
+        bodyBox.append(field('参数 id', id), field('目标值', to), field('毫秒', ms));
+      } else if (t === 'emo') {
+        const sel2 = document.createElement('select');
+        for (const k of Object.keys(EMO_ZH)) {
+          const o = document.createElement('option');
+          o.value = k;
+          o.textContent = k + ' · ' + EMO_ZH[k];
+          if (act.name === k) o.selected = true;
+          sel2.appendChild(o);
+        }
+        sel2.onchange = () => { act.name = sel2.value; };
+        act.name = act.name || 'happy';
+        bodyBox.append(field('情绪', sel2));
+      } else if (t === 'say' || t === 'speak' || t === 'send' || t === 'toast') {
+        const tx = textArea(act.text || '', 2, t === 'send' ? '（你戳了戳她的手臂）' : '');
+        tx.oninput = () => { act.text = tx.value; };
+        bodyBox.append(field(t === 'send' ? '发给她的话' : '文字', tx,
+          t === 'send' ? '会作为一条用户消息进入回合，她真的会回。' : ''));
+      } else if (t === 'idle') {
+        bodyBox.append(el('div', 'tip', '让她主动开口一次（等同于「主动关怀」那条 [[idle]]）。'));
+      } else if (t === 'fx') {
+        const sel2 = document.createElement('select');
+        for (const v of ['pulse', 'shake', 'flash', 'dim']) {
+          const o = document.createElement('option');
+          o.value = v;
+          o.textContent = v;
+          if (act.name === v) o.selected = true;
+          sel2.appendChild(o);
+        }
+        sel2.onchange = () => { act.name = sel2.value; };
+        act.name = act.name || 'pulse';
+        const ms = textInput(act.ms == null ? 600 : act.ms, '600', 'number');
+        ms.oninput = () => { act.ms = Number(ms.value) || 600; };
+        bodyBox.append(field('效果', sel2), field('毫秒', ms));
+      } else if (t === 'sound') {
+        const url = textInput(act.url || '', '/api/live2d/models/x/sound/hi.wav');
+        const vol = textInput(act.volume == null ? 0.7 : act.volume, '0.7', 'number');
+        url.oninput = () => { act.url = url.value; };
+        vol.oninput = () => { act.volume = Number(vol.value) || 0.7; };
+        bodyBox.append(field('音频地址', url, '可以是 /api/live2d/ 下的文件，也可以是外链。'), field('音量', vol));
+      } else if (t === 'wait') {
+        const ms = textInput(act.ms == null ? 300 : act.ms, '300', 'number');
+        ms.oninput = () => { act.ms = Number(ms.value) || 0; };
+        bodyBox.append(field('毫秒', ms));
+      }
+    };
+    sel.onchange = render;
+    render();
+    row.append(head, bodyBox);
+    actsBox.appendChild(row);
+  };
+  for (const a of r.do) addActRow(a);
+  s3.appendChild(actsBox);
+  s3.appendChild(el('div', 'btn-row', actionBtn('+ 加一个动作', () => addActRow({ a: 'say', text: '' }), 'btn sm')));
+
+  const cd = textInput(r.cd == null ? 3 : r.cd, '3', 'number');
+  const once = el('button', 'switch' + (r.once ? ' on' : ''));
+  once.onclick = () => { r.once = !once.classList.contains('on'); once.classList.toggle('on', r.once); };
+  const onceRow = el('div', 'switch-row');
+  const onceLeft = el('div');
+  onceLeft.append(el('div', 'k', '只触发一次'), el('div', 'd', '本次页面会话内只算一次（刷新后重置）。'));
+  onceRow.append(onceLeft, once);
+  s3.append(field('冷却秒数 cd', cd, '同一规则两次触发之间至少隔这么久。'), onceRow);
+  body.appendChild(s3);
+
+  body.appendChild(el('div', 'btn-row',
+    actionBtn(isNew ? '创建' : '保存', async () => {
+      r.note = note.value.trim();
+      r.when = {};
+      const w = {};
+      const put = (k, v) => { if (v) w[k] = v; };
+      put('zone', splitCond(zone.value));
+      put('emotion', splitCond(emotion.value));
+      put('act', splitCond(act.value));
+      put('group', splitCond(group.value));
+      put('text', text.value.trim());
+      if (minIdle.value !== '') w.min_idle = Number(minIdle.value) || 0;
+      r.when = w;
+      r.do = rows.map(x => x.act).filter(a => a && a.a);
+      r.cd = Math.max(0, Number(cd.value) || 0);
+      if (!r.do.length) { toast('至少要有 1 个动作', 'err'); return; }
+      const next = trigClone(TRIG.list);
+      const at = next.findIndex(x => x.id === r.id);
+      if (at >= 0) next[at] = r; else next.push(r);
+      try { await TRIG.save(next); toast(isNew ? '规则已创建' : '已保存', 'ok'); stageGo({ kind: 'list' }); }
+      catch (e) { toast(e.message, 'err'); }
+    }, 'btn primary'),
+    actionBtn('试一下', () => TRIG.test(r), 'btn ghost'),
+    actionBtn('取消', () => stageGo({ kind: 'list' }), 'btn ghost')
+  ));
+  return body;
+}
+
+function joinCond(v) {
+  if (v == null) return '';
+  return Array.isArray(v) ? v.join(', ') : String(v);
+}
+function splitCond(v) {
+  const s = String(v || '').trim();
+  if (!s) return '';
+  const parts = s.split(/[,，\s]+/).filter(Boolean);
+  return parts.length > 1 ? parts : parts[0] || '';
+}
+
+/* ---------------- JSON 编辑 ---------------- */
+function buildTriggerJson(body) {
+  const s = el('div', 'sect');
+  s.appendChild(el('div', 'sect-h', '触发器 JSON'));
+  const ta = textArea(JSON.stringify(TRIG.list, null, 2), 22, '');
+  ta.classList.add('mono');
+  s.appendChild(field('', ta, '整份数组直接改；保存前会做一次语法检查。字段说明见 README「演出协议」。'));
+  body.appendChild(s);
+  body.appendChild(el('div', 'btn-row',
+    actionBtn('保存', async () => {
+      let list;
+      try { list = JSON.parse(ta.value); } catch (e) { toast('JSON 语法错误：' + e.message, 'err', 5000); return; }
+      if (!Array.isArray(list)) { toast('最外层必须是数组', 'err'); return; }
+      try { await TRIG.save(list); toast('已保存', 'ok'); stageGo({ kind: 'list' }); }
+      catch (e) { toast(e.message, 'err'); }
+    }, 'btn primary'),
+    actionBtn('← 回到列表', () => stageGo({ kind: 'list' }), 'btn ghost')
+  ));
+  return body;
+}
 </script>
 </body>
 </html>

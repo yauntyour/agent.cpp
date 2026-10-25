@@ -22,6 +22,8 @@ function buildDrawer() {
 }
 function paintDrawer() {
   if ($('#drawer').classList.contains('hidden')) return;
+  // 舞台面板的规则编辑器里正在填表：状态广播来了也别把它冲掉
+  if (DRAWER.current === 'stage' && typeof STAGE_VIEW !== 'undefined' && STAGE_VIEW.kind !== 'list') return;
   buildDrawer();
 }
 function closeDrawer() {
@@ -305,6 +307,8 @@ function wireGlobal() {
   $('#btn-settings').onclick = openSettings;
   $('#btn-edit-persona').onclick = () => openPersonaEditor(false);
   $('#btn-new-persona').onclick = () => openPersonaEditor(true);
+  $('#btn-stage').onclick = () => openStagePanel();
+  $('#stage-hint').onclick = () => openStagePanel();
   $('#btn-proactive').onclick = async () => {
     const p = S.persona || {};
     try {

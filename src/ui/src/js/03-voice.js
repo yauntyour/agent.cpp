@@ -12,6 +12,7 @@ AUDIO.el.addEventListener('error', () => { AUDIO.playing = false; playNext(); })
 function setSpeaking(on) {
   $('#orb').classList.toggle('speaking', on);
   $('#voice-bars').classList.toggle('on', on);
+  l2dSetSpeaking(on);
 }
 
 function playNext() {
@@ -291,6 +292,8 @@ function setEmotion(name, fromVoice) {
   S.emotion = emo;
   $('#orb').dataset.emo = emo;
   $('#mood-text').textContent = EMO_ZH[emo] || emo;
+  // 光球和 Live2D 是同一个情绪的两张脸：表情映射写在角色卡 live2d.emo 里
+  l2dSetEmotion(emo);
   if (!fromVoice) {
     if (moodTimer) clearTimeout(moodTimer);
     // 情绪是回合内的状态：过一会儿回到平静，但保留当前值到下一句
@@ -298,6 +301,7 @@ function setEmotion(name, fromVoice) {
       if (!AUDIO.playing) {
         $('#orb').dataset.emo = 'neutral';
         $('#mood-text').textContent = EMO_ZH.neutral;
+        l2dSetEmotion('neutral');
       }
     }, 14000);
   }
@@ -323,6 +327,9 @@ function paintStage() {
   pro.classList.toggle('on', !!p.proactive);
   $('#proactive-v').textContent = p.proactive ? `每 ${p.idle_minutes || 30} 分钟` : '关';
   if (!document.querySelector('#orb').classList.contains('speaking')) setSpeaking(false);
+  // 舞台形态跟着角色卡走：配了模型就换 Live2D，没配就是光球
+  trigRefresh();
+  l2dApply();
 }
 
 /* ---------------- 事件 ---------------- */
@@ -331,8 +338,6 @@ onEvent((m) => {
   else if (m.t === 'voice_stop') stopAudio();
   else if (m.t === 'voice_error') toast('语音合成失败：' + (m.d || ''), 'err', 5000);
   else if (m.t === 'turn_begin') {
-    S.emotion = 'thinking';
-    $('#orb').dataset.emo = 'thinking';
-    $('#mood-text').textContent = '思索';
+    setEmotion('thinking', true);
   }
 });

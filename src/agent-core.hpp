@@ -102,13 +102,18 @@ namespace app
         std::string voice;              // 覆盖 TTS 服务的音色
         bool proactive = false;         // 主动关怀
         int idle_minutes = 30;          // 静默多久后主动开口
+        // 舞台：模型路径、缩放、情绪→表情/动作映射（字段说明见 README「舞台」一节）
+        nlohmann::json live2d = nlohmann::json::object();
+        // 触发器：事件 → 动作序列，由页面侧的触发器引擎执行
+        nlohmann::json triggers = nlohmann::json::array();
 
         nlohmann::json to_json() const
         {
             return {{"id", id}, {"name", name}, {"subtitle", subtitle}, {"accent", accent},
                     {"avatar", avatar}, {"greeting", greeting}, {"prompt", prompt},
                     {"user_name", user_name}, {"voice", voice},
-                    {"proactive", proactive}, {"idle_minutes", idle_minutes}};
+                    {"proactive", proactive}, {"idle_minutes", idle_minutes},
+                    {"live2d", live2d}, {"triggers", triggers}};
         }
         static persona from_json(const std::string &id, const nlohmann::json &j)
         {
@@ -134,6 +139,12 @@ namespace app
             auto m = j.find("idle_minutes");
             if (m != j.end() && m->is_number_integer())
                 p.idle_minutes = std::clamp<int>((int)m->get<long long>(), 1, 24 * 60);
+            auto l = j.find("live2d");
+            if (l != j.end() && l->is_object())
+                p.live2d = *l;
+            auto t = j.find("triggers");
+            if (t != j.end() && t->is_array())
+                p.triggers = *t;
             return p;
         }
     };
@@ -152,6 +163,29 @@ namespace app
     inline fs::path persona_dir(const std::string &id) { return personas_dir() / id; }
     inline fs::path audio_dir() { return cell::root / "audio"; }
     inline fs::path mic_dir() { return cell::root / "mic"; }
+    // 舞台资源根：runtime/（Cubism Core 等库）+ models/（模型目录）
+    // 放在数据根里而不是 exe 里，模型换一个不需要重新编译。
+    inline fs::path live2d_dir() { return cell::root / "live2d"; }
+    inline fs::path live2d_runtime_dir() { return live2d_dir() / "runtime"; }
+    inline fs::path live2d_models_dir() { return live2d_dir() / "models"; }
+
+    // 页面按顺序加载的运行时脚本；manifest.json 可以覆盖这份默认清单
+    inline std::vector<std::string> live2d_runtime_scripts()
+    {
+        std::vector<std::string> out;
+        std::ifstream f(live2d_runtime_dir() / "manifest.json", std::ios::binary);
+        if (f)
+        {
+            auto j = nlohmann::json::parse(f, nullptr, false);
+            if (j.is_object() && j.contains("scripts") && j["scripts"].is_array())
+                for (auto &s : j["scripts"])
+                    if (s.is_string() && !s.get<std::string>().empty())
+                        out.push_back(s.get<std::string>());
+        }
+        if (out.empty())
+            out = {"pixi.min.js", "live2dcubismcore.min.js", "cubism4.min.js"};
+        return out;
+    }
 
     inline std::string default_persona_prompt()
     {
@@ -169,6 +203,9 @@ namespace app
     //   [[emo:happy]]            情绪（驱动表情 / 语音音色）
     //   [[act:hug]]              动作（界面演出，不朗读）
     //   [[remember]]…[[/remember]] 要长期记住的事实
+    // 装了 Live2D 模型之后还有两种直接指挥模型的标记：
+    //   [[motion:TapBody]] / [[motion:TapBody/2]]   播放动作组
+    //   [[expr:f01]]                                切表情
     // 流式输出会把标记切碎，所以这里做增量解析：遇到可能的标记前缀就按住不放，
     // 确定不是标记再原样吐出来。
     class marker_stream
@@ -300,6 +337,18 @@ namespace app
                 {
                     if (on_marker)
                         on_marker("act", body.substr(4));
+                    continue;
+                }
+                if (body.rfind("motion:", 0) == 0 && body.size() > 7)
+                {
+                    if (on_marker)
+                        on_marker("motion", body.substr(7));
+                    continue;
+                }
+                if (body.rfind("expr:", 0) == 0 && body.size() > 5)
+                {
+                    if (on_marker)
+                        on_marker("expr", body.substr(5));
                     continue;
                 }
                 // 不认识的标记：原样保留（可能是角色自己的写法）
@@ -902,6 +951,32 @@ namespace app
                  "不要提到这条消息本身。\n"
                  "6. 回复保持口语化，通常 1-3 句；不要用标题、列表、代码块，除非对方在讨论代码。\n"
                  "7. 永远保持角色，不跳出扮演，不描述这些规则。\n";
+            // 装了 Live2D 模型才追加「直接指挥模型」的约定：没有模型时说了也没人接
+            std::string model = p.live2d.is_object() ? p.live2d.value("model", std::string()) : std::string();
+            if (!model.empty())
+            {
+                s += "\n## 舞台（你有一具会动的身体）\n"
+                     "8. `[[motion:动作组]]` 让身体播放一次动作，写 `[[motion:动作组/序号]]` 指定第几个；"
+                     "动作正在播时不要叠加。\n"
+                     "9. `[[expr:表情名]]` 直接切表情（比 `[[emo:…]]` 更具体，二者可以只用一个）。\n"
+                     "10. 这两种标记放在句首或单独一行，一次回复最多两个；没有合适的动作就不要硬套，"
+                     "宁可只写情绪和星号。\n";
+                auto list_of = [&](const char *key)
+                {
+                    std::string out;
+                    if (p.live2d.contains(key) && p.live2d[key].is_array())
+                        for (auto &v : p.live2d[key])
+                            if (v.is_string() && !v.get<std::string>().empty())
+                                out += (out.empty() ? "" : " / ") + v.get<std::string>();
+                    return out;
+                };
+                std::string groups = list_of("groups");
+                std::string exprs = list_of("expressions");
+                if (!groups.empty())
+                    s += std::format("可用的动作组：{}\n", groups);
+                if (!exprs.empty())
+                    s += std::format("可用的表情：{}\n", exprs);
+            }
             return s;
         }
 
@@ -987,7 +1062,9 @@ namespace app
                     if (close != std::string::npos)
                     {
                         std::string body = s.substr(i + 2, close - i - 2);
-                        if (body.rfind("emo:", 0) == 0 || body.rfind("act:", 0) == 0 || body == "/remember")
+                        if (body.rfind("emo:", 0) == 0 || body.rfind("act:", 0) == 0 ||
+                            body.rfind("motion:", 0) == 0 || body.rfind("expr:", 0) == 0 ||
+                            body == "/remember")
                         {
                             i = close + 2;
                             continue;
@@ -1121,6 +1198,26 @@ namespace app
                 else if (kind == "act")
                 {
                     post({{"t", "act"}, {"name", cell::text::trim(value)}});
+                }
+                else if (kind == "motion")
+                {
+                    // 组名/序号：序号留给页面解析，省得在这里处理非法数字
+                    std::string v = cell::text::trim(value);
+                    std::string group = v, index;
+                    if (auto slash = v.find('/'); slash != std::string::npos)
+                    {
+                        group = cell::text::trim(v.substr(0, slash));
+                        index = cell::text::trim(v.substr(slash + 1));
+                    }
+                    if (group.empty())
+                        return;
+                    post({{"t", "motion"}, {"group", group}, {"index", index}});
+                }
+                else if (kind == "expr")
+                {
+                    std::string v = cell::text::trim(value);
+                    if (!v.empty())
+                        post({{"t", "expr"}, {"name", v}});
                 }
                 else if (kind == "remember")
                 {
@@ -1302,6 +1399,58 @@ namespace app
                                {"active", p.id == active}});
             }
             return arr;
+        }
+        // 舞台资源盘点：运行时脚本齐不齐、models/ 下面有哪些模型
+        nlohmann::json live2d_scan()
+        {
+            std::error_code ec;
+            fs::create_directories(live2d_runtime_dir(), ec);
+            fs::create_directories(live2d_models_dir(), ec);
+
+            nlohmann::json r;
+            r["root"] = live2d_dir().string();
+            r["models_dir"] = live2d_models_dir().string();
+            r["runtime_dir"] = live2d_runtime_dir().string();
+
+            nlohmann::json scripts = nlohmann::json::array();
+            nlohmann::json missing = nlohmann::json::array();
+            for (auto &s : live2d_runtime_scripts())
+            {
+                bool ok = fs::is_regular_file(live2d_runtime_dir() / s, ec);
+                scripts.push_back({{"name", s}, {"ok", ok}});
+                if (!ok)
+                    missing.push_back(s);
+            }
+            r["runtime"] = {{"scripts", scripts}, {"missing", missing}, {"ok", missing.empty()}};
+
+            nlohmann::json models = nlohmann::json::array();
+            if (fs::is_directory(live2d_models_dir(), ec))
+            {
+                fs::recursive_directory_iterator it(live2d_models_dir(), fs::directory_options::skip_permission_denied, ec);
+                fs::recursive_directory_iterator end;
+                int n = 0;
+                for (; !ec && it != end && n < 200; it.increment(ec))
+                {
+                    if (it.depth() >= 4)
+                        it.disable_recursion_pending();
+                    if (!it->is_regular_file(ec))
+                        continue;
+                    std::string file = it->path().filename().string();
+                    std::string suffix;
+                    if (file.size() > 12 && file.ends_with(".model3.json"))
+                        suffix = ".model3.json";
+                    else if (file.size() > 11 && file.ends_with(".model.json"))
+                        suffix = ".model.json";
+                    if (suffix.empty())
+                        continue;
+                    models.push_back({{"name", file.substr(0, file.size() - suffix.size())},
+                                      {"path", it->path().lexically_relative(live2d_dir()).generic_string()},
+                                      {"dir", it->path().parent_path().lexically_relative(live2d_dir()).generic_string()}});
+                    ++n;
+                }
+            }
+            r["models"] = models;
+            return r;
         }
         nlohmann::json providers_json() const
         {
@@ -1521,6 +1670,18 @@ namespace app
                     s("prompt", p.prompt);
                     s("user_name", p.user_name);
                     s("voice", p.voice);
+                    if (patch.contains("live2d") && patch["live2d"].is_object())
+                    {
+                        if (patch["live2d"].dump().size() > 96 * 1024)
+                            return fail("Live2D 配置太大（上限 96KB）");
+                        p.live2d = patch["live2d"];
+                    }
+                    if (patch.contains("triggers") && patch["triggers"].is_array())
+                    {
+                        if (patch["triggers"].dump().size() > 256 * 1024)
+                            return fail("触发器太多或太大（上限 256KB）");
+                        p.triggers = patch["triggers"];
+                    }
                     if (patch.contains("proactive") && patch["proactive"].is_boolean())
                         p.proactive = patch["proactive"].get<bool>();
                     if (patch.contains("idle_minutes") && patch["idle_minutes"].is_number_integer())
@@ -1610,6 +1771,29 @@ namespace app
                     if (auto *c = find_ctx(id))
                         c->p = p;
                     post_state_locked(true);
+                    return ok();
+                }
+
+                // ---- 舞台资源 ----------------------------------------------
+                if (name == "live2d.scan")
+                {
+                    std::lock_guard<std::mutex> lk(cmd_mx);
+                    return ok_with(live2d_scan());
+                }
+                if (name == "live2d.open_dir")
+                {
+                    std::error_code ec;
+                    fs::create_directories(live2d_models_dir(), ec);
+                    fs::create_directories(live2d_runtime_dir(), ec);
+                    std::string cmd = "explorer.exe \"" + live2d_dir().string() + "\"";
+#ifdef __APPLE__
+                    cmd = "open \"" + live2d_dir().string() + "\"";
+#elif !defined(_WIN32)
+                    cmd = "xdg-open \"" + live2d_dir().string() + "\"";
+#endif
+                    std::string out, err;
+                    int code = -1;
+                    cell::plat::spawn_cmd(cmd, 10, out, code, err);
                     return ok();
                 }
 

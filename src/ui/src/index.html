@@ -76,25 +76,43 @@
   <!-- ================= 右侧角色舞台 ================= -->
   <aside id="stage">
     <div class="stage-glow" id="stage-glow"></div>
-    <div class="orb-wrap">
-      <div class="orb-ring"></div>
-      <div class="orb-ring r2"></div>
-      <div class="orb" id="orb" data-emo="neutral">
-        <img id="avatar" alt="" class="hidden">
-        <div class="face" id="face">
-          <div class="brow l"></div><div class="brow r"></div>
-          <div class="eye l"></div><div class="eye r"></div>
-          <div class="blush l"></div><div class="blush r"></div>
-          <div class="mouth"></div>
-        </div>
-        <div class="orb-sheen"></div>
+
+    <div class="stage-frame" id="stage-frame" data-mode="orb">
+      <!-- Live2D：模型画在这块画布上。没有模型 / 运行时的时候退回光球，
+           光球的表情层仍然跟着 emo 事件走，两种形态共用同一套触发器。 -->
+      <div class="l2d-wrap" id="l2d-wrap">
+        <canvas id="l2d-canvas"></canvas>
+        <div class="l2d-status" id="l2d-status"></div>
       </div>
+
+      <div class="orb-wrap" id="orb-wrap">
+        <div class="orb-ring"></div>
+        <div class="orb-ring r2"></div>
+        <div class="orb" id="orb" data-emo="neutral">
+          <img id="avatar" alt="" class="hidden">
+          <div class="face" id="face">
+            <div class="brow l"></div><div class="brow r"></div>
+            <div class="eye l"></div><div class="eye r"></div>
+            <div class="blush l"></div><div class="blush r"></div>
+            <div class="mouth"></div>
+          </div>
+          <div class="orb-sheen"></div>
+        </div>
+      </div>
+
       <div class="voice-bars" id="voice-bars"><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="stage-bubble" id="stage-bubble"></div>
+      <button class="stage-hint" id="stage-hint"></button>
     </div>
 
     <div class="stage-name" id="stage-name">—</div>
     <div class="stage-sub" id="stage-sub"></div>
-    <div class="stage-mood"><span class="dot" id="mood-dot"></span><span id="mood-text">平静</span></div>
+    <div class="stage-mood-row">
+      <div class="stage-mood"><span class="dot" id="mood-dot"></span><span id="mood-text">平静</span></div>
+      <button class="stage-tune" id="btn-stage" title="Live2D 与触发器">
+        <svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 12h4M12 12h8M4 17h12M20 17h0"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="17" r="2"/></svg>
+      </button>
+    </div>
 
     <div class="stage-act" id="stage-act"></div>
 

@@ -202,6 +202,8 @@ onEvent((m) => {
       hideTyping();
       LIVE.raw += m.d || '';
       renderLive();
+      // 正文末尾一小段交给触发器匹配关键词（「晚安」「抱抱」之类）
+      TRIG.fire('reply', { text: LIVE.raw.slice(-160) });
       break;
     case 'reason':
       if (!LIVE.node) ensureLiveNode();
@@ -247,6 +249,12 @@ onEvent((m) => {
     case 'act':
       showAct(m.name || '');
       break;
+    case 'motion':
+      l2dPlayMotion(m.group || m.name || '', m.index);
+      break;
+    case 'expr':
+      l2dSetExpression(m.name || '');
+      break;
     case 'quit':
       window.close();
       break;
@@ -270,6 +278,7 @@ async function sendCurrent() {
   LIVE.raw = '';
   pinned = true;
   stick(true);
+  TRIG.fire('user', { text });
   try {
     await cmd('send', { text });
   } catch (e) {

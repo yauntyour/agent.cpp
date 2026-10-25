@@ -9,6 +9,7 @@
 //   GET  /api/events        SSE：一条 data: {...} 一行
 //   GET  /api/audio/<name>  TTS 产出的音频
 //   GET  /api/avatar/<id>   角色头像
+//   GET  /api/live2d/<…>    舞台资源：运行时库与模型文件（.agent/live2d/ 下）
 //
 // 安全模型：服务是一个「能记事、能说话」的本机控制面，绝不能被网页或局域网
 // 碰到。只绑 127.0.0.1；每个请求必须带 loopback Host、同源 Origin（或没有
@@ -140,6 +141,61 @@ namespace app
             std::ifstream f(p, std::ios::binary);
             return std::string((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
         }
+        static std::string percent_decode(const std::string &s)
+        {
+            std::string out;
+            out.reserve(s.size());
+            for (size_t i = 0; i < s.size(); i++)
+            {
+                if (s[i] == '%' && i + 2 < s.size())
+                {
+                    auto hex = [](char c) -> int
+                    {
+                        if (c >= '0' && c <= '9') return c - '0';
+                        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+                        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+                        return -1;
+                    };
+                    int hi = hex(s[i + 1]), lo = hex(s[i + 2]);
+                    if (hi >= 0 && lo >= 0)
+                    {
+                        out.push_back((char)((hi << 4) | lo));
+                        i += 2;
+                        continue;
+                    }
+                }
+                out.push_back(s[i]);
+            }
+            return out;
+        }
+        // 舞台资源：模型里出现过的类型都要认，认不出的一律当二进制流
+        static std::string live2d_mime(std::string ext)
+        {
+            ext = lower_ascii(ext);
+            if (!ext.empty() && ext.front() == '.')
+                ext.erase(ext.begin());
+            if (ext == "js" || ext == "mjs")
+                return "text/javascript; charset=utf-8";
+            if (ext == "json" || ext == "mtn")
+                return "application/json; charset=utf-8";
+            if (ext == "html")
+                return "text/html; charset=utf-8";
+            if (ext == "png")
+                return "image/png";
+            if (ext == "jpg" || ext == "jpeg")
+                return "image/jpeg";
+            if (ext == "webp")
+                return "image/webp";
+            if (ext == "wasm")
+                return "application/wasm";
+            if (ext == "wav")
+                return "audio/wav";
+            if (ext == "mp3")
+                return "audio/mpeg";
+            if (ext == "ogg")
+                return "audio/ogg";
+            return "application/octet-stream";
+        }
 
         // ---- lifecycle -----------------------------------------------------
         std::string start(int port, int n_threads)
@@ -252,6 +308,71 @@ namespace app
                     }
                 out = text_response("404 Not Found", "avatar not found");
                 return rt::FLAG_DONE; });
+
+            // GET /api/live2d/<path…> —— 舞台资源：运行时库 + 模型文件
+            // 路由只按层数精确匹配，所以 1..5 层各注册一次，交给同一个处理函数。
+            auto serve_live2d = [this](std::string &req, std::string &out,
+                                       const std::map<std::string, std::string> &params) -> int
+            {
+                if (std::string bad = check_request(req, "GET"); !bad.empty())
+                {
+                    out = std::move(bad);
+                    return rt::FLAG_DONE;
+                }
+                std::string rel;
+                for (const char *k : {"a", "b", "c", "d", "e"})
+                {
+                    auto it = params.find(k);
+                    if (it == params.end())
+                        break;
+                    if (!rel.empty())
+                        rel += '/';
+                    rel += percent_decode(it->second);
+                }
+                // 逐段白名单：模型目录是用户自己放的，不能让它变成任意文件读取
+                std::vector<std::string> segs;
+                {
+                    std::string cur;
+                    for (char c : rel)
+                    {
+                        if (c == '/')
+                        {
+                            segs.push_back(cur);
+                            cur.clear();
+                        }
+                        else
+                            cur += c;
+                    }
+                    segs.push_back(cur);
+                }
+                for (auto &seg : segs)
+                {
+                    if (seg.empty() || seg == "." || seg == ".." || seg.size() > 96 ||
+                        seg.find('\\') != std::string::npos || seg.find(':') != std::string::npos)
+                    {
+                        out = text_response("400 Bad Request", "bad live2d path");
+                        return rt::FLAG_DONE;
+                    }
+                }
+                std::error_code ec;
+                auto base = std::filesystem::weakly_canonical(live2d_dir(), ec);
+                auto file = std::filesystem::weakly_canonical(live2d_dir() / rel, ec);
+                std::string parent = file.parent_path().string();
+                std::string root_s = base.string();
+                bool inside = parent == root_s ||
+                              parent.rfind(root_s + std::string(1, (char)std::filesystem::path::preferred_separator), 0) == 0;
+                if (!ec && inside && std::filesystem::is_regular_file(file, ec))
+                {
+                    out = http_response("200 OK", live2d_mime(file.extension().string()), read_file(file),
+                                        "Cache-Control: no-store\r\n");
+                    return rt::FLAG_DONE;
+                }
+                out = text_response("404 Not Found", "live2d file not found");
+                return rt::FLAG_DONE;
+            };
+            for (const char *route : {"api/live2d/:a", "api/live2d/:a/:b", "api/live2d/:a/:b/:c",
+                                      "api/live2d/:a/:b/:c/:d", "api/live2d/:a/:b/:c/:d/:e"})
+                ros.on(route, serve_live2d);
 
             // POST /api/cmd/<name>
             ros.on("api/cmd/:name", [this](std::string &req, std::string &out, const std::map<std::string, std::string> &params) -> int
