@@ -46,7 +46,7 @@ src/ui/src/**            页面源码（css / js 分层，按文件名顺序拼�
 | `src/agent-voice.hpp` | 语音服务 | 四种 `kind`，全部走 libcurl + `cell::net::ca_bundle()`；宿主录音是兜底 |
 | `src/agent-http.hpp` | 本机服务 | `servic.hpp` + `router`，SSE 每条事件一个 `data:` 行 |
 | `src/agent-ui.hpp` | 内嵌页面 | 生成物，不进版本库手工改 |
-| `build_ui.py` | 装配器 | 骨架 + css/* + js/* → 单页 HTML + C++ 字符串 |
+| `build_ui.py` | 装配器 | 骨架 + css/* + js/* → 单页 HTML + C++ 字符串；`@asset(路径)` 换成 data URI |
 
 ### 一次对话怎么走完
 
@@ -86,7 +86,7 @@ run_turn ──► cell::engine::runner::run_turn
 | 链接 | `-static`，只留系统 DLL 导入 | 同（额外 `winmm` 给兜底的 MCI 录音） |
 | 窗口 | `webview.h`（WebView2 / WKWebView / WebKitGTK） | 同 |
 | 页面 | `build_ui.py` 装配 → `src/*-ui.hpp` raw string | 同 |
-| 图标 | `windres` 编 `assets/icon.rc`（`icon.ico` → 资源 id 1） | 同 |
+| 图标 | `windres` 编 `assets/icon.rc`（`icon.ico` → 资源 id 1） | 同（`assets/icon.png` 是母版，`make_icon.py` 派生） |
 | 服务 | 只绑 `127.0.0.1`，校验 Host / Origin | 同（另加 `Sec-Fetch-Site`） |
 | 冒烟 | `--smoke` 隔离数据根，自动退出 | 同（多一档 `--smoke-engine`） |
 
@@ -95,6 +95,7 @@ run_turn ──► cell::engine::runner::run_turn
 - **WebView2 运行时不用打包**。它随系统 Edge 存在；`webview.h` 的构造只做一次性初始化。所以产物是一个 20MB 左右的 exe，没有第三方 DLL。
 - **静态 libcurl 的 CA 问题**。静态 curl 自带的 CA 路径是 POSIX 路径，Windows 上必然 `curl 60`。`cell::net::ca_bundle()` 走系统 ROOT 证书库导出，链接时需要 `crypt32`。
 - **页面内嵌 vs 磁盘**。`build_ui.py` 只在内容变化时写盘，`src/agent-ui.hpp` 被声明成 CMake `OUTPUT`，所以改一行 css 再 `cmake --build` 就会重新编译；想更快就用 `--ui` 直接从磁盘读页面，改完刷新，不重新编译。
+- **图标只有一张母版**。`assets/icon.png` 是母版，`python assets/make_icon.py` 派生四份：`icon.ico`（16–256，exe / 窗口 / 托盘）、`icon-512.png`（发布用）、`ui-logo.png`（深色界面里的白描版）、`favicon.png`（浏览器标签）。界面里的图不是走路由，而是 `@asset(assets/ui-logo.png)` 在装配时内联成 data URI —— 单文件 exe 里也带着 logo。
 - **窗口关闭 ≠ 退出**。`webview.h` 在 `WM_CLOSE` 时销毁窗口，所以换掉窗口过程只把窗口藏起来，图标挂在自己的隐藏窗口上（`assets/icon.rc` 的图标被 `LoadImageW` 取出来）；托盘菜单里有「显示主窗口 / 打开数据目录 / 退出」。
 - **webview.h 有一处本地改动**（麦克风权限放行，见下面「麦克风」一节）。它是 vendored 的单头文件，升级时注意别覆盖掉。
 - **单实例**。`Local\agent-cpp-desktop` 互斥体；重复启动只是把已有窗口拉到前台（藏在托盘里也能拉出来）。

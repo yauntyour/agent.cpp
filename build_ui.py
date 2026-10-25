@@ -13,6 +13,9 @@
     src/agent-ui.hpp       同一页面的 C++ raw string literal
                            （C++ 构建唯一需要的文件）
 
+骨架、样式、脚本里都可以写 `@asset(assets/xxx.png)`：装配时换成 data: URI，
+所以图片也会跟着进 exe，不用另外起路由。
+
 内容没变就不写盘，所以 CMake 每次构建前跑一遍也不会触发无谓的重编译。
 
 用法：
@@ -20,7 +23,10 @@
     python build_ui.py --html     # 只写 src/ui/index.html（开发循环）
     python build_ui.py --check    # 产物过期则失败
 """
+import base64
+import mimetypes
 import pathlib
+import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent
@@ -48,6 +54,26 @@ def layer(folder: str, suffix: str) -> str:
     return "\n\n".join(chunks) + "\n"
 
 
+# 页面里写 @asset(assets/ui-logo.png)，装配时换成 data: URI —— 内嵌页面不能
+# 指望旁边有文件，图标也就跟着进了 exe。
+ASSET_RE = re.compile(r"@asset\(([^)\s]+)\)")
+
+
+def inline_assets(page: str) -> str:
+    def sub(m):
+        rel = m.group(1)
+        path = (ROOT / rel).resolve()
+        if ROOT not in path.parents:
+            raise SystemExit(f"build_ui: asset outside the project: {rel}")
+        if not path.is_file():
+            raise SystemExit(f"build_ui: missing asset: {rel}")
+        mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        data = base64.b64encode(path.read_bytes()).decode("ascii")
+        return f"data:{mime};base64,{data}"
+
+    return ASSET_RE.sub(sub, page)
+
+
 def build() -> str:
     skeleton = (SRC / "index.html").read_text(encoding="utf-8-sig").replace("\r\n", "\n")
     css = layer("css", ".css")
@@ -55,6 +81,7 @@ def build() -> str:
     if "/*@css*/" not in skeleton or "/*@js*/" not in skeleton:
         raise SystemExit("build_ui: skeleton is missing the /*@css*/ or /*@js*/ marker")
     page = skeleton.replace("/*@css*/", css).replace("/*@js*/", js)
+    page = inline_assets(page)
     # banner 放在 doctype 之后，页面解析不受影响
     if page.startswith("<!DOCTYPE html>"):
         head, _, rest = page.partition("\n")

@@ -16,8 +16,12 @@
   backdrop-filter: blur(8px);
   z-index: 3;
 }
-.rail-mark { width: 38px; height: 38px; display: grid; place-items: center; color: var(--accent); margin-bottom: 6px; }
-.rail-mark svg { width: 30px; height: 30px; stroke-width: 1.4; }
+.rail-mark { width: 44px; height: 44px; display: grid; place-items: center; margin-bottom: 8px; }
+.rail-logo {
+  width: 36px; height: 36px; display: block;
+  opacity: .95;
+  filter: drop-shadow(0 3px 10px rgba(0, 0, 0, .55));
+}
 .rail-list { display: flex; flex-direction: column; gap: 10px; align-items: center; }
 .rail-gap { flex: 1; }
 
