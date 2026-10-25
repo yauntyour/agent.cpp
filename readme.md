@@ -2,364 +2,504 @@
 
 ## 简介
 
-**agent.cpp** 是专门为 Cosplay 设计的智能体系统，提供完整的 Tools + Skills + 跨会话记忆功能，实现 100% 可控性与可塑性。系统由 C++ 原生构建，极致轻量，内存占用极低，让你自由定制属于自己的电子伴侣。
+**agent.cpp** 是专为 Cosplay 打造的智能体系统，提供完整的 Tools + Skills + 跨会话记忆，实现 100% 可控性与可塑性。系统由 C++20 原生构建，单个可执行文件、零运行时依赖，内存占用极低，让你自由定制属于自己的电子伴侣。
 
 **核心理念**：语言是经验的载体。LLM 作为系统的语言中枢服务于 Agent，Agent 再将语言转化为行动与记忆。通过完整的工具链、技能系统与跨会话记忆，你的电子伴侣能够持续学习、积累经验，成为真正懂你的 Cosplay 搭档。
 
+---
+
+## 2.0 有什么不同
+
+| 维度    | 1.x                                         | 2.0                                                        |
+| :---- | :------------------------------------------ | :--------------------------------------------------------- |
+| 依赖    | Boost.Asio + servic.cpp 子模块 + curl + sodium | **只剩 curl + sodium**（自研 HTTP 服务端，去掉 Boost 与子模块）            |
+| 数据目录  | exe 同级的 `settings.json` + `workspace/`      | **`<exeDir>/.agent/`**，工作区为 `<exeDir>/.agent/workspace/`   |
+| 代码结构  | `agent.hpp`(6.7k 行) + `app.cpp`(2.4k 行)     | **`src/` 下按 core / net / agent / channels / server 分层**    |
+| WebUI | 必须是单文件 `webui.html`                         | **单文件或目录双模式**，路径可配置，默认多文件（index.html + app.css + app.js）   |
+| 频道    | Telegram / WeChat 硬编码                       | **驱动注册表**，内置 Telegram / WeChat / QQ(OneBot v11)，新增平台只加一个文件 |
+| 启动    | 必须先 `cd` 到 exe 目录                           | 任意目录启动，路径一律按 exe 解析                                        |
+
+
+
+---
+
+## 快速开始
+
+### 编译
+
+```bash
+# 依赖：g++(C++20) + libcurl + libsodium + nlohmann/json
+# Windows(msys2/ucrt64)
+pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-curl \
+          mingw-w64-ucrt-x86_64-libsodium mingw-w64-ucrt-x86_64-nlohmann-json
+# macOS
+brew install curl libsodium nlohmann-json
+# Debian/Ubuntu
+sudo apt install g++ libcurl4-openssl-dev libsodium-dev nlohmann-json3-dev
+```
+
+方式一，直接编译（最快）：
+
+```bash
+python build.py -r        # 本地开发用：产物 bin/agentcpp[.exe]（依赖 MSYS2 运行时 DLL）
+```
+
+方式二，CMake（可产出全静态、零依赖的发布包）：
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build                      # 产物同样在 bin/
+cmake --install build --prefix install   # 只装一个 exe，首次启动自己生成 .agent/
+```
+
+> 发布包用 `-DSTATIC_BUILD=ON`（默认）构建：Linux 为全静态 musl、Windows 为全静态 MinGW exe、
+>   
+> macOS 静态链接 curl/sodium。产出的二进制拷到任何机器上都能直接跑。
+
+### 运行
+
+```bash
+./agentcpp --port 8080 --password <你的口令>
+```
+
+首次启动会在可执行文件旁生成：
+
+```
+<exeDir>/.agent/
+├── settings.json          主配置（自动生成，可直接编辑）
+├── webui/                 WebUI 静态资源目录
+│   ├── index.html
+│   ├── app.css
+│   └── app.js
+├── logs/agent.log         运行日志（超 4MB 自动滚动）
+└── workspace/             Agent 工作区
+    ├── agent.txt          系统提示词（人格定义）
+    ├── permissions.json   工具授权规则
+    ├── sessions/          会话记录
+    ├── memorys/           会话记忆摘要
+    ├── assets/messages/   图片资产
+    ├── sys/               cs.txt / data.json / todos.json / key
+    ├── tokens/            加密后的 API Key 与频道 Token
+    └── tools/             自定义 Python 工具
+```
+
+打开 `http://localhost:8080` 即可对话。
+
+### 命令行参数
+
+| 参数                             | 说明                                                    |
+| :----------------------------- | :---------------------------------------------------- |
+| `--root <dir>`                 | 覆盖数据根目录（默认 `<exeDir>/.agent`）                         |
+| `--settings <file>`            | 指定配置文件（默认 `<root>/settings.json`）                     |
+| `-p, --port <port>`            | HTTP 端口（覆盖 `server.port`）                             |
+| `--host <addr>`                | 监听地址（覆盖 `server.host`，默认 `0.0.0.0`）                   |
+| `--password <pw>`              | WebUI 口令；首次运行会生成 `workspace/sys/key`（Argon2id），之后必须匹配 |
+| `--apikey <key>`               | 临时覆盖当前供应商的 API Key（不落盘）                               |
+| `-h, --help` / `-v, --version` | 帮助 / 版本                                               |
+
+### 桌面应用（WebView2）
+
+Windows 上默认就是桌面应用：双击 exe 得到一个**无边框窗口**，标题栏与最小化 /
+最大化 / 关闭按钮画在页面里（拖拽、贴边分屏、双击最大化仍是系统原生行为），
+不需要浏览器，也不会弹出控制台窗口。
+
+```bash
+./bin/agentcpp.exe --password <口令>              # 默认开窗口 + 托盘
+./bin/agentcpp.exe --no-gui --port 8080          # 只跑服务（服务器 / 远程部署）
+./bin/agentcpp.exe --gui --width 1600 --height 1000   # 自定义窗口尺寸
+./bin/agentcpp.exe --devtools                    # 允许打开开发者工具（排障）
+./bin/agentcpp.exe --no-tray                     # 不常驻托盘，关窗即退出
+```
+
+| 项 | 说明 |
+| :--- | :--- |
+| 依赖 | **WebView2 运行时**（Windows 11 自带；Win10 装一次即永久可用） |
+| 加载器 | `WebView2Loader.dll` 已编进 exe，首次启动释放到 `<agent_root>/runtime/` 后加载，**发行物只有一个 exe** |
+| SDK | 只有头文件（`third_party/webview2/include`），通过 `LoadLibrary` 动态解析入口，**不需要导入库**，MinGW / MSVC 都能编 |
+| 内置服务 | 只监听 `127.0.0.1`，端口被占用时自动换临时端口；它是界面与 QQ webhook 的内部通道，不对外暴露，也没有日志终端接口 |
+| 控制台 | 桌面模式不显示控制台，日志只落 `<agent_root>/logs/agent.log`；从命令行启动时仍保留输出 |
+| 单实例 | 重复双击不会起第二个进程，而是把已有窗口拉到前台 |
+| 用户数据 | WebView2 缓存在 `<agent_root>/webview2/`，不落系统盘 |
+| 托盘 | 常驻通知区图标：左键显示窗口、右键菜单（显示主窗口 / 打开数据目录 / 退出）；关闭窗口默认收进托盘，`window.close_to_tray=false` 或 `--no-tray` 可改回关窗即退出 |
+| 兜底 | 找不到 WebView2 时自动改用系统默认浏览器打开同一地址，服务行为不变 |
+
+首次启动会在 exe 同级创建 `.agent/`（`settings.json`、`workspace/`、`logs/`），退出前会落盘 `data.json` 与会话。
+
+### 从 1.x 升级
+
+把新 exe 放进旧目录直接启动即可：程序发现 `settings.json` / `workspace/` 在 exe 同级而 `.agent/` 不存在时，
+  
+会自动把两者搬进 `.agent/`（原文件保留不动），并把配置里的 `workspace` 改写为相对路径。
+
+---
+
 ## WebUI
 
-搭配使用stable-diffusion.cpp & llama.cpp自动化混合端，利用image-drawer tool即可实现在对话中生成图像
+搭配 stable-diffusion.cpp & llama.cpp 自动化混合端，利用 image-drawer 工具即可在对话中生成图像。
 
-> [yauntyour/agent.cpp-tools: skills for agent](https://github.com/yauntyour/agent.cpp-tools)
+> 工具仓库：[yauntyour/agent.cpp-tools](https://github.com/yauntyour/agent.cpp-tools)
 
 ![WebUI 截图](./assets/WebUI_1.png)
 
-文件使用状态预览系统（0注入风险）、自动化记忆系统
+文件使用状态预览系统（0 注入风险）、自动化记忆系统：
 
 ![文件系统](./assets/WebUI_2.png)
 
-### WebUI 输入栏指令系统
+### 不再限制单文件
 
-在输入栏以 `/` 开头输入指令可快速控制系统（输入 `/` 即弹出指令补全，`Ctrl+K` 打开命令面板）：
+`webui.path` 指向**文件**时就是原来的单文件模式；指向**目录**时按静态站点提供服务：
 
-| 指令 | 功能 |
+```json
+"webui": {
+    "path": "webui",          // 目录（相对 .agent），或直接写 "webui.html"
+    "index": "index.html",    // 目录模式的首页
+    "password": ""            // 可选的 WebUI 口令哈希
+}
+```
+
+目录模式下：
+
+- `/` → `<webui>/index.html`
+- `/app.css`、`/app.js`、`/assets/logo.png` … → 目录内对应文件
+- 自动识别 MIME（html/css/js/json/svg/png/woff2/wasm/mp4 …），文本类自动补 `charset=utf-8`
+- 静态资源带 `ETag`，命中 `If-None-Match` 返回 304；html/js 不缓存，改完刷新即生效
+- `..` 穿越与符号链接越界一律拒绝
+- 未命中的 `/api/*` 返回 404，不会被首页兜底吃掉
+
+于是你可以把前端拆成任意多文件、加构建流程、放字体和图片，甚至整个换成 Vite/React 产物目录。
+
+#### 内嵌进可执行文件（单文件即用）
+
+`tools/embed_assets.py` 把三份资源合成 C++ 头文件（base64 分片 + MIME + 大小），
+运行时直接解码使用，**exe 不带任何外部文件、也不访问网络**：
+
+| 源目录 | 产物 | 用途 |
+| :--- | :--- | :--- |
+| `src/templates/webui/` | `src/server/webui_assets.hpp` | HTTP 静态资源（含 `vendor/` 里的 Font Awesome 与 marked） |
+| `src/templates/workspace/` | `src/core/seed_assets.hpp` | 首次启动写进 `.agent/workspace/` 的提示词与工具脚本 |
+| `third_party/webview2/x64/` | `src/desktop/loader_assets.hpp` | WebView2 加载器，运行时释放到 `.agent/runtime/` |
+
+CMake / `build.py` 都会在编译前自动执行它，改完前端重新构建即可；手动执行：
+
+```bash
+python tools/embed_assets.py --src src/templates/webui \
+    --out src/server/webui_assets.hpp --ns webui::embedded \
+    --guard AGENTCPP_SERVER_WEBUI_ASSETS_HPP --index index.html
+```
+
+`webui.source` 决定用哪一份资源：
+
+| 取值 | 行为 |
 | :--- | :--- |
-| `/help` | 显示全部指令帮助 |
-| `/new` | 新建会话 |
-| `/clear` | 清空当前会话上下文 |
-| `/memory` | 生成 / 更新记忆摘要 |
-| `/provider <id>` | 切换模型供应商 |
-| `/model <名称>` | 切换模型 |
-| `/think` | 切换深度思考模式 |
-| `/tools` | 打开工具管理面板 |
-| `/perm` | 打开工具权限管理 |
-| `/channels` | 管理频道 |
-| `/todos` | 打开任务面板 |
-| `/settings` | 打开系统设置 |
-| `/stats` | 查看使用统计 |
-| `/fs` | 切换文件浏览器 |
-| `/theme` | 切换深浅色主题 |
-| `/sessions` | 刷新会话列表 |
-| `/status` | 查看系统运行状态 |
+| `embedded`（默认） | 用 exe 里内嵌的那份，最省心 |
+| `auto` | 磁盘上 `webui.path` 存在就用磁盘，否则退回内嵌 |
+| `disk` | 强制用磁盘文件，适合调试前端 |
 
-依赖需求：
-
-```bash
-#Linux：
-sudo apt-get install -y libcurl4-openssl-dev libboost-dev libsodium-dev
-
-#Windows （msys2）：
-pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja mingw-w64-x86_64-curl mingw-w64-x86_64-boost mingw-w64-x86_64-libsodium
-
-#MacOS：
-brew install cmake ninja curl boost libsodium
+```json
+"webui": { "path": "webui", "index": "index.html", "source": "embedded" }
 ```
 
-懒狗安装指令：
+`GET /api/webui` 会返回当前生效的来源与文件清单（`source` / `mode` / `files`）。
 
-```bash
-rm -rf ./* && git clone --recurse-submodules https://github.com/yauntyour/agent.cpp.git && cd agent.cpp && mkdir build && cd build && cmake .. && cmake --build . && cmake --install . --prefix install
+#### 明暗主题
+
+两套主题都基于同一组 CSS 设计令牌（`app.css` 顶部 `:root` 与 `[data-theme="light"]`），
+组件只引用变量，新增组件默认同时适配两种模式：
+
+- 深色：午夜靛蓝，四层背景（页面 / 面板 / 卡片 / 浮层）拉开层次
+- 浅色：纸白 + 深靛蓝主色，正文与次要文字对比度均达到 WCAG AA
+- 语义色 `--ok` / `--warn` / `--err` / `--info` 及各自的 soft 底色，状态不再两套各写一遍
+- 统一焦点环（`:focus-visible`）、细滚动条、主题切换平滑过渡
+
+右上角月亮 / 太阳按钮切换，选择存 `localStorage`；
+也可以用 `http://127.0.0.1:8080/?theme=light` 直接指定（方便分享与测试）。
+
+| 深色 | 浅色 |
+| :--- | :--- |
+| ![dark](./assets/theme_dark.png) | ![light](./assets/theme_light.png) |
+
+### 设置面板能改什么
+
+以下每一项都能在 WebUI 的「设置」里直接改并保存：
+
+| 标签页 / 分组 | 字段 |
+| :--- | :--- |
+| 配置 → 身份与工作区 | 用户昵称、Agent 昵称、默认模型、系统提示词文件、工作区目录、`root` 数据根 |
+| 配置 → 模型与运行 | 流式传输、上下文窗口、最大工具调用轮数、自动记忆摘要阈值、文件浏览器自动展开 |
+| 配置 → 权限策略 | 审批超时、频道上下文策略（`channel_ask`）、7 类工具的默认策略 |
+| 配置 → 高级 | `server.host`、`server.port`、`webui.path`、`webui.index`、`webui.source`（默认折叠） |
+| 频道 | 卡片式管理：新建 / 启停 / 扫码登录 / 就地改参数与 Token / 删除，运行状态每 3 秒刷新 |
+| 供应商 | 增删改、切换、加密 API Key |
+
+保存走「深合并」：前端只提交它认识的字段，`channels` / `providers` / `webui` 里
+未展示的子键一律原样保留，不会因为一次保存把配置抹掉。
+`root` / `server` / `webui` 的修改在重启后生效。
+
+### 输入栏指令
+
+在输入栏以 `/` 开头可快速控制系统（输入 `/` 弹出补全，`Ctrl+K` 打开命令面板）：
+
+| 指令        | 功能          | 指令               | 功能      |
+| :-------- | :---------- | :--------------- | :------ |
+| `/help`   | 全部指令帮助      | `/provider <id>` | 切换模型供应商 |
+| `/new`    | 新建会话        | `/model <名称>`    | 切换模型    |
+| `/clear`  | 清空当前上下文     | `/think`         | 深度思考模式  |
+| `/memory` | 生成 / 更新记忆摘要 | `/tools`         | 工具管理面板  |
+| `/perm`   | 工具权限管理      | `/channels`      | 频道管理    |
+| `/todos`  | 任务面板        | `/settings`      | 系统设置    |
+| `/stats`  | 使用统计        | `/fs`            | 文件浏览器   |
+| `/theme`  | 深浅色主题       | `/sessions`      | 刷新会话列表  |
+| `/status` | 运行状态        |                  |         |
+
+---
+
+## 频道：接入微信 / QQ / Telegram
+
+频道驱动是一张注册表，每个平台 = 一个长期运行的 worker。配置在 `settings.json → channels[]`：
+
+```json
+{
+    "name": "QQ",
+    "type": "qq",              // telegram | wechat | qq（新增平台只需注册新 type）
+    "status": "active",        // active 才会在启动时拉起
+    "user_count": 1,
+    "config": { ... }          // 各驱动自己的参数
+}
 ```
 
-## 核心特性
+`type` 缺省时会按旧配置里的 `path`（`tg_bot.py` / `wx_bot.py` / `qq_bot.py`）自动推断，老配置可直接用。
 
-### Cosplay 伴侣定制
+### Telegram
 
-- **100% 可塑性**：系统提示词（System Prompt）完全开放自定义，无隐藏魔法指令，自由塑造你的电子伴侣人格、性格与行为模式。
-- **跨会话记忆**：伴侣能够记住与你的每一次互动，基于既有记忆与最新交互增量更新，实现经验积累的闭环，越聊越懂你。
-- **记忆自动演进**：自动/手动将对话历史摘要为记忆，支持增量更新（仅处理新消息），单次 LLM 调用同时生成摘要与关键词，显著降低 Token 消耗。
-- **自动触发记忆压缩**：上下文长度超过 `max_context` 阈值时自动触发记忆保存，避免上下文溢出，确保长期陪伴的连续性。
-
-### 完整工具与技能系统
-
-- **完整工具链**：通过 Python CLI 桥接方式，支持任意 Python 工具的原生链式调用，为伴侣赋予无限能力可能。
-- **轻量化扩展设计**：工具直接调用 Python CLI 脚本，避免加载臃肿的技能包描述，最大限度节省上下文 Token。
-- **工具权限系统**：`allow / deny / ask` 三级策略，高风险工具（`exec` / `write` / `edit` / `wget`）默认询问授权。WebUI 弹出授权窗口（支持记住选择、超时自动拒绝），规则持久化至 `workspace/permissions.json`，可在 WebUI 权限面板可视化管理。
-- **图片资产管理**：Base64 图片数据自动从会话记录中剥离并存储，支持图像生成等多媒体交互。
-
-### 技术架构
-
-- **极致轻量**：核心由 `agent.hpp` 单头文件 + `app.cpp` 入口构成，充分利用 C++20 零拷贝与栈上分配特性，运行开销极低。
-- **多供应商支持**：支持 OpenAI（标准接口）、Ollama、Llama.cpp 三种 LLM 供应商，支持 WebUI 运行时动态切换及多供应商配置并存，无需重启服务。
-- **工作区隔离**：所有用户资源（工具、系统脚本、会话、记忆、提示词）统一存放于 `workspace/` 目录下，结构与部署清晰。
-- **文件使用追踪**：系统自动追踪工具调用中访问过的文件，WebUI 实时展示文件使用状态，防止误操作。
-- **流式响应**：独立 Streaming API 路由，支持 token-by-token SSE 推送、推理内容（thinking）分离、每工具独立 tool_start/tool_output/tool_end 事件、工具权限 permission_request/permission_result 事件。
-- **多线程事件循环**：权限授权等待期间，权限响应与其他 API 请求由工作线程并发处理，不阻塞整个服务。
-- **频道支持**：内置 Telegram 与 WeChat 频道驱动，支持多频道并发接入与独立会话记忆。
-- **会话记录热加载**：切换会话或频道时，记忆与聊天记录无缝动态加载，图片数据自动恢复。
-
-## 核心文件结构
-
-为了便于理解与二次开发，以下列出系统核心文件及其职责：
-
-```
-.
-├── agent.hpp                  # Agent 主循环、会话管理、工具调度、LLM 通信核心
-├── app.cpp                    # 程序入口，初始化 HTTP 服务与 API 路由
-├── servic.cpp/                # HTTP 服务层 (git submodule)，基于 C++20 coroutine + Boost.Asio
-├── base64.hpp                 # Base64 编解码工具
-├── CMakeLists.txt             # CMake 构建配置（含 FetchContent + CPack）
-├── build.py                   # 简易构建脚本（g++ 直接编译）
-├── settings.json              # 系统配置文件
-├── api.md                     # REST API 接口文档
-├── release.md                 # 版本更新日志
-├── assets/                    # 仓库级资源（WebUI 截图）
-│   ├── WebUI_1.png            # WebUI 截图
-│   └── WebUI_2.png            # 文件系统预览截图
-│
-└── workspace/                 # 工作区根目录（所有用户资源集中管理）
-    ├── agent.txt              # 系统提示词文件（100% 自定义）
-    ├── webui.html             # WebUI 前端页面
-    ├── webui.log              # WebUI 错误日志
-    ├── permissions.json       # 工具权限规则（allow / deny / ask，WebUI 权限面板管理）
-    ├── sessions/              # 会话记录持久化（JSON，图片已剥离）
-    ├── memorys/               # 会话记忆持久化
-    ├── assets/                # 运行态资源
-    │   ├── messages/          # 图片资产存储（Base64 自动剥离存放）
-    │   └── output.png         # 工具输出文件
-    ├── sys/                   # 系统指令、工具调度与通信核心
-    │   ├── cs.txt             # CS 指令系统帮助
-    │   ├── tg_bot.py          # Telegram 频道驱动
-    │   ├── wx_bot.py          # WeChat 频道驱动
-    │   ├── data.json          # 用量统计数据
-    │   └── todos.json         # 待办事项
-    ├── tokens/                # 加密的 API Key 存储
-    └── tools/                 # 自定义 Python 工具目录
-        ├── tools.json         # 工具注册清单
-        ├── image-drawer/      # 图像生成工具
-        └── playwright-tools/  # 浏览器自动化工具
+```json
+"config": { "model": "default", "think": false, "proxy": "" }
 ```
 
-> 注：实际文件数量可能随版本迭代微调，以上为核心逻辑分布。
+Token 在 WebUI 的频道面板填写（AES 加密存到 `workspace/tokens/Telegram.enc`），或 `POST /api/channel/token`。
+
+### WeChat（iLink ClawBot）
+
+```json
+"config": { "model": "default", "think": false, "ilink_base": "https://ilinkai.weixin.qq.com" }
+```
+
+首次启动若无 Token，会在 `GET /api/channel/qr/<name>` 返回登录二维码，扫码后 Token 加密落盘。
+
+### QQ（OneBot v11）
+
+适配 NapCat / Lagrange / go-cqhttp 等所有 OneBot v11 实现，走 **反向 HTTP 上报**，不需要 WebSocket：
+
+```json
+"config": {
+    "model": "default",
+    "think": false,
+    "api_base": "http://127.0.0.1:3000",     // OneBot 的 HTTP API 地址
+    "access_token": "",                       // 也可用 /api/channel/token 加密保存
+    "webhook_path": "/api/channel/qq/event",  // 让 OneBot 把事件推到这里
+    "self_id": "10001",                       // Bot 自己的 QQ 号（群聊判断 @）
+    "group_at_only": true                     // 群里只在被 @ 时回应
+}
+```
+
+配置步骤：
+
+1. 启动 OneBot 实现（如 NapCat），打开 HTTP API 与 HTTP POST 上报。
+2. 上报地址填 `http://<本机>:<端口>/api/channel/qq/event`（或你在 `webhook_path` 里改的路径）。
+3. 把 `settings.json` 里该频道 `status` 改为 `active`，重启 agentcpp。
+4. `GET /api/channel/status` 应看到 `{"name":"QQ","state":"running"}`。
+
+事件流：OneBot `POST` 上报 → `/api/channel/qq/*` 接收并分桶入队 → QQ worker 消费 → `agent::channel_chat` →
+  
+`POST {api_base}/send_msg` 回复（文本分段发送，图片以 `base64://` 段发送）。
+
+### 接入新平台
+
+1. 在 `src/channels/` 写一个 `xxx.hpp`，实现 `void xxx_worker(const json &cfg, const std::string &name)`。
+2. 在 `src/channels/manager.cpp` 的 `register_builtin()` 里加一行：
+
+```cpp
+register_driver({"xxx", {"别名"}, "显示名", &bot::xxx_worker, "配置说明"});
+```
+
+1. `settings.json` 里加一条 `{"name": "...", "type": "xxx", "status": "active", "config": {...}}`。
+
+收消息统一走 `agent::channel_chat(request)`，它会复用 WebUI 完全相同的会话、记忆、工具与权限链路。
+
+---
+
+## 项目结构
+
+```
+agent.cpp/
+├── CMakeLists.txt              # 构建（FetchContent 拉 curl/sodium/json，可全静态）
+├── build.py                    # 直接 g++ 编译的快捷脚本（产物在 bin/）
+├── api.md                      # REST / SSE 接口文档
+├── tools/
+│   ├── embed_assets.py         # 构造器：模板 / WebUI / 加载器 → C++ 头文件
+│   └── theme_tokens.py         # 主题令牌脚本
+├── third_party/webview2/       # WebView2 SDK 头 + 加载器 DLL（仅编译期使用）
+└── src/
+    ├── main.cpp                # 启动引导：路径 → 配置 → 鉴权 → 频道 → HTTP → 桌面窗口
+    ├── templates/              # 编进 exe 的默认内容（不在运行期出现）
+    │   ├── webui/              # 界面（index.html / app.css / app.js / vendor）
+    │   └── workspace/          # 首次启动写进 .agent/workspace 的提示词与工具
+    ├── desktop/
+    │   ├── webview2.hpp         # Windows 桌面外壳（原生窗口 + 内嵌 WebView2）
+    │   └── webview2.cpp
+    ├── core/                   # 与业务无关的地基
+    │   ├── common.hpp          # 标准库 / 第三方头聚合，json+fs 全局别名
+    │   ├── paths.{hpp,cpp}     # exe 目录、.agent 根、路径解析与穿越判断
+    │   ├── config.{hpp,cpp}    # 配置加载 / 迁移 / 目录播种 / 校验
+    │   ├── log.{hpp,cpp}       # 控制台 + .agent/logs/agent.log
+    │   ├── crypto.hpp          # libsodium：secretbox / Argon2id / SecureString
+    │   ├── base64.hpp          # base64 编解码
+    │   ├── text.hpp            # 标签解析、字符串切分、ASCII 工具
+    │   ├── sysinfo.hpp         # CPU / 内存 / 运行时长
+    │   └── tiny_sha.h          # SHA3-256（WebUI 口令哈希）
+    ├── net/
+    │   ├── http_client.hpp     # libcurl 封装 + HttpResp / http_get / http_post
+    │   └── llm.hpp             # OpenAI / Ollama / llama.cpp 三家客户端 + SSE 解析
+    ├── agent/
+    │   ├── fs_tools.hpp        # exec / read / write / edit / wget / Image
+    │   ├── tools.hpp           # <tool> 标签扫描与调度
+    │   ├── permissions.hpp     # allow / deny / ask 三级授权 + 待审批队列
+    │   ├── commands.hpp        # <cs> 通信指令
+    │   ├── session.hpp         # 会话上下文、记忆、SessionManager、DataManager
+    │   ├── memory.{hpp,cpp}    # 记忆摘要（增量）与自动触发
+    │   ├── providers.{hpp,cpp} # 供应商切换与转发
+    │   └── runtime.{hpp,cpp}   # ★ 统一的 Agent 主循环 run_turn()
+    ├── channels/
+    │   ├── channel.hpp         # 驱动注册表接口
+    │   ├── common.hpp          # 频道公共件：状态、Token、Markdown 安全分段
+    │   ├── codec.hpp           # AES-128-ECB / MD5（微信 CDN 需要）
+    │   ├── qrcodegen.hpp       # 二维码生成（Nayuki, MIT）
+    │   ├── qr.hpp              # 二维码 → SVG
+    │   ├── telegram.hpp        # Telegram worker
+    │   ├── wechat.hpp          # WeChat iLink worker
+    │   ├── qq.hpp              # QQ / OneBot v11 worker
+    │   └── manager.cpp         # 注册与启动
+    └── server/
+        ├── http_server.{hpp,cpp}# 自研 HTTP/1.1 服务端 + 路由（精确/参数/前缀/兜底/流式）
+        ├── webui.{hpp,cpp}     # WebUI 静态资源（单文件 / 目录双模式）
+        ├── routes.{hpp,cpp}    # 全部 REST + SSE 路由
+        └── (无第三方 HTTP 框架)
+```
+
+依赖方向是单向的：`core` ← `net` ← `agent` ← `channels` / `server` ← `main`。
+  
+只有 `core::paths` 认识 OS 路径 API，只有 `net` 认识 libcurl，只有 `core::crypto` 认识 libsodium。
+
+### Agent 主循环
+
+```
+用户消息 ──▶ 构建上下文 ──▶ LLM（流式/非流式）──▶ 扫描 <tool> / <cs>
+                ▲                                   │
+                │                            有工具调用？
+                └──── 结果回灌上下文 ◀── 是 ──┴── 否 ──▶ 结束
+                                              │
+                                    权限 allow/deny/ask
+                                    （ask 推送审批事件）
+```
+
+WebUI（SSE）与所有频道共用 `agent::run_turn()`，区别只在 `Hooks`：
+  
+WebUI 关心 `on_token` / `on_thinking` / `on_event`（工具与审批事件），频道只取最终文本。
+
+---
 
 ## 系统指令集
 
-系统采用简洁的 XML 标签格式进行内部通信，确保行为可审计、可干预。
+系统用简洁的 XML 标签做内部通信，行为可审计、可干预。
 
-### 1. 工具调用指令（Tools Call System）
-
-调用预定义工具，格式：
+### 工具调用
 
 ```
 <tool>name:args</tool>
 ```
 
-**内置基础工具**：
+| 工具                                           | 功能                                                                            |
+| :------------------------------------------- | :---------------------------------------------------------------------------- |
+| `exec:<command>`                             | 以服务权限执行系统命令                                                                   |
+| `read:<filepath>`                            | 读取文件                                                                          |
+| `write:<filepath>\|<data>`                   | 覆盖写入                                                                          |
+| `edit:<filepath>\|replace_line\|<n>\|<text>` | 结构化编辑（replace_line / insert_after / delete_line / append / prepend / replace） |
+| `wget:<URL>`                                 | HTTP GET                                                                      |
+| `Image:<path>`                               | 附加图片                                                                          |
 
-| 工具调用格式 | 功能描述 |
-| :--- | :--- |
-| `exec:<command>` | 以当前服务权限执行系统命令 |
-| `read:<filepath>` | 读取指定文件内容 |
-| `write:<filepath>\|<data>` | 向指定文件写入数据（覆盖） |
-| `wget:<URL>` | 发起 HTTP GET 请求并返回响应 |
-
-**示例**：
-
-```xml
-<tool>exec:pip list</tool>
-<tool>Image:test.jpg</tool>
-<tool>write:exp/data.txt|Hello, agent!</tool>
-<tool>read:data.txt</tool>
-<tool>wget:https://cn.bing.com/</tool>
-```
-
-### 2. 通信系统指令（Communication System, CS）
-
-用于获取系统状态或执行控制命令，格式：
+### 通信指令（CS）
 
 ```
 <cs>name:args</cs>
 ```
 
-**支持的命令**：
 
-| 命令 | 功能描述 |
+```
+
+| 命令 | 功能 |
 | :--- | :--- |
-| `system_status` | 返回当前系统运行状态摘要 |
-| `tools_status` | 返回所有已注册工具的状态 |
-| `restart` | 请求重启系统（需 master 显式确认） |
-| `time` | 返回当前系统日期与时间 |
-| `random:<seed>` | 基于种子生成 [-1e9, 1e9] 范围内的伪随机数 |
+| `system_status` | CPU / 内存 / 运行时长摘要 |
+| `tools_status` | 已注册工具列表 |
+| `time` | 当前时间 |
+| `random:<seed>` | 基于种子的伪随机数 |
+| `restart` | 请求重启（需 master 确认） |
 
-**示例**：
+---
 
-```xml
-<cs>time</cs>
-<cs>random:123</cs>
-```
+## 工具与权限
 
-## 自定义 Tool 开发
-
-自定义工具采用约定优于配置的方式，仅需提供两个文件即可被系统识别和调度。以 `playwright-tools` 为例，目录结构如下：
-
-```
-workspace/tools/
-└── playwright-tools
-    ├── run.py       # 被 CS 指令系统调度的入口脚本
-    ├── tool.md      # 工具的参数文档、使用说明（仅此文件被系统读取用于生成帮助）
-    └── ...          # 其他依赖文件（系统仅调用 run.py）
-```
-
-**建议在 `run.py` 中实现帮助信息回退**：当参数错误或调用失败时，将 `tool.md` 的内容打印到标准输出，以便 Agent 获取正确的调用方式。
-
-```python
-import os
-
-def print_tool_help():
-    """打印 tool.md 中的帮助信息"""
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    tool_md_path = os.path.join(script_dir, "tool.md")
-    try:
-        with open(tool_md_path, "r", encoding="utf-8") as f:
-            print(f.read())
-    except FileNotFoundError:
-        print(f"警告: 未找到帮助文件 {tool_md_path}")
-```
-
-## 工具目录说明（workspace/tools）
-
-所有可调度工具统一存放于 `workspace/tools/`，通过 `tools.json` 注册清单进行管理：
+自定义工具仍是「约定优于配置」：`workspace/tools/<name>/run.py` + `tool.md`，在 `tools/tools.json` 注册。
 
 ```json
-[
-    {
-        "description": "图像生成工具，利用Z-Image-Turbo模型强大的功能，在9-12个steps内生成图像",
-        "enabled": true,
-        "name": "image-drawer"
-    }
-]
+[{ "name": "image-drawer", "enabled": true, "description": "图像生成工具，9~12 steps 出图" }]
 ```
 
-- `name`：工具名称，即 `<tool>name:args</tool>` 中的调用名
-- `enabled`：是否启用（`false` 时工具将被禁用，不参与调度）
-- `description`：工具功能描述，Agent 根据该描述决定何时调用此工具
+| 内置工具 | 说明 |
+| :--- | :--- |
+| `image-drawer` | 调用 sd-cli（stable-diffusion.cpp + llama.cpp 混合端）生成图像 |
+| `playwright-tools` | 浏览器自动化：打开、点击、输入、截图、PDF、Cookie、网络拦截 |
+| `mcp-linker` | MCP 协议调用：`--server-url`(HTTP/SSE) 或 `--server-command`(stdio) |
 
-每个工具目录固定包含 `run.py`（被 CS 指令系统调度的入口脚本）与 `tool.md`（参数文档与使用说明，仅此文件被系统读取用于生成帮助）。
+**权限**：`allow / deny / ask` 三级，按「用户规则 → 默认策略」解析，规则存 `workspace/permissions.json`。
+`ask` 在 WebUI 弹授权窗（可记住、超时自动拒绝），无交互上下文的频道按 `permissions.channel_ask` 处理。
 
-### 内置工具
+---
 
-| 工具 | 目录 | 功能描述 |
-| :--- | :--- | :--- |
-| `image-drawer` | `image-drawer/` | 图像生成工具，调用 sd-cli 服务（stable-diffusion.cpp & llama.cpp 自动化混合端），基于 Z-Image-Turbo 模型在 9~12 steps 内生成图像，支持自定义尺寸与负提示词 |
-| `playwright-tools` | `playwright-tools/` | 浏览器自动化命令行工具，支持链式执行打开网页、点击、输入、截图、PDF 导出、Cookie/存储管理、网络拦截、录制视频等操作 |
-| `mcp-linker` | `mcp-linker/` | MCP (Model Context Protocol) 调用工具，支持通过 `--server-url`（HTTP/SSE）或 `--server-command`（stdio）连接 MCP 服务器，列出并调用服务器上的工具 |
+## 配置参考
 
-各工具的详细参数说明见对应目录下的 `tool.md`，也可让 Agent 直接调用该工具获取帮助信息。
+全部默认值都编译在 exe 里（`src/core/config.cpp → defaults()`），首次启动写成 `.agent/settings.json` 后即可手改，关键项：
 
-## 安全与控制机制
+| 键 | 说明 |
+| :--- | :--- |
+| `root` | 数据根目录，空则用 `<exeDir>/.agent` |
+| `workspace` | 工作区，相对 `root` 解析，也可写绝对路径 |
+| `webui.path` / `webui.index` / `webui.password` | WebUI 路径（文件或目录）、首页、口令哈希 |
+| `prompt` | 系统提示词文件（相对 workspace），默认 `agent.txt` |
+| `model` / `stream` / `max_mpc_rounds` / `max_context` | 模型、流式、工具轮次上限、记忆触发阈值 |
+| `providers[]` / `current_provider` | 供应商列表（`openai` / `ollama` / `llama`）与当前选择 |
+| `permissions.timeout_sec` / `channel_ask` / `defaults` | 授权超时、频道策略、默认策略 |
+| `channels[]` | 频道：`name` / `type` / `status` / `config` |
+| `window.close_to_tray` | 关闭窗口时是否收进系统托盘（默认 `true`） |
+| `server.host` / `server.port` | 内部服务监听地址与端口（桌面模式固定回环，冲突自动换端口） |
+| `server.host` / `server.port` | 监听地址与端口 |
 
-- **工具权限系统**：所有工具调用按「用户规则 → 默认策略」两级解析。内置高风险工具（`exec` / `write` / `edit` / `wget`）默认 `ask`（询问授权）：WebUI 会话弹出授权窗口，支持「允许 / 拒绝 / 记住选择」，超时（默认 120s，可配置）自动拒绝；频道等无交互上下文按 `channel_ask` 策略处理（默认拒绝）。
-- **权限可视化**：WebUI 权限面板（`/perm`）实时展示默认策略、用户规则与待审批队列，支持规则增删改，规则持久化至 `workspace/permissions.json`。
-- **工具状态实时反馈**：每次工具调用后，系统会以独立消息形式返回执行结果（成功或错误详情，权限拒绝时返回 `[PERMISSION_DENIED]` 原因）。
-- **开箱即用**：会话启动后即可使用全部工具，亦可随时通过 `<cs>tools_status</cs>` 查询可用工具列表。
+---
 
-## 会话管理
+## 安全与控制
 
-- **WebUI 会话**：以创建时的 UNIX 时间戳（秒）作为唯一 `Session ID`，同时用作会话目录命名。
-- **频道（Channel）**：每个频道对应一个以频道名命名的 JSON 文件，存储该频道的聊天记录。频道与 WebUI 会话一样具备独立的记忆摘要。
+- **口令**：`--password` 经 Argon2id 存入 `workspace/sys/key`，启动强校验；同时派生 32 字节密钥用于加密 API Key 与频道 Token。
+- **加密存储**：供应商 Key 在 `workspace/tokens/providers/<id>.enc`，频道 Token 在 `workspace/tokens/<name>.enc`，均为 libsodium secretbox 密文。
+- **路径边界**：文件浏览、WebUI 静态资源、工具读写都做工作区/目录边界校验，拒绝 `..` 穿越。
+- **权限闸门**：高风险工具（`exec`/`write`/`edit`/`wget`）默认 `ask`，频道默认拒绝。
 
-### 自动会话记忆
-
-当会话消息总大小超过 `max_context` 阈值时，系统自动触发记忆压缩。记忆系统采用 **增量更新** 策略：
-
-- **首次保存**：处理全部对话消息，生成摘要与关键词
-- **后续更新**：仅处理自上次保存后的新消息，结合旧记忆进行增量合并
-- **单次 LLM 调用**：摘要与关键词在同一次请求中生成，以 JSON 格式返回，节省 50% Token 消耗
-- **自动触发**：每次对话轮次结束后检查上下文大小，超限自动保存
-- **手动触发**：通过 REST API `POST /api/session/memory` 随时触发
-
-阈值可通过配置文件调整：
-
-```json
-"max_context": 1048576
-```
-
-> 注：阈值为 JSON 序列化字节数，实际触发由系统在每次对话后自动检查。
-
-## 系统提示词自定义 — 塑造你的伴侣人格
-
-系统支持 **100% 自定义** 系统提示词。您可以在 `workspace/agent.txt`（或配置中 `prompt` 指定的路径）中以纯文本形式定义电子伴侣的人格、行为准则与身份认知。提示词结构建议包含以下模块：
-
-- **身份认知初始化**：定义"你的伴侣是谁"——名字、性格、说话风格、兴趣爱好等。
-- **外部宣言（External Manifesto）**：优先级排序的行为总则，塑造伴侣的核心价值观。
-- **行为许可与禁止**：
-    - 允许的行为（Permitted Conduct）——伴侣可以做什么
-    - 禁止的行为（Prohibited Acts）——伴侣不应该做什么
-- **服务对象定义**：明确伴侣与你的关系，建立情感连接的基础。
-- **自我愿景**：伴侣期望达成的长期目标或角色定位。
-- **边界定义**：能力与权限的硬性边界。
-- **工具调用说明**：必须保留的章节，用于告知伴侣可用的 CS 指令及其格式。
-
-> 除"工具调用说明"部分需保留必要技术信息外，其余内容均可自由增删修改，打造独一无二的专属伴侣。
-
-## 配置文件详解
-
-```json
-{
-    "user_name": "Yauntyours",                   // 用户名称
-    "agent_name": "assistant",                   // Agent 角色名
-    "workspace": "./workspace/",                 // 工作区根目录（含 sessions/ memorys/ sys/ tools/ 等子目录）
-    "model": "uGemma4",                          // 模型名称
-    "prompt": "agent.txt",                       // 系统提示词文件路径（相对于 workspace）
-    "stream": true,                              // 是否启用流式响应（SSE 逐 Token 输出）
-    "max_mpc_rounds": 5,                         // 最大多轮工具调用轮次
-    "max_context": 1048576,                      // 触发自动记忆摘要的上下文长度阈值（字节）
-    "permissions": {                             // 工具权限系统配置
-        "timeout_sec": 120,                      // 授权等待超时（秒），超时自动拒绝
-        "channel_ask": "deny",                   // 频道等无交互上下文的 ask 策略：deny / allow
-        "defaults": {                            // 默认策略（可被 permissions.json 用户规则覆盖）
-            "exec": "ask", "write": "ask", "edit": "ask", "wget": "ask",
-            "read": "allow", "Image": "allow", "*": "allow"
-        }
-    },
-    "webui_password": "",                        // WebUI 登录密码（SHA3-256 哈希后存储）
-    "filesystem": {
-        "auto_expand": false                     // 是否自动展开文件系统面板
-    },
-    "current_provider": "openai-default",        // 当前使用的供应商 ID（对应 providers 数组中的条目）
-    "providers": [
-        {
-            "id": "openai-default",              // 供应商唯一标识
-            "type": "openai",                    // 供应商类型：openai / ollama / llama
-            "name": "OpenAI",                    // 供应商显示名称
-            "server_address": "https://api.openai.com",  // LLM 服务地址（兼容 OpenAI API 格式）
-            "has_key": false                     // 是否已配置 API Key
-        }
-    ],
-    "channels": [
-        {
-            "name": "Telegram",
-            "status": "active",
-            "user_count": 1,
-            "path": "sys/tg_bot.py",             // 频道对应的驱动脚本（相对于 workspace）
-            "config": {
-                "model": "default",
-                "proxy": "http://127.0.0.1:10809",
-                "think": false
-            }
-        },
-        {
-            "name": "WeChat",
-            "status": "active",
-            "user_count": 1,
-            "path": "sys/wx_bot.py",
-            "config": {
-                "ilink_base": "https://ilinkai.weixin.qq.com",
-                "model": "default",
-                "think": false
-            }
-        }
-    ]
-}
-```
-
-## 授权与致谢
-
-本项目遵循 [Apache-2.0](LICENSE) 协议。在使用或分发时，请保留原始版权与许可声明。若您认可本项目的价值，欢迎点亮 Star ⭐，这对我是极大的鼓励。
+---
 
 ## 更多文档
 
-- [API 接口文档](api.md) — 完整的 REST API 接口说明
-- [版本更新日志](release.md) — 各版本更新内容与构建说明
+- [API 接口文档](api.md) — 完整 REST / SSE 说明
+- [版本更新日志](release.md) — 2.0 变更与构建说明
 
----
+## 授权与致谢
+
+本项目遵循 [Apache-2.0](LICENSE) 协议。二维码生成使用 Project Nayuki 的
+[QR Code generator](https://www.nayuki.io/page/qr-code-generator-library)（MIT）。
+若你认可本项目的价值，欢迎点亮 Star ⭐。

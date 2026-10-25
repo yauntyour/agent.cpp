@@ -1,15 +1,25 @@
-.vscode
-*.exe
-sessions/*
-memorys/*
-*.a
-*.pyc
-*.dll
-*.zip
+# ---- 构建产物 ----
+/bin/
 build
+install
 _CPack_Packages
+*.exe
+*.a
+*.dll
+*.so
+*.dylib
+*.o
+*.zip
+agentcpp
+
+# ---- 运行期数据：全部落在 <exeDir>/.agent ----
+.agent/
+
+# ---- 编辑器 / 工具 ----
+.vscode
+.idea
 .claude
 .playwright-cli
-workspace/webui.log
-*.enc
-workspace/sys/key
+.workbuddy-ai
+__pycache__
+*.pyc

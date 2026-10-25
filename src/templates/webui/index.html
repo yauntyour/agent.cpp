@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>Loading</title>
+    <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
+    <!-- 所有前端依赖都内置在 exe 里（vendor/ 由 tools/embed_assets.py 打包），离线可用 -->
+    <link rel="stylesheet" href="vendor/fontawesome/css/fontawesome.min.css" />
+    <link rel="stylesheet" href="vendor/fontawesome/css/solid.min.css" />
+    <link rel="stylesheet" href="app.css" />
+    <script src="vendor/marked.min.js"></script>
+</head>
+
+<body>
+    <!-- 先把窗口标记加上，避免标题栏出现时页面跳一下 -->
+    <script>
+        if (window.chrome && window.chrome.webview) document.body.classList.add('is-webview');
+    </script>
+
+    <!-- 自绘标题栏：仅 WebView2 窗口里显示，浏览器里隐藏（见 app.js） -->
+    <header id="titlebar">
+        <div class="tb-brand">
+            <span class="tb-logo">a</span>
+            <span class="tb-name" id="tb-name">agent.cpp</span>
+            <span class="tb-status" id="tb-status">本地运行</span>
+        </div>
+        <div class="tb-controls">
+            <button class="tb-btn" id="win-min" title="最小化" aria-label="最小化">
+                <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                    <path d="M0 5.5h10" stroke="currentColor" stroke-width="1" />
+                </svg>
+            </button>
+            <button class="tb-btn" id="win-max" title="最大化" aria-label="最大化">
+                <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                    <rect id="win-max-icon" x="0.5" y="0.5" width="9" height="9" rx="1.5" fill="none"
+                        stroke="currentColor" stroke-width="1" />
+                </svg>
+            </button>
+            <button class="tb-btn danger" id="win-close" title="关闭" aria-label="关闭">
+                <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                    <path d="M0.5 0.5l9 9M9.5 0.5l-9 9" stroke="currentColor" stroke-width="1" />
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- 无边框窗口的缩放热区（8 个方向），仅窗口模式启用 -->
+    <div id="resize-layer" aria-hidden="true">
+        <div class="rs rs-t" data-dir="t"></div>
+        <div class="rs rs-b" data-dir="b"></div>
+        <div class="rs rs-l" data-dir="l"></div>
+        <div class="rs rs-r" data-dir="r"></div>
+        <div class="rs rs-tl" data-dir="tl"></div>
+        <div class="rs rs-tr" data-dir="tr"></div>
+        <div class="rs rs-bl" data-dir="bl"></div>
+        <div class="rs rs-br" data-dir="br"></div>
+    </div>
+
+    <div id="app">
+        <!-- 左侧会话列表 -->
+        <aside id="sidebar">
+            <div class="sidebar-header">
+                <h2>Sessions</h2>
+                <button class="sidebar-btn" id="new-session-btn" title="新建会话">+</button>
+            </div>
+            <div id="session-list"></div>
+            <div class="sidebar-footer">
+                <span id="current-user-display"
+                    style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted);">User</span>
+                <button class="sidebar-btn" id="data-stats-btn" title="统计"
+                    style="width:26px;height:26px;font-size:12px;"><i class="fa-solid fa-chart-pie"></i></button>
+            </div>
+        </aside>
+
+        <!-- 文件浏览器面板（左侧隐藏式） -->
+        <div id="file-browser-panel">
+            <div id="file-browser-bar">
+                <div id="fb-header"><i class="fa-solid fa-folder-open"></i> 文件浏览器</div>
+                <div id="fb-actions">
+                    <button class="fb-btn" id="fb-auto-toggle" title="自动展开"><i class="fa-solid fa-bolt"></i></button>
+                    <button class="fb-btn" id="fb-refresh" title="刷新"><i class="fa-solid fa-rotate"></i></button>
+                    <button class="fb-btn" id="fb-collapse" title="收起"><i class="fa-solid fa-chevron-left"></i></button>
+                </div>
+            </div>
+            <div id="fb-breadcrumb"></div>
+            <div id="fb-listing">
+                <div style="padding:24px 12px;color:var(--text-dim);font-size:12px;text-align:center;">
+                    <i class="fa-solid fa-folder-open"
+                        style="display:block;font-size:24px;margin-bottom:8px;opacity:0.3;"></i>
+                    点击工具栏按钮打开文件浏览器
+                </div>
+            </div>
+        </div>
+
+        <!-- 主聊天区 -->
+        <main id="main">
+            <header class="chat-header">
+                <div class="chat-header-left">
+                    <div class="provider-selector">
+                        <button class="provider-btn" id="provider-dropdown-btn">
+                            <i class="fa-solid fa-server" style="font-size:11px;"></i>
+                            <span id="provider-name-display">加载中...</span>
+                            <i class="fa-solid fa-chevron-down" style="font-size:8px;color:var(--text-dim);"></i>
+                        </button>
+                        <div class="provider-dropdown" id="provider-dropdown-menu">
+                            <div id="provider-dropdown-list"></div>
+                            <div style="border-top:1px solid var(--border-color);margin-top:4px;padding-top:4px;">
+                                <button class="provider-opt" onclick="openProvidersManager()" style="color:var(--text-dim);font-size:11px;">
+                                    <i class="fa-solid fa-gear"></i> 管理供应商...
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="model-selector">
+                        <button class="model-btn" id="model-dropdown-btn">
+                            <span class="model-dot" id="connection-status-dot"
+                                style="background:var(--text-dim);"></span>
+                            <span id="model-name-display">加载中...</span>
+                            <i class="fa-solid fa-chevron-down" style="font-size:9px;color:var(--text-dim);"></i>
+                        </button>
+                        <div class="model-dropdown" id="model-dropdown-menu">
+                            <div id="model-dropdown-list"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="chat-header-right">
+                    <button class="icon-btn purple" id="summary-session-btn" title="生成记忆摘要"><i
+                            class="fa-solid fa-brain"></i></button>
+                    <button class="icon-btn red" id="clear-session-btn" title="清空上下文"><i
+                            class="fa-solid fa-trash-can"></i></button>
+                    <span class="session-id-badge" id="current-session-id-display">ID: -</span>
+                    <span class="memory-time-indicator" id="memory-time-indicator"><i
+                            class="fa-solid fa-brain"></i><span id="memory-time-text"></span></span>
+                    <button class="icon-btn" id="file-browser-btn" title="文件浏览器"><i
+                            class="fa-solid fa-folder-tree"></i></button>
+                    <button class="icon-btn" id="theme-toggle-btn" title="切换主题"><i
+                            class="fa-solid fa-circle-half-stroke"></i></button>
+                    <button class="icon-btn" id="settings-gear-btn" title="设置"><i class="fa-solid fa-gear"></i></button>
+                </div>
+            </header>
+
+            <div id="messages-container">
+                <button id="scroll-bottom-btn"><i class="fa-solid fa-arrow-down"></i> 滚动到底部</button>
+                <div class="empty-state">
+                    <i class="fa-solid fa-comments"></i>
+                    <div style="font-size:16px;font-weight:500;color:var(--text-dim);">未选择会话</div>
+                    <div style="font-size:13px;margin-top:4px;color:var(--text-dim);">请从左侧选择一个会话，或创建新会话。</div>
+                </div>
+            </div>
+
+            <div class="input-area">
+                <div class="input-wrapper">
+                    <div class="input-box">
+                        <div id="image-preview-container"></div>
+                        <div class="input-row">
+                            <button class="attach-btn" id="attach-btn" title="上传文件/图片"><i
+                                    class="fa-solid fa-paperclip"></i></button>
+                            <input type="file" id="file-upload"
+                                accept="image/*,.txt,.md,.py,.json,.cpp,.h,.js,.ts,.html,.css,.yaml,.yml,.toml" multiple
+                                style="display:none;">
+                            <textarea id="user-input" placeholder="输入消息..." rows="1"></textarea>
+                            <button id="send-btn" title="发送"><i class="fa-solid fa-arrow-up"></i></button>
+                        </div>
+                    </div>
+                    <div class="input-footer">
+                        <label class="think-toggle-row">
+                            <input type="checkbox" id="think-toggle">
+                            <span class="toggle-track"></span>
+                            深度思考
+                        </label>
+                        <div id="context-usage" style="display:none;align-items:center;gap:8px;">
+                            <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-dim);">
+                                <i class="fa-solid fa-circle-notch"></i>
+                                <span id="context-bar-container"
+                                    style="width:70px;height:4px;background:var(--bg-elevated);border-radius:2px;overflow:hidden;display:inline-block;vertical-align:middle;">
+                                    <span id="context-bar-fill"
+                                        style="display:block;height:100%;width:0%;background:var(--accent-color);border-radius:2px;transition:width 0.3s;"></span>
+                                </span>
+                                <span id="context-text" style="font-family:'JetBrains Mono',monospace;">0 / 0</span>
+                            </div>
+                        </div>
+                        <span style="font-size:11px;color:var(--text-dim);">Enter 发送 / Shift+Enter 换行</span>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- 设置覆盖层背景 -->
+        <div id="overlay-backdrop"></div>
+
+        <!-- 右侧设置覆盖层 -->
+        <aside id="settings-overlay" class="side-overlay">
+            <div class="overlay-header">
+                <h2>系统设置</h2>
+                <button class="icon-btn" id="close-settings-btn" style="font-size:16px;"><i
+                        class="fa-solid fa-times"></i></button>
+            </div>
+            <div class="overlay-tabs">
+                <button class="overlay-tab active" data-otab="settings">配置</button>
+                <button class="overlay-tab" data-otab="channels">频道</button>
+                <button class="overlay-tab" data-otab="providers">供应商</button>
+                <button class="overlay-tab" data-otab="tools">工具</button>
+                <button class="overlay-tab" data-otab="permissions">权限<span id="perm-tab-badge"
+                        class="perm-count-badge" style="display:none;margin-left:4px;padding:0 5px;font-size:10px;"></span></button>
+                <button class="overlay-tab" data-otab="todos">任务</button>
+            </div>
+            <div class="overlay-body">
+                <div class="overlay-panel active" id="opanel-settings">
+                    <div id="settings-form-container"></div>
+                    <button class="save-btn" id="save-settings-btn"><i class="fa-solid fa-floppy-disk"></i>
+                        应用配置</button>
+                </div>
+                <div class="overlay-panel" id="opanel-channels">
+                    <div class="channel-toolbar">
+                        <span class="channel-toolbar-title">IM 频道</span>
+                        <span class="channel-toolbar-count" id="channel-count">0</span>
+                        <button class="channel-new-btn" id="channel-new-btn">
+                            <i class="fa-solid fa-plus"></i> 新建频道
+                        </button>
+                    </div>
+                    <div id="channel-editor"></div>
+                    <div id="channel-cards"></div>
+                </div>
+                <div class="overlay-panel" id="opanel-providers">
+                    <div id="providers-header-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+                        <span style="font-size:12px;color:var(--text-muted);font-weight:500;">模型供应商管理</span>
+                        <button class="save-btn" onclick="addProviderForm()" style="margin-left:auto;margin-top:0;padding:6px 12px;font-size:11px;background:var(--accent-color);">
+                            <i class="fa-solid fa-plus"></i> 添加供应商
+                        </button>
+                    </div>
+                    <div id="providers-list"></div>
+                </div>
+                <div class="overlay-panel" id="opanel-tools">
+                    <div id="tools-header-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+                        <div style="flex:1;position:relative;">
+                            <i class="fa-solid fa-search"
+                                style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-dim);font-size:12px;pointer-events:none;"></i>
+                            <input type="text" id="tools-search-input" placeholder="搜索工具..."
+                                style="width:100%;background:var(--bg-base);border:1px solid var(--border-color);border-radius:var(--radius-sm);padding:7px 10px 7px 28px;color:var(--text-main);font-size:12px;outline:none;transition:border-color var(--transition-fast);"
+                                onfocus="this.style.borderColor='var(--accent-color)'"
+                                onblur="this.style.borderColor='var(--border-color)'" oninput="filterTools()">
+                        </div>
+                        <span id="tools-enabled-count"
+                            style="font-size:11px;color:var(--text-dim);background:var(--bg-base);padding:4px 10px;border-radius:var(--radius-sm);border:1px solid var(--border-color);white-space:nowrap;">0/0</span>
+                    </div>
+                    <div id="tools-toggle-list" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;"></div>
+                </div>
+                <div class="overlay-panel" id="opanel-permissions">
+                    <div id="perm-header-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+                        <span style="font-size:12px;color:var(--text-muted);font-weight:500;">工具权限管理</span>
+                        <span id="perm-pending-count" class="perm-count-badge" style="display:none;">0 待审批</span>
+                        <button class="save-btn" onclick="loadPermissions()" title="刷新"
+                            style="margin-left:auto;margin-top:0;padding:6px 10px;font-size:11px;background:var(--bg-elevated);"><i
+                                class="fa-solid fa-rotate"></i> 刷新</button>
+                    </div>
+                    <div class="setting-group">
+                        <div class="setting-group-title">待审批队列</div>
+                        <div id="perm-pending-list" style="display:grid;gap:8px;"></div>
+                    </div>
+                    <div class="setting-group">
+                        <div class="setting-group-title">用户规则（workspace/permissions.json）</div>
+                        <div id="perm-rules-list" style="display:grid;gap:6px;"></div>
+                        <div
+                            style="display:grid;grid-template-columns:1fr 1fr 110px auto;gap:6px;margin-top:10px;align-items:center;">
+                            <input type="text" id="perm-rule-tool" list="perm-tool-list" placeholder="工具名（如 exec / *）"
+                                style="background:var(--bg-base);border:1px solid var(--border-color);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text-main);font-size:12px;outline:none;">
+                            <datalist id="perm-tool-list"></datalist>
+                            <input type="text" id="perm-rule-pattern" placeholder="参数匹配（留空=全部）"
+                                style="background:var(--bg-base);border:1px solid var(--border-color);border-radius:var(--radius-sm);padding:7px 10px;color:var(--text-main);font-size:12px;outline:none;">
+                            <select id="perm-rule-policy"
+                                style="background:var(--bg-base);border:1px solid var(--border-color);border-radius:var(--radius-sm);padding:7px 6px;color:var(--text-main);font-size:12px;outline:none;">
+                                <option value="allow">allow 放行</option>
+                                <option value="ask" selected>ask 询问</option>
+                                <option value="deny">deny 拒绝</option>
+                            </select>
+                            <button class="save-btn" onclick="addPermissionRule()"
+                                style="margin:0;padding:7px 12px;font-size:12px;background:var(--accent-color);white-space:nowrap;"><i
+                                    class="fa-solid fa-plus"></i> 新增</button>
+                        </div>
+                    </div>
+                    <div class="setting-group">
+                        <div class="setting-group-title">默认策略（settings.json → permissions.defaults）</div>
+                        <div id="perm-defaults-list" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+                        <div style="font-size:11px;color:var(--text-dim);margin-top:8px;">用户规则优先于默认策略；默认策略可在「配置」页修改，重启服务后生效。</div>
+                    </div>
+                </div>
+                <div class="overlay-panel" id="opanel-todos">
+                    <div style="display:flex;gap:6px;margin-bottom:10px;">
+                        <input id="new-todo-input" placeholder="新任务..." type="text"
+                            style="flex:1;background:var(--bg-base);border:1px solid var(--border-color);border-radius:var(--radius-sm);padding:8px 10px;color:var(--text-main);font-size:13px;outline:none;">
+                        <button id="add-todo-btn"
+                            style="padding:8px 14px;background:var(--accent-color);border:none;border-radius:var(--radius-sm);color:#fff;cursor:pointer;font-size:12px;"><i
+                                class="fa-solid fa-plus"></i></button>
+                    </div>
+                    <div id="todos-list"></div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- 统计覆盖层（独立弹窗） -->
+        <aside id="stats-overlay" class="side-overlay">
+            <div class="overlay-header">
+                <h2>使用统计</h2>
+                <button class="icon-btn" id="close-stats-btn" style="font-size:16px;"><i
+                        class="fa-solid fa-times"></i></button>
+            </div>
+            <div class="overlay-body" id="stats-overlay-body">
+                <div style="padding:40px 20px;text-align:center;color:var(--text-dim);font-size:13px;">加载中...</div>
+            </div>
+        </aside>
+
+        <!-- 扫码登录弹窗（居中模态） -->
+        <div id="channel-qr-overlay" class="qr-modal">
+            <div class="qr-modal-box">
+                <div class="overlay-header">
+                    <h2 id="channel-qr-title">扫码登录</h2>
+                    <button class="icon-btn" id="close-channel-qr-btn" style="font-size:16px;"><i
+                            class="fa-solid fa-times"></i></button>
+                </div>
+                <div class="overlay-body" id="channel-qr-overlay-body">
+                    <div style="padding:40px 20px;text-align:center;color:var(--text-dim);font-size:13px;">加载中...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 工具授权请求弹窗（居中模态） -->
+    <div id="perm-approve-overlay" class="qr-modal">
+        <div class="qr-modal-box" style="width:420px;">
+            <div class="overlay-header">
+                <h2><i class="fa-solid fa-shield-halved" style="color:#fbbf24;margin-right:6px;"></i>工具授权请求</h2>
+                <button class="icon-btn" id="close-perm-approve-btn" style="font-size:16px;"><i
+                        class="fa-solid fa-times"></i></button>
+            </div>
+            <div class="overlay-body" id="perm-approve-body">
+                <div style="padding:40px 20px;text-align:center;color:var(--text-dim);font-size:13px;">暂无待授权请求</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 加载覆盖层 -->
+    <div id="loading-overlay">
+        <div class="loading-spinner">
+            <i class="fa-solid fa-circle-notch fa-spin"></i>
+            <div class="loading-text">加载中...</div>
+            <div class="loading-sub">正在切换会话，请稍候</div>
+        </div>
+    </div>
+
+    <div id="toast-container"></div>
+    <script src="app.js"></script>
+</body>
+
+</html>
