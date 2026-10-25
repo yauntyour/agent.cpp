@@ -35,7 +35,10 @@ function closeDrawer() {
 $('#btn-drawer-close').onclick = closeDrawer;
 $('#scrim').onclick = closeDrawer;
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closeDrawer();
+  if (e.key !== 'Escape') return;
+  // 抽屉开着先关抽屉；没有抽屉又在回应，Esc 就是「停止生成」
+  if (!$('#drawer').classList.contains('hidden')) { closeDrawer(); return; }
+  if (S.busy) stopTurn();
 });
 
 /* ---------------- 表单小件 ---------------- */
@@ -134,7 +137,9 @@ function openMemory() {
 /* ---------------- 角色编辑 ---------------- */
 function openPersonaEditor(creating) {
   const p = creating ? { name: '', subtitle: '', greeting: '', user_name: '', prompt: '', accent: '#8b7cff', voice: '', proactive: false, idle_minutes: 30 } : (S.persona || {});
-  openDrawer(creating ? '新建角色' : '角色设定', 'persona', (body) => {
+  // 新建时的默认模型要扫描一次资源清单（空角色启动时舞台还没拿过）；
+  // 等扫描回来再开抽屉，表单里才填得上模型路径
+  const open = () => openDrawer(creating ? '新建角色' : '角色设定', 'persona', (body) => {
     const av = el('div', 'avatar-edit');
     const prev = el('div', 'preview');
     if (p.avatar_url) prev.innerHTML = `<img src="${esc(p.avatar_url)}">`;
@@ -166,6 +171,7 @@ function openPersonaEditor(creating) {
       swatches.appendChild(s);
     }
     const idle = textInput(p.idle_minutes || 30, '30', 'number');
+    const models = (L2D.scan && L2D.scan.models) || [];
     form.append(
       field('名字', name),
       field('副标题', sub),
@@ -175,6 +181,13 @@ function openPersonaEditor(creating) {
       field('音色（可选）', voice, '对应语音服务里的 voice 参数；例如 alloy / zh-CN-XiaoxiaoNeural。'),
       field('主题色', swatches),
     );
+    if (creating && models.length) {
+      form.appendChild(field('舞台模型', (() => {
+        const t = textInput(models[0].path, '');
+        t.disabled = true;
+        return t;
+      })(), '新角色默认用自带的这个模型；建好后在舞台面板里可以换。'));
+    }
     body.appendChild(form);
 
     const behavior = el('div', 'sect');
@@ -197,6 +210,11 @@ function openPersonaEditor(creating) {
         idle_minutes: Math.max(1, parseInt(idle.value || '30', 10) || 30),
       };
       const args = creating ? { patch } : { id: p.id, patch };
+      // 新角色直接挂上自带模型：建完就能在舞台上看见人
+      if (creating) {
+        const models = (L2D.scan && L2D.scan.models) || [];
+        if (models.length) patch.live2d = { model: models[0].path };
+      }
       const r = await cmd('persona.save', args);
       if (creating) await cmd('persona.select', { id: r.id });
       await refreshState();
@@ -215,6 +233,12 @@ function openPersonaEditor(creating) {
       body.appendChild(el('div', 'btn-row', del));
     }
   });
+
+  if (creating && !L2D.scan && !MOCK) {
+    cmd('live2d.scan').then(s => { L2D.scan = s; open(); }).catch(() => open());
+  } else {
+    open();
+  }
 }
 
 /* 头像上传 */
@@ -308,7 +332,6 @@ function wireGlobal() {
   $('#btn-edit-persona').onclick = () => openPersonaEditor(false);
   $('#btn-new-persona').onclick = () => openPersonaEditor(true);
   $('#btn-stage').onclick = () => openStagePanel();
-  $('#stage-hint').onclick = () => openStagePanel();
   $('#btn-proactive').onclick = async () => {
     const p = S.persona || {};
     try {

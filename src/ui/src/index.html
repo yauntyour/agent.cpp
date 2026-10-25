@@ -77,32 +77,15 @@
   <aside id="stage">
     <div class="stage-glow" id="stage-glow"></div>
 
-    <div class="stage-frame" id="stage-frame" data-mode="orb">
-      <!-- Live2D：模型画在这块画布上。没有模型 / 运行时的时候退回光球，
-           光球的表情层仍然跟着 emo 事件走，两种形态共用同一套触发器。 -->
-      <div class="l2d-wrap" id="l2d-wrap">
+    <div class="stage-frame" id="stage-frame">
+      <!-- 舞台就是 Live2D：模型画在这块画布上。
+           模型或运行时不在的时候这里给一句能点的提示，不再有备用的光球。 -->
+      <div class="l2d-wrap idle" id="l2d-wrap">
         <canvas id="l2d-canvas"></canvas>
-        <div class="l2d-status" id="l2d-status"></div>
+        <button class="l2d-status" id="l2d-status">Live2D 还没就绪 · 点这里接入</button>
       </div>
-
-      <div class="orb-wrap" id="orb-wrap">
-        <div class="orb-ring"></div>
-        <div class="orb-ring r2"></div>
-        <div class="orb" id="orb" data-emo="neutral">
-          <img id="avatar" alt="" class="hidden">
-          <div class="face" id="face">
-            <div class="brow l"></div><div class="brow r"></div>
-            <div class="eye l"></div><div class="eye r"></div>
-            <div class="blush l"></div><div class="blush r"></div>
-            <div class="mouth"></div>
-          </div>
-          <div class="orb-sheen"></div>
-        </div>
-      </div>
-
       <div class="voice-bars" id="voice-bars"><i></i><i></i><i></i><i></i><i></i></div>
       <div class="stage-bubble" id="stage-bubble"></div>
-      <button class="stage-hint" id="stage-hint"></button>
     </div>
 
     <div class="stage-name" id="stage-name">—</div>

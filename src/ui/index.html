@@ -225,156 +225,14 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 
 /* ==== css/03-stage.css ================================================ */
 
-/* 角色舞台：一枚会呼吸、会看人、会说话的光球。
-   没有立绘也不空——情绪由光球的颜色、眼睛、嘴形和光晕共同表达；
-   角色卡提供了头像时，头像浮在光球里，表情层自动隐藏。
-
-   接入 Live2D 模型后（data-mode="l2d"）光球整块让位给画布，
-   两者是同一个舞台的两种形态，共用情绪、动作、触发器。 */
+/* 角色舞台：一块 Live2D 画布。
+   表情和动作由模型自己演，界面只负责排版、台词和状态。
+   画布上没有模型时给一句能点的提示（见 07-live2d.css 的 .l2d-status）。 */
 
 .stage-frame {
   position: relative; width: 100%;
   display: grid; place-items: center;
   margin-top: 6px; flex: 0 0 auto;
-}
-.stage-frame[data-mode="l2d"] .orb-wrap { display: none; }
-.stage-frame[data-mode="orb"] .l2d-wrap { display: none; }
-
-.orb-wrap {
-  position: relative; width: 214px; height: 214px;
-  display: grid; place-items: center;
-  flex: 0 0 auto;
-}
-.orb-ring {
-  position: absolute; inset: 10px; border-radius: 50%;
-  border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
-  animation: spin 26s linear infinite;
-}
-.orb-ring.r2 {
-  inset: 0; border-style: dashed;
-  border-color: color-mix(in srgb, var(--accent) 14%, transparent);
-  animation: spin 44s linear infinite reverse;
-}
-.orb-ring::after {
-  content: ""; position: absolute; top: -2px; left: 50%; width: 5px; height: 5px;
-  border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent);
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-
-.orb {
-  position: relative; width: 166px; height: 166px; border-radius: 50%;
-  background:
-    radial-gradient(120% 120% at 32% 26%, var(--mood-a, #cfc8ff) 0%, var(--mood-b, #7c6cff) 46%, var(--mood-c, #4a3fb0) 100%);
-  box-shadow:
-    inset 0 -18px 40px color-mix(in srgb, var(--mood-c, #3b2f92) 70%, transparent),
-    inset 0 10px 26px rgba(255, 255, 255, .28),
-    0 18px 50px color-mix(in srgb, var(--mood-b, #7c6cff) 30%, transparent);
-  animation: breathe 7s var(--ease) infinite;
-  transition: background .8s var(--ease), box-shadow .8s var(--ease);
-  overflow: hidden;
-}
-@keyframes breathe {
-  50% { transform: translateY(-4px) scale(1.012); }
-}
-.orb-sheen {
-  position: absolute; inset: 0; border-radius: 50%;
-  background: radial-gradient(60% 45% at 30% 18%, rgba(255, 255, 255, .55), transparent 70%);
-  mix-blend-mode: screen; opacity: .55; pointer-events: none;
-}
-.orb img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; position: relative; z-index: 1; }
-
-/* ---------------- 表情 ---------------- */
-.face { position: absolute; inset: 0; z-index: 2; }
-.eye {
-  position: absolute; top: 44%; width: 15px; height: 17px; border-radius: 50%;
-  background: color-mix(in srgb, var(--mood-c, #241a55) 82%, #000);
-  transform-origin: 50% 60%;
-  transition: all .28s var(--ease);
-  box-shadow: inset 0 -3px 0 rgba(255, 255, 255, .18);
-}
-.eye.l { left: 33%; }
-.eye.r { right: 33%; }
-.eye::after { /* 高光 */
-  content: ""; position: absolute; top: 3px; left: 3px; width: 5px; height: 5px;
-  border-radius: 50%; background: rgba(255, 255, 255, .92);
-}
-.mouth {
-  position: absolute; left: 50%; top: 63%; width: 22px; height: 10px;
-  transform: translateX(-50%);
-  border-bottom: 2.5px solid color-mix(in srgb, var(--mood-c, #241a55) 78%, #000);
-  border-radius: 0 0 50% 50%;
-  transition: all .26s var(--ease);
-}
-.brow {
-  position: absolute; top: 36%; width: 15px; height: 2.5px; border-radius: 2px;
-  background: color-mix(in srgb, var(--mood-c, #241a55) 55%, transparent);
-  opacity: 0; transition: all .26s var(--ease);
-}
-.brow.l { left: 32.5%; }
-.brow.r { right: 32.5%; }
-.blush {
-  position: absolute; top: 56%; width: 24px; height: 12px; border-radius: 50%;
-  background: radial-gradient(closest-side, rgba(255, 132, 164, .68), transparent 78%);
-  opacity: 0; transition: opacity .3s var(--ease);
-}
-.blush.l { left: 18%; }
-.blush.r { right: 18%; }
-
-/* 情绪：颜色 + 五官一起变 */
-.orb[data-emo="neutral"]   { --mood-a: #cfc8ff; --mood-b: #7c6cff; --mood-c: #453a9e; }
-.orb[data-emo="happy"]     { --mood-a: #ffe0f2; --mood-b: #f388c9; --mood-c: #a83f86; }
-.orb[data-emo="sad"]       { --mood-a: #c8d8ff; --mood-b: #6f8ce0; --mood-c: #33427e; }
-.orb[data-emo="angry"]     { --mood-a: #ffd0cd; --mood-b: #ef6a72; --mood-c: #8e2f3a; }
-.orb[data-emo="shy"]       { --mood-a: #ffe3ea; --mood-b: #f59bb2; --mood-c: #a3546c; }
-.orb[data-emo="surprised"] { --mood-a: #d8fbff; --mood-b: #62c9e8; --mood-c: #2a7287; }
-.orb[data-emo="thinking"]  { --mood-a: #dcd8ff; --mood-b: #8d82e8; --mood-c: #4a418e; }
-.orb[data-emo="affection"] { --mood-a: #ffe1ec; --mood-b: #f28ab7; --mood-c: #9c4468; }
-
-.orb[data-emo="happy"] .eye { height: 9px; border-radius: 9px 9px 4px 4px; top: 46%; }
-.orb[data-emo="happy"] .mouth { width: 30px; height: 14px; }
-.orb[data-emo="sad"] .eye { transform: rotate(6deg) translateY(2px); height: 15px; }
-.orb[data-emo="sad"] .eye.r { transform: rotate(-6deg) translateY(2px); }
-.orb[data-emo="sad"] .mouth { border-bottom: 0; border-top: 2.5px solid currentColor; top: 67%;
-  color: color-mix(in srgb, var(--mood-c, #241a55) 78%, #000); border-radius: 50% 50% 0 0; width: 18px; }
-.orb[data-emo="sad"] .brow { opacity: .8; }
-.orb[data-emo="sad"] .brow.l { transform: rotate(-14deg) translateY(-2px); }
-.orb[data-emo="sad"] .brow.r { transform: rotate(14deg) translateY(-2px); }
-
-.orb[data-emo="angry"] .brow { opacity: .95; }
-.orb[data-emo="angry"] .brow.l { transform: rotate(16deg) translateY(1px); }
-.orb[data-emo="angry"] .brow.r { transform: rotate(-16deg) translateY(1px); }
-.orb[data-emo="angry"] .eye { height: 12px; }
-.orb[data-emo="angry"] .mouth { width: 16px; height: 3px; border-bottom-width: 3px; border-radius: 2px; }
-
-.orb[data-emo="shy"] .blush { opacity: 1; }
-.orb[data-emo="shy"] .eye { height: 8px; border-radius: 8px 8px 3px 3px; top: 48%; }
-.orb[data-emo="shy"] .mouth { width: 14px; height: 8px; }
-
-.orb[data-emo="surprised"] .eye { width: 17px; height: 19px; }
-.orb[data-emo="surprised"] .mouth { width: 12px; height: 14px; border: 2.5px solid color-mix(in srgb, var(--mood-c, #241a55) 78%, #000);
-  border-radius: 50%; background: transparent; }
-.orb[data-emo="surprised"] .brow { opacity: .7; transform: translateY(-4px); }
-
-.orb[data-emo="thinking"] .eye { transform: translate(3px, -3px); }
-.orb[data-emo="thinking"] .mouth { width: 12px; transform: translateX(-50%) rotate(-8deg); }
-.orb[data-emo="thinking"] .brow.l { opacity: .55; transform: rotate(-10deg); }
-
-.orb[data-emo="affection"] .blush { opacity: 1; }
-.orb[data-emo="affection"] .eye { height: 8px; border-radius: 8px 8px 3px 3px; top: 48%; }
-.orb[data-emo="affection"] .mouth { width: 26px; height: 12px; }
-
-/* 说话：嘴动、光晕呼吸、声波跳 */
-.orb.speaking { animation: breathe 7s var(--ease) infinite, talk-glow .9s ease-in-out infinite; }
-.orb.speaking .mouth { animation: talk .34s ease-in-out infinite; }
-@keyframes talk {
-  0%, 100% { height: 8px; width: 22px; }
-  50% { height: 16px; width: 26px; border-radius: 10px; }
-}
-@keyframes talk-glow {
-  50% { box-shadow:
-    inset 0 -18px 40px color-mix(in srgb, var(--mood-c, #3b2f92) 70%, transparent),
-    inset 0 10px 26px rgba(255, 255, 255, .3),
-    0 18px 60px color-mix(in srgb, var(--mood-b, #7c6cff) 46%, transparent); }
 }
 
 .voice-bars {
@@ -400,8 +258,9 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   margin-top: 26px; font-size: 19px; font-weight: 600; letter-spacing: .04em;
 }
 .stage-sub { margin-top: 4px; font-size: 12.5px; color: var(--muted); text-align: center; }
+.stage-mood-row { margin-top: 14px; display: flex; align-items: center; gap: 8px; }
 .stage-mood {
-  margin-top: 14px; display: inline-flex; align-items: center; gap: 7px;
+  display: inline-flex; align-items: center; gap: 7px;
   padding: 5px 12px; border-radius: 999px;
   background: color-mix(in srgb, var(--accent) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
@@ -409,8 +268,6 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   transition: background .4s, border-color .4s;
 }
 .stage-mood .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
-.stage-mood-row { margin-top: 14px; display: flex; align-items: center; gap: 8px; }
-.stage-mood-row .stage-mood { margin-top: 0; }
 .stage-tune {
   width: 26px; height: 26px; border-radius: 50%;
   display: grid; place-items: center; color: var(--faint);
@@ -420,17 +277,6 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .stage-tune:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 34%, transparent);
   background: color-mix(in srgb, var(--accent) 8%, transparent); transform: rotate(45deg); }
 .stage-tune svg { width: 14px; height: 14px; }
-
-/* 没有模型时的一行小字：点开面板接入 */
-.stage-hint {
-  margin-top: 12px; max-width: 100%;
-  padding: 3px 9px; border-radius: 999px;
-  font-size: 10.5px; color: var(--faint); letter-spacing: .02em;
-  border: 1px dashed var(--line-strong);
-  transition: color .16s, border-color .16s;
-}
-.stage-hint:hover { color: var(--text-2); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
-.stage-frame[data-mode="l2d"] .stage-hint { display: none; }
 
 .stage-act {
   margin-top: 18px; min-height: 40px; max-width: 260px;
@@ -657,7 +503,14 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .send-btn:active { transform: translateY(0) scale(.97); }
 .send-btn:disabled { opacity: .4; box-shadow: none; cursor: not-allowed; transform: none; }
 .send-btn .i-stop { display: none; }
-.send-btn.stop { background: var(--card-2); color: var(--text); box-shadow: none; border: 1px solid var(--line-strong); }
+/* 回合进行中：发送键变成「停止」——用红色描边，一眼能看出来可以打断 */
+.send-btn.stop {
+  background: color-mix(in srgb, var(--err) 14%, var(--card-2));
+  color: color-mix(in srgb, var(--err) 88%, #fff);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--err) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--err) 42%, transparent);
+}
+.send-btn.stop:hover { background: color-mix(in srgb, var(--err) 22%, var(--card-2)); }
 .send-btn.stop .i-send { display: none; }
 .send-btn.stop .i-stop { display: block; }
 
@@ -836,25 +689,30 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .l2d-wrap.ready canvas { animation: l2d-in .55s var(--ease) both; }
 @keyframes l2d-in { from { opacity: 0; transform: translateY(8px) scale(.985); } }
 
-/* 加载中 / 出错时压在画布上的状态行 */
+/* 加载中 / 没模型 / 出错时压在画布上的状态行（可点，直接打开舞台面板） */
 .l2d-status {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
   display: none; align-items: center; gap: 7px;
-  padding: 6px 12px; border-radius: 999px;
-  font-size: 11.5px; color: var(--text-2);
-  background: rgba(10, 10, 14, .72);
+  padding: 8px 14px; border-radius: 999px;
+  font-size: 11.5px; color: var(--text-2); text-align: center; line-height: 1.5;
+  background: rgba(10, 10, 14, .78);
   border: 1px solid var(--line-strong);
   backdrop-filter: blur(6px);
-  max-width: 90%; text-align: center; line-height: 1.5;
+  max-width: 88%;
+  transition: color .16s, border-color .16s;
 }
+.l2d-wrap.idle .l2d-status,
 .l2d-wrap.loading .l2d-status,
 .l2d-wrap.error .l2d-status { display: inline-flex; }
+.l2d-wrap.idle .l2d-status { border-style: dashed; }
+.l2d-status:hover { color: var(--text); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 .l2d-wrap.loading .l2d-status::before {
   content: ""; width: 9px; height: 9px; border-radius: 50%;
   border: 1.5px solid color-mix(in srgb, var(--accent) 40%, transparent);
   border-top-color: var(--accent);
   animation: spin .8s linear infinite;
 }
+@keyframes spin { to { transform: rotate(360deg); } }
 .l2d-wrap.error .l2d-status { color: var(--err); border-color: color-mix(in srgb, var(--err) 34%, transparent); }
 
 /* ---------------- 台词气泡 ----------------
@@ -964,6 +822,31 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .act-body .field { margin-bottom: 8px; }
 .act-body .field > label { font-size: 10.5px; }
 .act-body .field input, .act-body .field select, .act-body .field textarea { font-size: 12px; padding: 6px 9px; }
+
+/* 底部保存条：滚到哪都贴着底边，改没改一眼看得见 */
+.stage-bar {
+  position: sticky; bottom: 0; z-index: 3;
+  margin: 24px -22px -40px; padding: 12px 22px 14px;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: linear-gradient(180deg, rgba(16, 16, 22, .62), #0f0f15 46%);
+  border-top: 1px solid var(--line);
+  backdrop-filter: blur(10px);
+}
+.stage-bar .bar-text {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 11.5px; color: var(--muted);
+}
+.stage-bar .bar-dot {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--faint);
+  transition: background .2s, box-shadow .2s;
+}
+.stage-bar.dirty .bar-dot {
+  background: var(--warn);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--warn) 70%, transparent);
+}
+.stage-bar.dirty .bar-text { color: var(--text-2); }
+.stage-bar .bar-acts { display: flex; gap: 8px; flex: 0 0 auto; }
+.stage-bar .btn:disabled { opacity: .35; }
 </style>
 </head>
 <body>
@@ -1035,32 +918,15 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   <aside id="stage">
     <div class="stage-glow" id="stage-glow"></div>
 
-    <div class="stage-frame" id="stage-frame" data-mode="orb">
-      <!-- Live2D：模型画在这块画布上。没有模型 / 运行时的时候退回光球，
-           光球的表情层仍然跟着 emo 事件走，两种形态共用同一套触发器。 -->
-      <div class="l2d-wrap" id="l2d-wrap">
+    <div class="stage-frame" id="stage-frame">
+      <!-- 舞台就是 Live2D：模型画在这块画布上。
+           模型或运行时不在的时候这里给一句能点的提示，不再有备用的光球。 -->
+      <div class="l2d-wrap idle" id="l2d-wrap">
         <canvas id="l2d-canvas"></canvas>
-        <div class="l2d-status" id="l2d-status"></div>
+        <button class="l2d-status" id="l2d-status">Live2D 还没就绪 · 点这里接入</button>
       </div>
-
-      <div class="orb-wrap" id="orb-wrap">
-        <div class="orb-ring"></div>
-        <div class="orb-ring r2"></div>
-        <div class="orb" id="orb" data-emo="neutral">
-          <img id="avatar" alt="" class="hidden">
-          <div class="face" id="face">
-            <div class="brow l"></div><div class="brow r"></div>
-            <div class="eye l"></div><div class="eye r"></div>
-            <div class="blush l"></div><div class="blush r"></div>
-            <div class="mouth"></div>
-          </div>
-          <div class="orb-sheen"></div>
-        </div>
-      </div>
-
       <div class="voice-bars" id="voice-bars"><i></i><i></i><i></i><i></i><i></i></div>
       <div class="stage-bubble" id="stage-bubble"></div>
-      <button class="stage-hint" id="stage-hint"></button>
     </div>
 
     <div class="stage-name" id="stage-name">—</div>
@@ -1192,7 +1058,7 @@ function toast(msg, kind = '', ms = 2600) {
 function applyAccent(color) {
   if (!color) return;
   document.documentElement.style.setProperty('--accent', color);
-  // 主色的深一档，供光球/阴影用
+  // 主色的深一档，供阴影用
   const c = color.replace('#', '');
   if (c.length === 6) {
     const n = parseInt(c, 16);
@@ -1461,11 +1327,19 @@ function paintHistory() {
 
   if (!S.history.length) {
     const w = el('div', 'welcome');
-    w.appendChild(el('div', 'hi', 'a companion, not an assistant'));
-    w.appendChild(el('div', 'say', (S.persona && S.persona.greeting) || '……在的。'));
-    w.appendChild(el('div', 'hint', S.tts.enabled
-      ? '开口说话，或者按麦克风；她会用声音回你。'
-      : '开口说话；在设置里接上语音服务，她就能读出回复。'));
+    if (!S.personas.length) {
+      // 默认空角色：欢迎页就是「建一个」
+      w.appendChild(el('div', 'hi', 'a companion, not an assistant'));
+      w.appendChild(el('div', 'say', '还没有角色。建一个，她才能住进来。'));
+      w.appendChild(el('div', 'btn-row',
+        actionBtn('创建第一个角色', () => openPersonaEditor(true), 'btn primary')));
+    } else {
+      w.appendChild(el('div', 'hi', 'a companion, not an assistant'));
+      w.appendChild(el('div', 'say', (S.persona && S.persona.greeting) || '……在的。'));
+      w.appendChild(el('div', 'hint', S.tts.enabled
+        ? '开口说话，或者按麦克风；她会用声音回你。'
+        : '开口说话；在设置里接上语音服务，她就能读出回复。'));
+    }
     stream.appendChild(w);
     pinned = true;
     return;
@@ -1577,6 +1451,7 @@ onEvent((m) => {
     case 'turn_begin':
       S.busy = true;
       paintHead();
+      paintComposer(); // 发送键变成「停止」，不然回合里没地方按
       if (m.idle) toast('她主动开口了');
       showTyping('正在想');
       break;
@@ -1612,6 +1487,7 @@ onEvent((m) => {
       S.busy = false;
       finishLive();
       paintHead();
+      paintComposer();
       break;
     }
     case 'memory':
@@ -1653,6 +1529,7 @@ async function sendCurrent() {
   const input = $('#input');
   const text = input.value.trim();
   if (!text) return;
+  if (!S.active) { toast('先创建一个角色', 'err'); openPersonaEditor(true); return; }
   if (S.busy) { toast('她还在说，先等一下'); return; }
   input.value = '';
   autoGrow();
@@ -1688,8 +1565,14 @@ function autoGrow() {
 function paintComposer() {
   const btn = $('#btn-send');
   btn.classList.toggle('stop', S.busy);
-  btn.title = S.busy ? '打断' : '发送';
-  $('#btn-mic').disabled = !S.asr.enabled;
+  btn.title = S.busy ? '停止生成（Esc 也可以）' : '发送';
+  const input = $('#input');
+  const none = !S.active;
+  input.disabled = none;
+  input.placeholder = none
+    ? '先创建一个角色…'
+    : (S.busy ? '正在回应… 点右边停止' : '说点什么…（Enter 发送，Shift+Enter 换行）');
+  $('#btn-mic').disabled = !S.asr.enabled || none;
   $('#btn-mic').title = S.asr.enabled ? '点击开始 / 结束录音' : '还没有配置语音识别服务';
   $('#btn-mic').classList.toggle('rec', S.recording);
   const hint = $('#composer-hint');
@@ -1719,7 +1602,6 @@ AUDIO.el.addEventListener('ended', () => { AUDIO.playing = false; playNext(); })
 AUDIO.el.addEventListener('error', () => { AUDIO.playing = false; playNext(); });
 
 function setSpeaking(on) {
-  $('#orb').classList.toggle('speaking', on);
   $('#voice-bars').classList.toggle('on', on);
   l2dSetSpeaking(on);
 }
@@ -1999,16 +1881,14 @@ let moodTimer = null;
 function setEmotion(name, fromVoice) {
   const emo = (name || 'neutral').toLowerCase();
   S.emotion = emo;
-  $('#orb').dataset.emo = emo;
   $('#mood-text').textContent = EMO_ZH[emo] || emo;
-  // 光球和 Live2D 是同一个情绪的两张脸：表情映射写在角色卡 live2d.emo 里
+  // 表情交给模型：映射写在角色卡 live2d.emo 里
   l2dSetEmotion(emo);
   if (!fromVoice) {
     if (moodTimer) clearTimeout(moodTimer);
     // 情绪是回合内的状态：过一会儿回到平静，但保留当前值到下一句
     moodTimer = setTimeout(() => {
       if (!AUDIO.playing) {
-        $('#orb').dataset.emo = 'neutral';
         $('#mood-text').textContent = EMO_ZH.neutral;
         l2dSetEmotion('neutral');
       }
@@ -2021,22 +1901,11 @@ function paintStage() {
   $('#stage-name').textContent = p.name || '—';
   $('#stage-sub').textContent = p.subtitle || '';
   $('#mood-text').textContent = EMO_ZH[S.emotion] || '平静';
-  $('#orb').dataset.emo = S.emotion || 'neutral';
   $('#stage-mem').textContent = `记忆 ${S.memory.length} 条`;
-  const av = $('#avatar');
-  if (p.avatar_url) {
-    av.src = p.avatar_url;
-    av.classList.remove('hidden');
-    $('#face').classList.add('hidden');
-  } else {
-    av.classList.add('hidden');
-    $('#face').classList.remove('hidden');
-  }
   const pro = $('#btn-proactive');
   pro.classList.toggle('on', !!p.proactive);
   $('#proactive-v').textContent = p.proactive ? `每 ${p.idle_minutes || 30} 分钟` : '关';
-  if (!document.querySelector('#orb').classList.contains('speaking')) setSpeaking(false);
-  // 舞台形态跟着角色卡走：配了模型就换 Live2D，没配就是光球
+  // 舞台就是 Live2D：角色卡里配了模型就加载，没配就让画布上的提示说话
   trigRefresh();
   l2dApply();
 }
@@ -2045,7 +1914,8 @@ function paintStage() {
 onEvent((m) => {
   if (m.t === 'voice') enqueueClip({ url: m.url, text: m.text, emo: m.emo });
   else if (m.t === 'voice_stop') stopAudio();
-  else if (m.t === 'voice_error') toast('语音合成失败：' + (m.d || ''), 'err', 5000);
+  else if (m.t === 'voice_error')
+    toast('语音合成失败：' + (m.d || '') + '（设置 → 语音合成 里可以改，或者直接关掉）', 'err', 6000);
   else if (m.t === 'turn_begin') {
     setEmotion('thinking', true);
   }
@@ -2090,7 +1960,10 @@ function closeDrawer() {
 $('#btn-drawer-close').onclick = closeDrawer;
 $('#scrim').onclick = closeDrawer;
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closeDrawer();
+  if (e.key !== 'Escape') return;
+  // 抽屉开着先关抽屉；没有抽屉又在回应，Esc 就是「停止生成」
+  if (!$('#drawer').classList.contains('hidden')) { closeDrawer(); return; }
+  if (S.busy) stopTurn();
 });
 
 /* ---------------- 表单小件 ---------------- */
@@ -2189,7 +2062,9 @@ function openMemory() {
 /* ---------------- 角色编辑 ---------------- */
 function openPersonaEditor(creating) {
   const p = creating ? { name: '', subtitle: '', greeting: '', user_name: '', prompt: '', accent: '#8b7cff', voice: '', proactive: false, idle_minutes: 30 } : (S.persona || {});
-  openDrawer(creating ? '新建角色' : '角色设定', 'persona', (body) => {
+  // 新建时的默认模型要扫描一次资源清单（空角色启动时舞台还没拿过）；
+  // 等扫描回来再开抽屉，表单里才填得上模型路径
+  const open = () => openDrawer(creating ? '新建角色' : '角色设定', 'persona', (body) => {
     const av = el('div', 'avatar-edit');
     const prev = el('div', 'preview');
     if (p.avatar_url) prev.innerHTML = `<img src="${esc(p.avatar_url)}">`;
@@ -2221,6 +2096,7 @@ function openPersonaEditor(creating) {
       swatches.appendChild(s);
     }
     const idle = textInput(p.idle_minutes || 30, '30', 'number');
+    const models = (L2D.scan && L2D.scan.models) || [];
     form.append(
       field('名字', name),
       field('副标题', sub),
@@ -2230,6 +2106,13 @@ function openPersonaEditor(creating) {
       field('音色（可选）', voice, '对应语音服务里的 voice 参数；例如 alloy / zh-CN-XiaoxiaoNeural。'),
       field('主题色', swatches),
     );
+    if (creating && models.length) {
+      form.appendChild(field('舞台模型', (() => {
+        const t = textInput(models[0].path, '');
+        t.disabled = true;
+        return t;
+      })(), '新角色默认用自带的这个模型；建好后在舞台面板里可以换。'));
+    }
     body.appendChild(form);
 
     const behavior = el('div', 'sect');
@@ -2252,6 +2135,11 @@ function openPersonaEditor(creating) {
         idle_minutes: Math.max(1, parseInt(idle.value || '30', 10) || 30),
       };
       const args = creating ? { patch } : { id: p.id, patch };
+      // 新角色直接挂上自带模型：建完就能在舞台上看见人
+      if (creating) {
+        const models = (L2D.scan && L2D.scan.models) || [];
+        if (models.length) patch.live2d = { model: models[0].path };
+      }
       const r = await cmd('persona.save', args);
       if (creating) await cmd('persona.select', { id: r.id });
       await refreshState();
@@ -2270,6 +2158,12 @@ function openPersonaEditor(creating) {
       body.appendChild(el('div', 'btn-row', del));
     }
   });
+
+  if (creating && !L2D.scan && !MOCK) {
+    cmd('live2d.scan').then(s => { L2D.scan = s; open(); }).catch(() => open());
+  } else {
+    open();
+  }
 }
 
 /* 头像上传 */
@@ -2363,7 +2257,6 @@ function wireGlobal() {
   $('#btn-edit-persona').onclick = () => openPersonaEditor(false);
   $('#btn-new-persona').onclick = () => openPersonaEditor(true);
   $('#btn-stage').onclick = () => openStagePanel();
-  $('#stage-hint').onclick = () => openStagePanel();
   $('#btn-proactive').onclick = async () => {
     const p = S.persona || {};
     try {
@@ -2537,7 +2430,10 @@ function modelSection() {
 function serviceSection(which, svc) {
   const isTts = which === 'tts';
   const sect = el('div', 'sect');
-  sect.appendChild(el('div', 'sect-h', isTts ? '语音合成（TTS）' : '语音识别（ASR）'));
+  const head = el('div', 'sect-h', isTts ? '语音合成（TTS）' : '语音识别（ASR）');
+  const on = (svc.kind || 'off') !== 'off';
+  head.appendChild(el('span', 'badge' + (on ? ' ok' : ''), on ? '已开启' : '未开启'));
+  sect.appendChild(head);
 
   const state = Object.assign({}, svc);
   const kinds = isTts
@@ -2589,24 +2485,32 @@ function serviceSection(which, svc) {
         field('超时（秒）', mk('timeout_s', '60', 'number')),
       );
     }
+    if (state.kind === 'off') {
+      const empty = el('div', 'empty', isTts
+        ? '未开启。语音合成是可选的 —— 不配置也能正常聊天，回复只显示文字。需要时在上面选一种接法，填好点「保存」。'
+        : '未开启。语音识别是可选的 —— 不配置也能正常打字聊天。需要时在上面选一种接法，填好点「保存」。');
+      empty.style.lineHeight = '1.7';
+      fields.appendChild(empty);
+    }
+    if (!isTts) fields.appendChild(el('div', 'tip',
+      '麦克风由页面直接采集（getUserMedia + MediaRecorder），录音不经过宿主；'
+      + '窗口只对 127.0.0.1 的页面放行麦克风权限。'));
+    // 保存键一直在：关掉服务也要能存下来（否则「关闭」这个选择没法生效）
+    const row = el('div', 'btn-row');
+    row.appendChild(actionBtn('保存', async () => {
+      await cmd('service.set', { name: which, patch: state });
+      await refreshState();
+      toast(state.kind === 'off' ? '已关闭' : '已保存', 'ok');
+    }, 'btn primary'));
     if (state.kind !== 'off') {
-      if (!isTts) fields.appendChild(el('div', 'tip',
-        '麦克风由页面直接采集（getUserMedia + MediaRecorder），录音不经过宿主；'
-        + '窗口只对 127.0.0.1 的页面放行麦克风权限。'));
-      const row = el('div', 'btn-row');
-      row.appendChild(actionBtn('保存', async () => {
-        await cmd('service.set', { name: which, patch: state });
-        await refreshState();
-        toast('已保存', 'ok');
-      }, 'btn primary'));
       row.appendChild(actionBtn('试一下', async () => {
         const r = await cmd('service.test', { name: which });
         if (isTts) { enqueueClip({ url: r.url }); toast('正在播放测试音频', 'ok'); }
         else toast('识别结果：' + (r.text || ''), 'ok', 5000);
       }, 'btn'));
       if (!isTts) row.appendChild(actionBtn('上传音频转写', () => { closeDrawer(); pickAudio(); }, 'btn ghost'));
-      fields.appendChild(row);
     }
+    fields.appendChild(row);
     return fields;
   };
   function mk(key, ph, type) {
@@ -2638,7 +2542,9 @@ function serviceSection(which, svc) {
 function prefSection() {
   const sect = el('div', 'sect');
   sect.appendChild(el('div', 'sect-h', '偏好'));
-  sect.appendChild(switchRow('自动朗读回复', '关掉后仍然可以点消息下面的「重播」。', S.voice_reply, async (on) => {
+  sect.appendChild(switchRow('自动朗读回复',
+    S.tts.enabled ? '关掉后仍然可以点消息下面的「重播」。' : '语音合成还没开启，这一项现在不起作用。',
+    S.voice_reply, async (on) => {
     const r = await cmd('ui.pref', { voice_reply: on });
     S.voice_reply = r.voice_reply;
     if (!on) stopAudio();
@@ -2761,7 +2667,7 @@ onEvent((m) => {
    3. 演出：动作、表情、参数、口型。表情与动作的对应关系是数据（live2d.emo），
       不是代码 —— 换模型不用改 JS。
 
-   没有模型时整个舞台退回光球，情绪 / 动作 / 触发器照常工作。
+   没有模型时画布上给一句能点的提示，情绪 / 动作 / 触发器照常工作。
    ===================================================================== */
 
 const L2D = {
@@ -2806,27 +2712,18 @@ function l2dCfg() {
   return c && typeof c === 'object' ? c : {};
 }
 
+const L2D_KINDS = ['idle', 'loading', 'ready', 'error'];
+
 function l2dSetStatus(kind, text) {
   const wrap = $('#l2d-wrap');
   const st = $('#l2d-status');
-  wrap.classList.toggle('loading', kind === 'loading');
-  wrap.classList.toggle('error', kind === 'error');
-  wrap.classList.toggle('ready', kind === 'ready');
-  if (st) st.textContent = text || '';
-  const hint = $('#stage-hint');
-  if (hint && kind !== 'ready') hint.textContent = text || 'Live2D 未接入 · 点这里接入';
+  for (const k of L2D_KINDS) wrap.classList.toggle(k, k === kind);
+  L2D.mode = kind === 'ready' ? 'l2d' : 'empty';
+  if (st) st.textContent = kind === 'ready' ? '' : (text || '');
 }
 
-function l2dSetMode(mode) {
-  L2D.mode = mode;
-  $('#stage-frame').dataset.mode = mode;
-  if (mode === 'l2d') {
-    $('#stage-hint').textContent = '';
-    $('#stage-hint').classList.add('hidden');
-  } else {
-    $('#stage-hint').classList.remove('hidden');
-  }
-}
+// 画布上的提示本身就是入口：没模型 / 没运行时，点一下打开舞台面板
+$('#l2d-status').onclick = () => openStagePanel();
 
 /* ---------------- 运行时 ---------------- */
 function loadScript(url) {
@@ -2849,7 +2746,7 @@ async function l2dLoadRuntime() {
   } else {
     const scripts = (L2D.scan && L2D.scan.runtime && L2D.scan.runtime.scripts) || [];
     if (!scripts.length || (L2D.scan.runtime && !L2D.scan.runtime.ok))
-      throw new Error('运行时库不全：把 Cubism Core 等放进 .agent/live2d/runtime/');
+      throw new Error('运行时核心没装：在舞台面板里点「下载运行时」');
     list = scripts.filter(s => s.ok !== false).map(s => '/api/live2d/runtime/' + encodeURIComponent(s.name));
     from = 'local';
   }
@@ -2907,34 +2804,66 @@ function l2dDestroy() {
   }
 }
 
-async function l2dMount(force) {
-  if (L2D._loading && !force) return L2D._loading;
-  const job = l2dMountInner(force);
-  L2D._loading = job;
-  try {
-    return await job;
-  } finally {
-    // 只有自己那一份还挂着时才清；换模型时可能已经换成新的加载了
-    if (L2D._loading === job) L2D._loading = null;
-  }
+/* ---------------- 加载调度 ----------------
+   一个模型只装一次：paintStage 会被状态广播反复调到，如果每次都从
+   Live2DModel.from 走一遍，就会看到模型反复重建（掉帧、网络里重复请求）。
+   这里把加载排成一条队：
+   - 已经在装的模型，重复请求直接拿同一个 Promise；
+   - 排队期间换了模型，旧的那次开跑时自己退出；
+   - token 作废更早的请求，同一个模型不会被装两遍。 */
+L2D._chain = Promise.resolve();
+L2D._pending = null;
+L2D._token = 0;
+L2D._failedPath = '';
+
+function l2dSerialize(job) {
+  const run = L2D._chain.then(job, job);
+  L2D._chain = run.then(() => { }, () => { });
+  return run;
 }
 
-async function l2dMountInner(force) {
+function l2dApply(force) {
+  const cfg = l2dCfg();
+  const path = (cfg.model || '').trim();
+  L2D.cfg = cfg;
+  if (!force) {
+    if (L2D.status === 'ready' && L2D.model && L2D._path === path) { l2dFit(); return Promise.resolve(); }
+    if (L2D._pending && L2D._path === path) return L2D._pending;   // 同一个模型正在装
+    if (L2D.status === 'error' && L2D._failedPath === path) return Promise.resolve(); // 失败过别自动重试
+  }
+  L2D._path = path;
+  const token = ++L2D._token;
+  const job = l2dSerialize(() => l2dMountInner(path, token));
+  const tracked = job.then(
+    (r) => { if (L2D._pending === tracked) L2D._pending = null; return r; },
+    (e) => { if (L2D._pending === tracked) L2D._pending = null; throw e; });
+  L2D._pending = tracked;
+  return tracked;
+}
+
+async function l2dMountInner(path, token) {
+  if (token !== L2D._token) return;                      // 被后来的请求取代了
+  if (path !== (l2dCfg().model || '').trim()) return;     // 排队期间换了模型
+  // 先拿一次资源清单：面板的模型列表和「新建角色」里的默认模型都靠它，
+  // 就算当前角色没有模型也要拿
+  if (!L2D.scan && !MOCK) {
+    try { L2D.scan = await cmd('live2d.scan'); } catch { }
+    if (token !== L2D._token) return;
+  }
   const cfg = l2dCfg();
   L2D.cfg = cfg;
-  const path = (cfg.model || '').trim();
-  if (MOCK) { l2dSetStatus('error', '演示模式没有后端，接不上模型'); l2dSetMode('orb'); return; }
+  if (MOCK) { l2dSetStatus('error', '演示模式没有后端，接不上模型'); return; }
   if (!path) {
     l2dDestroy();
     L2D.status = 'idle';
-    l2dSetStatus('idle', 'Live2D 未接入 · 点这里接入');
-    l2dSetMode('orb');
+    L2D._failedPath = '';
+    l2dSetStatus('idle', '还没有选模型 · 点这里接入');
     return;
   }
   try {
     l2dSetStatus('loading', '加载运行时…');
-    if (L2D.mode !== 'l2d') l2dSetMode('l2d');
     await l2dLoadRuntime();
+    if (token !== L2D._token) return;
     l2dSetStatus('loading', '加载模型…');
     l2dDestroy();
     L2D.canvas = $('#l2d-canvas');
@@ -2949,12 +2878,13 @@ async function l2dMountInner(force) {
       resolution: Math.min(2, window.devicePixelRatio || 1),
     });
     const model = await PIXI.live2d.Live2DModel.from(l2dModelUrl(path), { autoInteract: true });
+    if (token !== L2D._token) { try { model.destroy(); } catch { } return; }
     L2D.model = model;
     L2D.app.stage.addChild(model);
     l2dCollectInfo();
     l2dFit();
     L2D.status = 'ready';
-    l2dSetMode('l2d');
+    L2D._failedPath = '';
     l2dSetStatus('ready', '');
     l2dBindPointer();
     l2dStartTicker();
@@ -2968,7 +2898,7 @@ async function l2dMountInner(force) {
   } catch (e) {
     console.warn('live2d mount failed:', e);
     L2D.status = 'error';
-    l2dSetMode('orb');
+    L2D._failedPath = path;
     l2dSetStatus('error', '模型没起来：' + (e && e.message ? e.message : e));
   }
 }
@@ -3056,6 +2986,13 @@ function l2dSetSpeaking(on) {
   L2D.speaking = !!on;
 }
 
+/* 面板里拖缩放 / 偏移时先看效果，点「保存并生效」才写进角色卡 */
+function l2dPreview(patch) {
+  if (L2D.status !== 'ready' || !L2D.model) return;
+  L2D.cfg = Object.assign({}, L2D.cfg, patch);
+  l2dFit();
+}
+
 function l2dStartTicker() {
   const app = L2D.app;
   if (!app || app.__l2dTick) return;
@@ -3137,27 +3074,12 @@ function l2dScheduleResize() {
 window.addEventListener('resize', l2dScheduleResize);
 
 /* ---------------- 入口 ---------------- */
-async function l2dApply(force) {
-  const cfg = l2dCfg();
-  const path = (cfg.model || '').trim();
-  // 同一个模型不重复加载；换角色 / 换模型才重建
-  if (!force && L2D.status === 'ready' && L2D.model && L2D._path === path) {
-    L2D.cfg = cfg;
-    l2dFit();
-    return;
-  }
-  L2D._path = path;
-  if (!L2D.scan && !MOCK) {
-    try { L2D.scan = await cmd('live2d.scan'); } catch { }
-  }
-  await l2dMount(force);
-}
-
 async function l2dReload() {
-  l2dDestroy();
+  // 不在这里同步 destroy：真正的销毁在队列里做，避免和正在跑的加载抢画布
   L2D.status = 'idle';
+  L2D._failedPath = '';
   L2D._path = '';
-  await l2dApply(true);
+  return l2dApply(true);
 }
 
 function l2dUseCdn(on) {
@@ -3344,7 +3266,7 @@ async function trigAct(act, ctx, state) {
       if (!state.sent) { state.sent = true; await stageSend('[[idle]]', { hidden: true }); }
       break;
     case 'emo':
-      // 走一遍正常链路，光球 / 语音音色也跟着变；深度护栏防止自激
+      // 走一遍正常链路：语气徽标 / 语音音色 / 映射表情；深度护栏防止自激
       if (TRIG.depth < 3) {
         TRIG.depth += 1;
         try { setEmotion(act.name || 'neutral'); } finally { TRIG.depth -= 1; }
@@ -3477,6 +3399,8 @@ let STAGE_VIEW = { kind: 'list' };
 
 function openStagePanel() {
   STAGE_VIEW = { kind: 'list' };
+  STAGE_DRAFT = null;   // 每次打开都从角色卡重新读一份草稿
+  STAGE_BAR = null;
   openDrawer('舞台', 'stage', (body) => buildStagePanel(body));
 }
 
@@ -3494,16 +3418,132 @@ function buildStagePanel(body) {
   body.appendChild(stageModelSection());
   body.appendChild(stageEmoSection());
   body.appendChild(stageTriggerSection());
+  body.appendChild(stageSaveBar());
+}
+
+/* ---------------- 草稿：改了不算数，点了保存才生效 ----------------
+   面板会被状态广播重建（换角色、回合结束、自动回报动作组），所以改动放在
+   一份独立的草稿里，重建时不会丢；保存 = 一次 persona.save。 */
+let STAGE_DRAFT = null;
+let STAGE_BAR = null;
+
+function stageDraft() {
+  if (STAGE_DRAFT) return STAGE_DRAFT;
+  const cfg = l2dCfg();
+  const src = cfg.emo && typeof cfg.emo === 'object' ? cfg.emo : {};
+  const emo = {};
+  for (const k of Object.keys(src)) {
+    const one = src[k] || {};
+    emo[k] = {
+      expr: one.expr == null ? '' : String(one.expr),
+      motion: Array.isArray(one.motion) ? String(one.motion[0] || '') : String(one.motion || ''),
+    };
+  }
+  STAGE_DRAFT = {
+    model: cfg.model || '',
+    scale: cfg.scale == null ? 1 : cfg.scale,
+    x: cfg.x || 0,
+    y: cfg.y || 0,
+    emo,
+  };
+  return STAGE_DRAFT;
+}
+
+/* 归一化后再比：草稿里是字符串，角色卡里可能是数字，键序也可能不同 */
+function stageNorm(v) {
+  const src = (v && v.emo && typeof v.emo === 'object') ? v.emo : {};
+  const emo = {};
+  for (const k of Object.keys(src).sort()) {
+    const one = src[k] || {};
+    const expr = one.expr == null ? '' : String(one.expr);
+    const motion = Array.isArray(one.motion) ? String(one.motion[0] || '') : String(one.motion || '');
+    if (expr === '' && motion === '') continue;
+    emo[k] = { expr, motion };
+  }
+  return JSON.stringify({
+    model: String((v && v.model) || '').trim(),
+    scale: Number(v && v.scale != null ? v.scale : 1),
+    x: Number((v && v.x) || 0),
+    y: Number((v && v.y) || 0),
+    emo,
+  });
+}
+
+function stageDirty() {
+  return stageNorm(stageDraft()) !== stageNorm(l2dCfg());
+}
+
+function stageSyncBar() {
+  if (!STAGE_BAR) return;
+  const dirty = stageDirty();
+  STAGE_BAR.bar.classList.toggle('dirty', dirty);
+  STAGE_BAR.text.textContent = dirty ? '有未保存的改动' : '已与角色卡一致';
+  STAGE_BAR.save.disabled = !dirty;
+  STAGE_BAR.undo.disabled = !dirty;
+}
+
+function stageRevert() {
+  STAGE_DRAFT = null;
+  const cfg = l2dCfg();
+  l2dPreview({ scale: cfg.scale == null ? 1 : cfg.scale, x: cfg.x || 0, y: cfg.y || 0 });
+  buildDrawer();
+}
+
+async function stageCommit() {
+  const p = S.persona || {};
+  if (!p.id) { toast('还没有打开角色', 'err'); return; }
+  const d = stageDraft();
+  const cur = l2dCfg();
+  const emo = {};
+  for (const k of Object.keys(d.emo)) {
+    const one = d.emo[k] || {};
+    const e = {};
+    if (one.expr !== '' && one.expr != null) e.expr = /^\d+$/.test(String(one.expr)) ? Number(one.expr) : one.expr;
+    if (one.motion) e.motion = one.motion;
+    if (Object.keys(e).length) emo[k] = e;
+  }
+  const next = Object.assign({}, cur, {
+    model: String(d.model || '').trim(),
+    scale: Number(d.scale) || 1,
+    x: Number(d.x) || 0,
+    y: Number(d.y) || 0,
+    emo,
+  });
+  const modelChanged = String(cur.model || '').trim() !== next.model;
+  await cmd('persona.save', { id: p.id, patch: { live2d: next } });
+  S.persona.live2d = next;
+  L2D.cfg = next;
+  STAGE_DRAFT = null;
+  if (modelChanged) await l2dReload();
+  else l2dPreview({ scale: next.scale, x: next.x, y: next.y });
+  toast('舞台设置已保存', 'ok');
+  buildDrawer();
+}
+
+function stageSaveBar() {
+  const bar = el('div', 'stage-bar');
+  const info = el('div', 'bar-text');
+  const dot = el('span', 'bar-dot');
+  const text = el('span', null, '已与角色卡一致');
+  info.append(dot, text);
+  const acts = el('div', 'bar-acts');
+  const undo = actionBtn('撤销', () => stageRevert(), 'btn sm ghost');
+  const save = actionBtn('保存并生效', () => stageCommit(), 'btn primary sm');
+  acts.append(undo, save);
+  bar.append(info, acts);
+  STAGE_BAR = { bar, text, save, undo };
+  stageSyncBar();
+  return bar;
 }
 
 /* ---------------- 状态 ---------------- */
 function stageStatusSection() {
   const s = el('div', 'sect');
-  s.appendChild(el('div', 'sect-h', '舞台形态'));
+  s.appendChild(el('div', 'sect-h', '舞台'));
 
   const card = el('div', 'card' + (L2D.status === 'ready' ? ' on' : ''));
   const top = el('div', 'card-top');
-  const title = L2D.status === 'ready' ? 'Live2D' : (L2D.status === 'loading' ? 'Live2D · 加载中' : '光球');
+  const title = L2D.status === 'ready' ? 'Live2D' : (L2D.status === 'loading' ? 'Live2D · 加载中' : 'Live2D · 未就绪');
   top.appendChild(el('div', 'card-name', title));
   const badge = el('span', 'badge ' + (L2D.status === 'ready' ? 'ok' : (L2D.status === 'error' ? 'warn' : '')),
     L2D.status === 'ready' ? '运行中' : (L2D.status === 'error' ? '出错' : '待接入'));
@@ -3513,20 +3553,32 @@ function stageStatusSection() {
   const model = (l2dCfg().model || '').trim();
   const sub = el('div', 'card-sub');
   if (model) sub.textContent = model;
-  else sub.textContent = '还没有选模型。把模型目录放进 .agent/live2d/models/，然后在上面的列表里选一个。';
+  else sub.textContent = '还没有选模型。自带模型已经解到 .agent/live2d/models/，在下面选一个。';
   card.appendChild(sub);
 
+  const rtState = L2D.scan && L2D.scan.runtime;
+  const rtMissing = !rtState || !rtState.ok;
   const rt = el('div', 'card-sub');
   if (L2D.status === 'ready') {
     rt.textContent = `运行时：${L2D.runtimeFrom === 'cdn' ? 'CDN' : '本地'} · 动作组 ${L2D.groups.length} 个 · 表情 ${L2D.expressions.length} 个`;
   } else {
-    const r = L2D.scan && L2D.scan.runtime;
-    rt.textContent = r && r.ok ? '运行时：本地已就绪' : '运行时：缺失（' + ((r && r.missing) || []).join(', ') + '）';
+    rt.textContent = rtMissing
+      ? '运行时核心：未安装（Cubism Core 不随程序分发，点下面的「下载运行时」取回本地）'
+      : '运行时核心：已就绪';
   }
   card.appendChild(rt);
   s.appendChild(card);
 
   const row = el('div', 'btn-row');
+  if (rtMissing) {
+    row.appendChild(actionBtn('下载运行时', async () => {
+      const r = await cmd('live2d.fetch_runtime');
+      L2D.scan = r.scan || L2D.scan;
+      toast(`已下载 ${(r.downloaded || []).length} 个文件`, 'ok');
+      await l2dReload();
+      buildDrawer();
+    }, 'btn primary sm'));
+  }
   row.appendChild(actionBtn('重新加载', async () => { await l2dReload(); buildDrawer(); }, 'btn sm'));
   row.appendChild(actionBtn('扫描资源', async () => {
     L2D.scan = await cmd('live2d.scan');
@@ -3539,7 +3591,9 @@ function stageStatusSection() {
   const cdnRow = el('div', 'switch-row');
   const left = el('div');
   left.appendChild(el('div', 'k', '运行时走 CDN'));
-  left.appendChild(el('div', 'd', '本地没有放 Cubism Core 时，从 unpkg 现取（要联网）。'));
+  left.appendChild(el('div', 'd', rtMissing
+    ? '不想下载也行：直接从 unpkg 现取（每次启动都要联网）。'
+    : '本地已经有运行时了，一般不用开。'));
   const sw = el('button', 'switch' + (localStorage.getItem('agent.l2d.cdn') === '1' ? ' on' : ''));
   sw.onclick = () => {
     const on = !sw.classList.contains('on');
@@ -3561,7 +3615,7 @@ function stageStatusSection() {
 function stageModelSection() {
   const s = el('div', 'sect');
   s.appendChild(el('div', 'sect-h', '模型'));
-  const cfg = l2dCfg();
+  const d = stageDraft();
   const models = (L2D.scan && L2D.scan.models) || [];
 
   const sel = document.createElement('select');
@@ -3573,48 +3627,46 @@ function stageModelSection() {
     const o = document.createElement('option');
     o.value = m.path;
     o.textContent = m.name + '  ·  ' + m.dir;
-    if (m.path === cfg.model) o.selected = true;
+    if (m.path === d.model) o.selected = true;
     sel.appendChild(o);
   }
-  s.appendChild(field('扫描到的模型', sel, '选完点下面的「保存」；也可以直接手填路径。'));
+  s.appendChild(field('扫描到的模型', sel, '选完记得点最下面的「保存并生效」。'));
 
-  const path = textInput(cfg.model || '', 'models/hiyori/hiyori.model3.json');
-  s.appendChild(field('模型路径', path, '相对 .agent/live2d/ 的路径，区分大小写。'));
+  const path = textInput(d.model || '', 'models/hiyori/hiyori.model3.json');
+  s.appendChild(field('模型路径', path, '相对 .agent/live2d/ 的路径，区分大小写；留空 = 舞台留白。'));
 
-  const scale = textInput(cfg.scale == null ? 1 : cfg.scale, '1', 'number');
-  const ox = textInput(cfg.x == null ? 0 : cfg.x, '0', 'number');
-  const oy = textInput(cfg.y == null ? 0 : cfg.y, '0', 'number');
+  const scale = textInput(d.scale, '1', 'number');
+  const ox = textInput(d.x, '0', 'number');
+  const oy = textInput(d.y, '0', 'number');
   const row = el('div', 'row');
   row.append(field('缩放', scale), field('水平偏移', ox));
   s.appendChild(row);
-  s.appendChild(field('垂直偏移', oy, '缩放 1 = 尽量填满画布；偏移是画布宽/高的比例（0.1 = 10%）。'));
+  s.appendChild(field('垂直偏移', oy, '缩放 1 = 尽量填满画布；偏移是画布宽/高的比例（0.1 = 10%）。拖动即时预览。'));
 
-  sel.onchange = () => { if (sel.value) path.value = sel.value; };
+  sel.onchange = () => {
+    if (!sel.value) return;
+    path.value = sel.value;
+    d.model = sel.value;
+    stageSyncBar();
+  };
+  path.oninput = () => { d.model = path.value; stageSyncBar(); };
+  const bindNum = (input, key) => {
+    input.oninput = () => {
+      d[key] = Number(input.value) || 0;
+      l2dPreview({ [key]: d[key] });
+      stageSyncBar();
+    };
+  };
+  bindNum(scale, 'scale');
+  bindNum(ox, 'x');
+  bindNum(oy, 'y');
 
   s.appendChild(el('div', 'btn-row',
-    actionBtn('保存并加载', async () => {
-      const next = Object.assign({}, cfg, {
-        model: path.value.trim(),
-        scale: Number(scale.value) || 1,
-        x: Number(ox.value) || 0,
-        y: Number(oy.value) || 0,
-      });
-      await cmd('persona.save', { id: (S.persona || {}).id, patch: { live2d: next } });
-      S.persona.live2d = next;
-      L2D.cfg = next;
-      L2D._path = '';
-      await l2dReload();
-      toast(next.model ? '模型已加载' : '已切回光球', 'ok');
-      buildDrawer();
-    }, 'btn primary sm'),
-    actionBtn('切回光球', async () => {
-      const next = Object.assign({}, cfg, { model: '' });
-      await cmd('persona.save', { id: (S.persona || {}).id, patch: { live2d: next } });
-      S.persona.live2d = next;
-      L2D.cfg = next;
-      L2D._path = '';
-      await l2dReload();
-      buildDrawer();
+    actionBtn('清空模型（舞台留白）', () => {
+      d.model = '';
+      path.value = '';
+      sel.value = '';
+      stageSyncBar();
     }, 'btn sm ghost')
   ));
   return s;
@@ -3624,15 +3676,18 @@ function stageModelSection() {
 function stageEmoSection() {
   const s = el('div', 'sect');
   s.appendChild(el('div', 'sect-h', '情绪 → 表情 / 动作'));
-  const cfg = l2dCfg();
-  const table = cfg.emo && typeof cfg.emo === 'object' ? cfg.emo : trigClone(L2D_EMO_DEFAULT);
+  const d = stageDraft();
   const exprs = L2D.expressions || [];
   const groups = L2D.groups || [];
 
-  const draft = {};
+  const touch = (name) => {
+    if (!d.emo[name]) d.emo[name] = { expr: '', motion: '' };
+    if (!d.emo[name].expr && !d.emo[name].motion) delete d.emo[name];
+    stageSyncBar();
+  };
+
   for (const name of Object.keys(EMO_ZH)) {
-    const cur = table[name] || {};
-    draft[name] = { expr: cur.expr == null ? '' : String(cur.expr), motion: Array.isArray(cur.motion) ? cur.motion[0] : (cur.motion || '') };
+    const cur = d.emo[name] || { expr: '', motion: '' };
     const row = el('div', 'map-row');
     row.appendChild(el('span', 'map-k', EMO_ZH[name]));
 
@@ -3645,11 +3700,15 @@ function stageEmoSection() {
       const o = document.createElement('option');
       o.value = String(i);
       o.textContent = '表情：' + n;
-      if (String(draft[name].expr) === String(i) || String(draft[name].expr) === n) o.selected = true;
+      if (String(cur.expr) === String(i) || String(cur.expr) === n) o.selected = true;
       exprSel.appendChild(o);
     });
     if (!exprs.length) exprSel.disabled = true;
-    exprSel.onchange = () => { draft[name].expr = exprSel.value; };
+    exprSel.onchange = () => {
+      if (!d.emo[name]) d.emo[name] = { expr: '', motion: '' };
+      d.emo[name].expr = exprSel.value;
+      touch(name);
+    };
 
     const moSel = document.createElement('select');
     const m0 = document.createElement('option');
@@ -3660,31 +3719,22 @@ function stageEmoSection() {
       const o = document.createElement('option');
       o.value = g;
       o.textContent = '动作：' + g;
-      if (g === draft[name].motion) o.selected = true;
+      if (g === cur.motion) o.selected = true;
       moSel.appendChild(o);
     }
-    moSel.onchange = () => { draft[name].motion = moSel.value; };
+    if (!groups.length) moSel.disabled = true;
+    moSel.onchange = () => {
+      if (!d.emo[name]) d.emo[name] = { expr: '', motion: '' };
+      d.emo[name].motion = moSel.value;
+      touch(name);
+    };
 
     row.append(exprSel, moSel);
     s.appendChild(row);
   }
 
   s.appendChild(el('div', 'btn-row',
-    actionBtn('保存映射', async () => {
-      const emo = {};
-      for (const k of Object.keys(draft)) {
-        const one = {};
-        if (draft[k].expr !== '') one.expr = /^\d+$/.test(draft[k].expr) ? Number(draft[k].expr) : draft[k].expr;
-        if (draft[k].motion) one.motion = draft[k].motion;
-        if (Object.keys(one).length) emo[k] = one;
-      }
-      const next = Object.assign({}, cfg, { emo });
-      await cmd('persona.save', { id: (S.persona || {}).id, patch: { live2d: next } });
-      S.persona.live2d = next;
-      L2D.cfg = next;
-      toast('映射已保存', 'ok');
-    }, 'btn primary sm'),
-    actionBtn('逐个试', async () => {
+    actionBtn('逐个试一遍', async () => {
       for (const k of Object.keys(EMO_ZH)) {
         setEmotion(k, true);
         await new Promise(r => setTimeout(r, 900));

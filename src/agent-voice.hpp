@@ -270,6 +270,44 @@ namespace app::voice
     } // namespace detail
 
     // ---------------------------------------------------------------------
+    //  通用下载（舞台运行时：Cubism Core 之类不随 exe 分发，由用户点一下取回）
+    // ---------------------------------------------------------------------
+    inline bool fetch(const std::string &url, std::string &out, std::string &err)
+    {
+        err.clear();
+        out.clear();
+        service svc;          // 只借它的超时 / 代理 / CA 设置
+        svc.timeout_s = 180;
+        CURL *c = curl_easy_init();
+        if (!c)
+        {
+            err = "curl 初始化失败";
+            return false;
+        }
+        detail::base_opts(c, svc, &out);
+        curl_easy_setopt(c, CURLOPT_URL, url.c_str());
+        CURLcode rc = curl_easy_perform(c);
+        reply r = detail::finish(c, reply{});
+        curl_easy_cleanup(c);
+        if (rc != CURLE_OK)
+        {
+            err = std::string("下载失败：") + curl_easy_strerror(rc);
+            return false;
+        }
+        if (!r.ok)
+        {
+            err = r.err.empty() ? std::format("HTTP {}", r.status) : r.err;
+            return false;
+        }
+        if (out.empty())
+        {
+            err = "下载到空文件";
+            return false;
+        }
+        return true;
+    }
+
+    // ---------------------------------------------------------------------
     //  TTS
     // ---------------------------------------------------------------------
     // 把 text 合成到 out（扩展名由调用方按 format 给好）。失败时 err 有话说。

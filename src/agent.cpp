@@ -6,6 +6,10 @@
 //   agent.exe --ui FILE          从磁盘读页面（改完刷新，不用重编译）
 //   agent.exe --smoke            冒烟：窗口 → 页面 → 第一条 state 命令
 //   agent.exe --smoke-engine     冒烟：再加一次完整回合（无模型时的错误路径）
+//   agent.exe --debug            开发模式：空数据根时自动生成一个测试角色
+//
+// 默认是「空角色」：第一次打开没有角色卡，用户自己建一个；
+// --debug（以及两个冒烟模式）会在空数据根里生成一个测试角色，方便调界面。
 //
 // 结构与 cell-app 一致：
 //   cell.cpp（单文件智能体内核，main 改名后整份编进来）
@@ -243,6 +247,7 @@ namespace app
         printf("  --serve [PORT]    同时在本机暴露界面与 API（默认 8899）\n");
         printf("  --headless [PORT] 只起服务，不开窗口\n");
         printf("  --ui FILE         从磁盘读界面（开发模式：改完刷新，不重编译）\n");
+        printf("  --debug           开发模式：空数据根时自动生成一个测试角色\n");
         printf("  --help            显示帮助\n\n");
         printf("冒烟测试（独立数据根，自动退出）：\n");
         printf("  --smoke           窗口 → 页面 → 第一条 state 命令\n");
@@ -258,6 +263,7 @@ namespace app
         int smoke = 0;
         int serve_port = 0;
         bool headless = false;
+        bool debug_mode = false;
         for (int i = 1; i < argc; i++)
         {
             std::string a = argv[i];
@@ -296,6 +302,8 @@ namespace app
                 smoke = 1;
             else if (a == "--smoke-engine")
                 smoke = 2;
+            else if (a == "--debug")
+                debug_mode = true;
             else if (a == "--help" || a == "-h")
             {
                 print_usage();
@@ -353,6 +361,11 @@ namespace app
         cell::box::sandbox_mode() = cell::box::SandboxMode::ReadOnly;
         cell::box::autoallow_enabled() = false;
         cell::sys::pool_max_setting() = 4;
+
+        // 默认空角色：只有开发模式（--debug / --smoke*）才自动生成测试角色
+        core.debug_seed = debug_mode || smoke != 0;
+        if (core.debug_seed)
+            log.info("app", "debug mode: an empty data root gets a test persona");
 
         core.start();
         if (core.active.empty())

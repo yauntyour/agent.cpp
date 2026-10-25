@@ -10,7 +10,6 @@ AUDIO.el.addEventListener('ended', () => { AUDIO.playing = false; playNext(); })
 AUDIO.el.addEventListener('error', () => { AUDIO.playing = false; playNext(); });
 
 function setSpeaking(on) {
-  $('#orb').classList.toggle('speaking', on);
   $('#voice-bars').classList.toggle('on', on);
   l2dSetSpeaking(on);
 }
@@ -290,16 +289,14 @@ let moodTimer = null;
 function setEmotion(name, fromVoice) {
   const emo = (name || 'neutral').toLowerCase();
   S.emotion = emo;
-  $('#orb').dataset.emo = emo;
   $('#mood-text').textContent = EMO_ZH[emo] || emo;
-  // 光球和 Live2D 是同一个情绪的两张脸：表情映射写在角色卡 live2d.emo 里
+  // 表情交给模型：映射写在角色卡 live2d.emo 里
   l2dSetEmotion(emo);
   if (!fromVoice) {
     if (moodTimer) clearTimeout(moodTimer);
     // 情绪是回合内的状态：过一会儿回到平静，但保留当前值到下一句
     moodTimer = setTimeout(() => {
       if (!AUDIO.playing) {
-        $('#orb').dataset.emo = 'neutral';
         $('#mood-text').textContent = EMO_ZH.neutral;
         l2dSetEmotion('neutral');
       }
@@ -312,22 +309,11 @@ function paintStage() {
   $('#stage-name').textContent = p.name || '—';
   $('#stage-sub').textContent = p.subtitle || '';
   $('#mood-text').textContent = EMO_ZH[S.emotion] || '平静';
-  $('#orb').dataset.emo = S.emotion || 'neutral';
   $('#stage-mem').textContent = `记忆 ${S.memory.length} 条`;
-  const av = $('#avatar');
-  if (p.avatar_url) {
-    av.src = p.avatar_url;
-    av.classList.remove('hidden');
-    $('#face').classList.add('hidden');
-  } else {
-    av.classList.add('hidden');
-    $('#face').classList.remove('hidden');
-  }
   const pro = $('#btn-proactive');
   pro.classList.toggle('on', !!p.proactive);
   $('#proactive-v').textContent = p.proactive ? `每 ${p.idle_minutes || 30} 分钟` : '关';
-  if (!document.querySelector('#orb').classList.contains('speaking')) setSpeaking(false);
-  // 舞台形态跟着角色卡走：配了模型就换 Live2D，没配就是光球
+  // 舞台就是 Live2D：角色卡里配了模型就加载，没配就让画布上的提示说话
   trigRefresh();
   l2dApply();
 }
@@ -336,7 +322,8 @@ function paintStage() {
 onEvent((m) => {
   if (m.t === 'voice') enqueueClip({ url: m.url, text: m.text, emo: m.emo });
   else if (m.t === 'voice_stop') stopAudio();
-  else if (m.t === 'voice_error') toast('语音合成失败：' + (m.d || ''), 'err', 5000);
+  else if (m.t === 'voice_error')
+    toast('语音合成失败：' + (m.d || '') + '（设置 → 语音合成 里可以改，或者直接关掉）', 'err', 6000);
   else if (m.t === 'turn_begin') {
     setEmotion('thinking', true);
   }

@@ -74,11 +74,19 @@ function paintHistory() {
 
   if (!S.history.length) {
     const w = el('div', 'welcome');
-    w.appendChild(el('div', 'hi', 'a companion, not an assistant'));
-    w.appendChild(el('div', 'say', (S.persona && S.persona.greeting) || '……在的。'));
-    w.appendChild(el('div', 'hint', S.tts.enabled
-      ? '开口说话，或者按麦克风；她会用声音回你。'
-      : '开口说话；在设置里接上语音服务，她就能读出回复。'));
+    if (!S.personas.length) {
+      // 默认空角色：欢迎页就是「建一个」
+      w.appendChild(el('div', 'hi', 'a companion, not an assistant'));
+      w.appendChild(el('div', 'say', '还没有角色。建一个，她才能住进来。'));
+      w.appendChild(el('div', 'btn-row',
+        actionBtn('创建第一个角色', () => openPersonaEditor(true), 'btn primary')));
+    } else {
+      w.appendChild(el('div', 'hi', 'a companion, not an assistant'));
+      w.appendChild(el('div', 'say', (S.persona && S.persona.greeting) || '……在的。'));
+      w.appendChild(el('div', 'hint', S.tts.enabled
+        ? '开口说话，或者按麦克风；她会用声音回你。'
+        : '开口说话；在设置里接上语音服务，她就能读出回复。'));
+    }
     stream.appendChild(w);
     pinned = true;
     return;
@@ -190,6 +198,7 @@ onEvent((m) => {
     case 'turn_begin':
       S.busy = true;
       paintHead();
+      paintComposer(); // 发送键变成「停止」，不然回合里没地方按
       if (m.idle) toast('她主动开口了');
       showTyping('正在想');
       break;
@@ -225,6 +234,7 @@ onEvent((m) => {
       S.busy = false;
       finishLive();
       paintHead();
+      paintComposer();
       break;
     }
     case 'memory':
@@ -266,6 +276,7 @@ async function sendCurrent() {
   const input = $('#input');
   const text = input.value.trim();
   if (!text) return;
+  if (!S.active) { toast('先创建一个角色', 'err'); openPersonaEditor(true); return; }
   if (S.busy) { toast('她还在说，先等一下'); return; }
   input.value = '';
   autoGrow();
@@ -301,8 +312,14 @@ function autoGrow() {
 function paintComposer() {
   const btn = $('#btn-send');
   btn.classList.toggle('stop', S.busy);
-  btn.title = S.busy ? '打断' : '发送';
-  $('#btn-mic').disabled = !S.asr.enabled;
+  btn.title = S.busy ? '停止生成（Esc 也可以）' : '发送';
+  const input = $('#input');
+  const none = !S.active;
+  input.disabled = none;
+  input.placeholder = none
+    ? '先创建一个角色…'
+    : (S.busy ? '正在回应… 点右边停止' : '说点什么…（Enter 发送，Shift+Enter 换行）');
+  $('#btn-mic').disabled = !S.asr.enabled || none;
   $('#btn-mic').title = S.asr.enabled ? '点击开始 / 结束录音' : '还没有配置语音识别服务';
   $('#btn-mic').classList.toggle('rec', S.recording);
   const hint = $('#composer-hint');

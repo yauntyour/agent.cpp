@@ -199,6 +199,28 @@ elseif(AGENT_BUILD_UI)
         "Pass -DPython3_EXECUTABLE=... or set the PYTHON environment variable.")
 endif()
 
+# ---- embedded default stage ------------------------------------------------
+# assets/live2d/{runtime,models} → src/agent-live2d.hpp（C++26 #embed 表）
+# 启动时写进 <数据根>/live2d/，让「第一次运行就有一个角色」不需要用户准备模型。
+
+if(AGENT_BUILD_UI AND Python3_Interpreter_FOUND)
+    file(GLOB_RECURSE AGENT_L2D_ASSETS CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/assets/live2d/*")
+    if(AGENT_L2D_ASSETS)
+        set(AGENT_L2D_HPP "${CMAKE_SOURCE_DIR}/src/agent-live2d.hpp")
+        add_custom_command(
+            OUTPUT "${AGENT_L2D_HPP}"
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/build_live2d.py"
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+            DEPENDS "${CMAKE_SOURCE_DIR}/build_live2d.py" ${AGENT_L2D_ASSETS}
+            COMMENT "Embedding the default Live2D stage (assets/live2d → src/agent-live2d.hpp)"
+            VERBATIM)
+        add_custom_target(agent-stage DEPENDS "${AGENT_L2D_HPP}")
+        add_dependencies(agent agent-stage)
+    else()
+        message(STATUS "assets/live2d/ is empty — the exe ships without a default model")
+    endif()
+endif()
+
 # ---- summary ----------------------------------------------------------------
 
 message(STATUS "agent: C++${AGENT_CXX_STANDARD}, executable lands in ${AGENT_OUTPUT_DIR}")

@@ -12,7 +12,7 @@
    3. 演出：动作、表情、参数、口型。表情与动作的对应关系是数据（live2d.emo），
       不是代码 —— 换模型不用改 JS。
 
-   没有模型时整个舞台退回光球，情绪 / 动作 / 触发器照常工作。
+   没有模型时画布上给一句能点的提示，情绪 / 动作 / 触发器照常工作。
    ===================================================================== */
 
 const L2D = {
@@ -57,27 +57,18 @@ function l2dCfg() {
   return c && typeof c === 'object' ? c : {};
 }
 
+const L2D_KINDS = ['idle', 'loading', 'ready', 'error'];
+
 function l2dSetStatus(kind, text) {
   const wrap = $('#l2d-wrap');
   const st = $('#l2d-status');
-  wrap.classList.toggle('loading', kind === 'loading');
-  wrap.classList.toggle('error', kind === 'error');
-  wrap.classList.toggle('ready', kind === 'ready');
-  if (st) st.textContent = text || '';
-  const hint = $('#stage-hint');
-  if (hint && kind !== 'ready') hint.textContent = text || 'Live2D 未接入 · 点这里接入';
+  for (const k of L2D_KINDS) wrap.classList.toggle(k, k === kind);
+  L2D.mode = kind === 'ready' ? 'l2d' : 'empty';
+  if (st) st.textContent = kind === 'ready' ? '' : (text || '');
 }
 
-function l2dSetMode(mode) {
-  L2D.mode = mode;
-  $('#stage-frame').dataset.mode = mode;
-  if (mode === 'l2d') {
-    $('#stage-hint').textContent = '';
-    $('#stage-hint').classList.add('hidden');
-  } else {
-    $('#stage-hint').classList.remove('hidden');
-  }
-}
+// 画布上的提示本身就是入口：没模型 / 没运行时，点一下打开舞台面板
+$('#l2d-status').onclick = () => openStagePanel();
 
 /* ---------------- 运行时 ---------------- */
 function loadScript(url) {
@@ -100,7 +91,7 @@ async function l2dLoadRuntime() {
   } else {
     const scripts = (L2D.scan && L2D.scan.runtime && L2D.scan.runtime.scripts) || [];
     if (!scripts.length || (L2D.scan.runtime && !L2D.scan.runtime.ok))
-      throw new Error('运行时库不全：把 Cubism Core 等放进 .agent/live2d/runtime/');
+      throw new Error('运行时核心没装：在舞台面板里点「下载运行时」');
     list = scripts.filter(s => s.ok !== false).map(s => '/api/live2d/runtime/' + encodeURIComponent(s.name));
     from = 'local';
   }
@@ -158,34 +149,66 @@ function l2dDestroy() {
   }
 }
 
-async function l2dMount(force) {
-  if (L2D._loading && !force) return L2D._loading;
-  const job = l2dMountInner(force);
-  L2D._loading = job;
-  try {
-    return await job;
-  } finally {
-    // 只有自己那一份还挂着时才清；换模型时可能已经换成新的加载了
-    if (L2D._loading === job) L2D._loading = null;
-  }
+/* ---------------- 加载调度 ----------------
+   一个模型只装一次：paintStage 会被状态广播反复调到，如果每次都从
+   Live2DModel.from 走一遍，就会看到模型反复重建（掉帧、网络里重复请求）。
+   这里把加载排成一条队：
+   - 已经在装的模型，重复请求直接拿同一个 Promise；
+   - 排队期间换了模型，旧的那次开跑时自己退出；
+   - token 作废更早的请求，同一个模型不会被装两遍。 */
+L2D._chain = Promise.resolve();
+L2D._pending = null;
+L2D._token = 0;
+L2D._failedPath = '';
+
+function l2dSerialize(job) {
+  const run = L2D._chain.then(job, job);
+  L2D._chain = run.then(() => { }, () => { });
+  return run;
 }
 
-async function l2dMountInner(force) {
+function l2dApply(force) {
+  const cfg = l2dCfg();
+  const path = (cfg.model || '').trim();
+  L2D.cfg = cfg;
+  if (!force) {
+    if (L2D.status === 'ready' && L2D.model && L2D._path === path) { l2dFit(); return Promise.resolve(); }
+    if (L2D._pending && L2D._path === path) return L2D._pending;   // 同一个模型正在装
+    if (L2D.status === 'error' && L2D._failedPath === path) return Promise.resolve(); // 失败过别自动重试
+  }
+  L2D._path = path;
+  const token = ++L2D._token;
+  const job = l2dSerialize(() => l2dMountInner(path, token));
+  const tracked = job.then(
+    (r) => { if (L2D._pending === tracked) L2D._pending = null; return r; },
+    (e) => { if (L2D._pending === tracked) L2D._pending = null; throw e; });
+  L2D._pending = tracked;
+  return tracked;
+}
+
+async function l2dMountInner(path, token) {
+  if (token !== L2D._token) return;                      // 被后来的请求取代了
+  if (path !== (l2dCfg().model || '').trim()) return;     // 排队期间换了模型
+  // 先拿一次资源清单：面板的模型列表和「新建角色」里的默认模型都靠它，
+  // 就算当前角色没有模型也要拿
+  if (!L2D.scan && !MOCK) {
+    try { L2D.scan = await cmd('live2d.scan'); } catch { }
+    if (token !== L2D._token) return;
+  }
   const cfg = l2dCfg();
   L2D.cfg = cfg;
-  const path = (cfg.model || '').trim();
-  if (MOCK) { l2dSetStatus('error', '演示模式没有后端，接不上模型'); l2dSetMode('orb'); return; }
+  if (MOCK) { l2dSetStatus('error', '演示模式没有后端，接不上模型'); return; }
   if (!path) {
     l2dDestroy();
     L2D.status = 'idle';
-    l2dSetStatus('idle', 'Live2D 未接入 · 点这里接入');
-    l2dSetMode('orb');
+    L2D._failedPath = '';
+    l2dSetStatus('idle', '还没有选模型 · 点这里接入');
     return;
   }
   try {
     l2dSetStatus('loading', '加载运行时…');
-    if (L2D.mode !== 'l2d') l2dSetMode('l2d');
     await l2dLoadRuntime();
+    if (token !== L2D._token) return;
     l2dSetStatus('loading', '加载模型…');
     l2dDestroy();
     L2D.canvas = $('#l2d-canvas');
@@ -200,12 +223,13 @@ async function l2dMountInner(force) {
       resolution: Math.min(2, window.devicePixelRatio || 1),
     });
     const model = await PIXI.live2d.Live2DModel.from(l2dModelUrl(path), { autoInteract: true });
+    if (token !== L2D._token) { try { model.destroy(); } catch { } return; }
     L2D.model = model;
     L2D.app.stage.addChild(model);
     l2dCollectInfo();
     l2dFit();
     L2D.status = 'ready';
-    l2dSetMode('l2d');
+    L2D._failedPath = '';
     l2dSetStatus('ready', '');
     l2dBindPointer();
     l2dStartTicker();
@@ -219,7 +243,7 @@ async function l2dMountInner(force) {
   } catch (e) {
     console.warn('live2d mount failed:', e);
     L2D.status = 'error';
-    l2dSetMode('orb');
+    L2D._failedPath = path;
     l2dSetStatus('error', '模型没起来：' + (e && e.message ? e.message : e));
   }
 }
@@ -307,6 +331,13 @@ function l2dSetSpeaking(on) {
   L2D.speaking = !!on;
 }
 
+/* 面板里拖缩放 / 偏移时先看效果，点「保存并生效」才写进角色卡 */
+function l2dPreview(patch) {
+  if (L2D.status !== 'ready' || !L2D.model) return;
+  L2D.cfg = Object.assign({}, L2D.cfg, patch);
+  l2dFit();
+}
+
 function l2dStartTicker() {
   const app = L2D.app;
   if (!app || app.__l2dTick) return;
@@ -388,27 +419,12 @@ function l2dScheduleResize() {
 window.addEventListener('resize', l2dScheduleResize);
 
 /* ---------------- 入口 ---------------- */
-async function l2dApply(force) {
-  const cfg = l2dCfg();
-  const path = (cfg.model || '').trim();
-  // 同一个模型不重复加载；换角色 / 换模型才重建
-  if (!force && L2D.status === 'ready' && L2D.model && L2D._path === path) {
-    L2D.cfg = cfg;
-    l2dFit();
-    return;
-  }
-  L2D._path = path;
-  if (!L2D.scan && !MOCK) {
-    try { L2D.scan = await cmd('live2d.scan'); } catch { }
-  }
-  await l2dMount(force);
-}
-
 async function l2dReload() {
-  l2dDestroy();
+  // 不在这里同步 destroy：真正的销毁在队列里做，避免和正在跑的加载抢画布
   L2D.status = 'idle';
+  L2D._failedPath = '';
   L2D._path = '';
-  await l2dApply(true);
+  return l2dApply(true);
 }
 
 function l2dUseCdn(on) {

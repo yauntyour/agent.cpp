@@ -175,7 +175,7 @@ async function trigAct(act, ctx, state) {
       if (!state.sent) { state.sent = true; await stageSend('[[idle]]', { hidden: true }); }
       break;
     case 'emo':
-      // 走一遍正常链路，光球 / 语音音色也跟着变；深度护栏防止自激
+      // 走一遍正常链路：语气徽标 / 语音音色 / 映射表情；深度护栏防止自激
       if (TRIG.depth < 3) {
         TRIG.depth += 1;
         try { setEmotion(act.name || 'neutral'); } finally { TRIG.depth -= 1; }

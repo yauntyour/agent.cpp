@@ -34,6 +34,7 @@
 #include <vector>
 
 #include "agent-voice.hpp"
+#include "agent-live2d.hpp"
 
 namespace app
 {
@@ -185,6 +186,63 @@ namespace app
         if (out.empty())
             out = {"pixi.min.js", "live2dcubismcore.min.js", "cubism4.min.js"};
         return out;
+    }
+
+    // 运行时核心不随 exe 分发（Cubism Core 的许可不允许再分发），
+    // 用户点「下载运行时」时按这张表取回 .agent/live2d/runtime/。
+    inline std::vector<std::pair<std::string, std::string>> live2d_runtime_sources(const std::string &base = "")
+    {
+        std::string root = base.empty() ? "https://unpkg.com" : base;
+        while (!root.empty() && root.back() == '/')
+            root.pop_back();
+        return {
+            {"pixi.min.js", root + "/pixi.js@6.5.10/dist/browser/pixi.min.js"},
+            {"live2dcubismcore.min.js", root + "/live2dcubismcore@1.0.2/live2dcubismcore.min.js"},
+            {"cubism4.min.js", root + "/pixi-live2d-display@0.4.0/dist/cubism4.min.js"},
+        };
+    }
+
+    // 自带的默认模型（assets/live2d/models 打进 exe 的那一份）
+    inline std::string stage_default_model() { return "models/hiyori/Hiyori.model3.json"; }
+
+    inline bool stage_has_model()
+    {
+        std::error_code ec;
+        if (!fs::is_directory(live2d_models_dir(), ec))
+            return false;
+        fs::recursive_directory_iterator it(live2d_models_dir(), fs::directory_options::skip_permission_denied, ec);
+        fs::recursive_directory_iterator end;
+        for (; !ec && it != end; it.increment(ec))
+        {
+            if (it.depth() >= 4)
+                it.disable_recursion_pending();
+            if (!it->is_regular_file(ec))
+                continue;
+            std::string n = it->path().filename().string();
+            if (n.ends_with(".model3.json") || n.ends_with(".model.json"))
+                return true;
+        }
+        return false;
+    }
+
+    // 第一次运行：把自带模型写进 .agent/live2d/；已经有模型就一个字节都不动
+    inline void stage_seed_assets()
+    {
+        if (stage_has_model() || stage::kAssetCount == 0)
+            return;
+        std::error_code ec;
+        for (std::size_t i = 0; i < stage::kAssetCount; i++)
+        {
+            const auto &a = stage::kAssets[i];
+            fs::path out = live2d_dir() / fs::path(a.path);
+            fs::create_directories(out.parent_path(), ec);
+            if (fs::is_regular_file(out, ec))
+                continue; // 用户自己改过的文件不覆盖
+            std::ofstream f(out, std::ios::binary | std::ios::trunc);
+            if (!f)
+                continue;
+            f.write(reinterpret_cast<const char *>(a.data), (std::streamsize)a.size);
+        }
     }
 
     inline std::string default_persona_prompt()
@@ -676,6 +734,8 @@ namespace app
         std::mutex cmd_mx; // 命令串行化 + 保护 ctxs
         std::map<std::string, std::unique_ptr<persona_ctx>> ctxs;
         std::string active;
+        // 默认不给角色：只有开发模式（--debug / --smoke*）才会自动生成一个测试角色
+        bool debug_seed = false;
 
         std::atomic<bool> shutting_down{false};
         std::atomic<long long> voice_seq{0};
@@ -713,7 +773,9 @@ namespace app
                 ac.tts.key = vault.get("service:tts").str();
             if (ac.asr.key.empty())
                 ac.asr.key = vault.get("service:asr").str();
+            stage_seed_assets();
             seed_personas();
+            adopt_default_stage();
             housekeeping();
             open_named(ac.active_persona, nullptr);
             if (active.empty())
@@ -827,25 +889,62 @@ namespace app
             }
             return cell::plat::write_file_atomic(persona_dir(p.id) / "persona.json", p.to_json().dump(2));
         }
-        // 首次运行：种一个默认角色
+        // 首次运行：默认是「空角色」状态，让用户自己建第一个角色。
+        // 开发模式（--debug，以及 --smoke / --smoke-engine）自动生成一个测试角色，
+        // 免得每次调界面都要先建卡；调试角色不主动开口，免得一直抢麦。
         void seed_personas()
         {
             if (!persona_ids().empty())
                 return;
+            if (!debug_seed)
+                return;
             persona p;
-            p.id = "xier";
-            p.name = "曦儿";
-            p.subtitle = "住在屏幕另一边的人";
+            p.id = "debug";
+            p.name = "测试角色";
+            p.subtitle = "debug 模式自动生成";
             p.accent = "#8b7cff";
             p.greeting = "……你终于来了。今天过得怎么样？";
             p.user_name = "主人";
             p.prompt = default_persona_prompt();
-            p.proactive = true;
+            p.proactive = false;
             p.idle_minutes = 40;
+            if (stage_has_model())
+                p.live2d = {{"model", stage_default_model()}};
+            p.triggers = nlohmann::json::array({
+                {{"id", "touch-head"}, {"on", "click"}, {"when", {{"zone", "head"}}},
+                 {"do", nlohmann::json::array({{{"a", "motion"}, {"group", "TapHead"}},
+                                               {{"a", "say"}, {"text", "别、别摸头…"}}})},
+                 {"cd", 3}},
+                {{"id", "poke-body"}, {"on", "click"}, {"when", {{"zone", "body"}}},
+                 {"do", nlohmann::json::array({{{"a", "motion"}, {"group", "TapBody"}},
+                                               {{"a", "send"}, {"text", "（你戳了戳她）"}}})},
+                 {"cd", 6}},
+            });
             save_persona(p);
             if (ac.active_persona.empty())
                 ac.active_persona = p.id;
             ac.save();
+        }
+
+        // 已经存在的角色：只要没在角色卡里表过态（live2d 里没有 model 这个键），
+        // 就挂上自带模型。显式写过 "model": "" 的算表过态，不动它。
+        void adopt_default_stage()
+        {
+            if (!stage_has_model())
+                return;
+            const std::string model = stage_default_model();
+            for (auto &id : persona_ids())
+            {
+                persona p = load_persona(id);
+                if (p.live2d.is_object() && p.live2d.contains("model"))
+                    continue;
+                if (!p.live2d.is_object())
+                    p.live2d = nlohmann::json::object();
+                p.live2d["model"] = model;
+                save_persona(p);
+                if (auto *c = find_ctx(id))
+                    c->p = p;
+            }
         }
         // 音频与录音只留最近两天的成品
         void housekeeping()
@@ -1779,6 +1878,40 @@ namespace app
                 {
                     std::lock_guard<std::mutex> lk(cmd_mx);
                     return ok_with(live2d_scan());
+                }
+                if (name == "live2d.fetch_runtime")
+                {
+                    // Cubism Core 这类运行时核心不随 exe 分发，由用户点一下取回本地。
+                    // 已经存在的文件不重下（除非 force）。
+                    const bool force = args.value("force", false);
+                    std::error_code ec;
+                    fs::create_directories(live2d_runtime_dir(), ec);
+                    nlohmann::json got = nlohmann::json::array();
+                    nlohmann::json kept = nlohmann::json::array();
+                    for (auto &[file, url] : live2d_runtime_sources(args.value("base", "")))
+                    {
+                        fs::path out = live2d_runtime_dir() / file;
+                        if (!force && fs::is_regular_file(out, ec) && fs::file_size(out, ec) > 1024)
+                        {
+                            kept.push_back(file);
+                            continue;
+                        }
+                        std::string body, err;
+                        if (!voice::fetch(url, body, err))
+                            return fail(std::format("{} 下载失败：{}", file, err));
+                        std::ofstream f(out, std::ios::binary | std::ios::trunc);
+                        if (!f)
+                            return fail("无法写入 " + out.string());
+                        f.write(body.data(), (std::streamsize)body.size());
+                        if (!f)
+                            return fail("写入中断：" + file);
+                        got.push_back(file);
+                    }
+                    nlohmann::json r = ok();
+                    r["downloaded"] = got;
+                    r["kept"] = kept;
+                    r["scan"] = live2d_scan();
+                    return r;
                 }
                 if (name == "live2d.open_dir")
                 {

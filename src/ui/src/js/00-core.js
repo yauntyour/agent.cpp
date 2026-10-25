@@ -85,7 +85,7 @@ function toast(msg, kind = '', ms = 2600) {
 function applyAccent(color) {
   if (!color) return;
   document.documentElement.style.setProperty('--accent', color);
-  // 主色的深一档，供光球/阴影用
+  // 主色的深一档，供阴影用
   const c = color.replace('#', '');
   if (c.length === 6) {
     const n = parseInt(c, 16);

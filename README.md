@@ -6,9 +6,9 @@
 
 ![对话](assets/shots/chat.png)
 
-| 空会话 | 记忆 | 设置 |
-| --- | --- | --- |
-| ![欢迎](assets/shots/welcome.png) | ![记忆](assets/shots/memory.png) | ![设置](assets/shots/settings.png) |
+| 空角色 | 角色设定 | 记忆 | 设置 |
+| --- | --- | --- | --- |
+| ![欢迎](assets/shots/welcome.png) | ![角色](assets/shots/persona.png) | ![记忆](assets/shots/memory.png) | ![设置](assets/shots/settings.png) |
 
 ---
 
@@ -21,7 +21,7 @@
 由此带来的三个设计约束，贯穿整份代码：
 
 1. **演出优先**。模型输出不是最终产物，是「剧本」：情绪标记驱动表情与语音音色，星号里的动作只演不念，正文按句切给 TTS。接了 Live2D 之后，`[[motion:]]` / `[[expr:]]` 还能直接指挥身体。
-2. **服务可插拔**。TTS / ASR 各是一份配置（`openai` / `http` / `command` / `off`），界面里改完即时生效，不重新编译。
+2. **服务可插拔**。TTS / ASR 都是可选服务，默认关闭（`off`），配了才生效；各是一份配置（`openai` / `http` / `command` / `off`），界面里改完即时生效，不重新编译。
 3. **传输层无特权**。桌面窗口和浏览器打开的是同一个页面、同一条 HTTP + SSE 通道，没有「只有窗口能调」的私有接口。
 
 ---
@@ -46,6 +46,8 @@ src/ui/src/**            页面源码（css / js 分层，按文件名顺序拼�
 | `src/agent-voice.hpp` | 语音服务 | 四种 `kind`，全部走 libcurl + `cell::net::ca_bundle()`；宿主录音是兜底 |
 | `src/agent-http.hpp` | 本机服务 | `servic.hpp` + `router`，SSE 每条事件一个 `data:` 行 |
 | `src/agent-ui.hpp` | 内嵌页面 | 生成物，不进版本库手工改 |
+| `src/agent-live2d.hpp` | 自带的默认模型 | `build_live2d.py` 用 `#embed` 打进去的字节表 |
+| `build_live2d.py` | 装配器 | `assets/live2d/**` → `src/agent-live2d.hpp` |
 | `src/ui/src/js/07-live2d.js` | 舞台 | 运行时加载、模型、动作 / 表情 / 口型 |
 | `src/ui/src/js/08-triggers.js` | 触发器引擎 | 事件 → 动作序列，含冷却与内置默认规则 |
 | `src/ui/src/js/09-stage-panel.js` | 舞台面板 | 换模型、情绪映射、规则编辑器 |
@@ -146,9 +148,15 @@ agent.exe --headless [PORT]  只跑服务，不开窗口（脚本驱动 / 远程
 agent.exe --ui FILE          从磁盘读页面（开发循环）
 agent.exe --smoke            冒烟：窗口 → 页面 → 第一条 state 命令
 agent.exe --smoke-engine     冒烟：再加一次完整回合
+agent.exe --debug            开发模式：空数据根时自动生成一个测试角色
 ```
 
-开发页面：
+**默认是空角色**：第一次打开没有角色卡，欢迎页上有一个「创建第一个角色」，
+建角色时自动挂上自带的模型。`--debug`（以及两个冒烟模式）会在空数据根里生成一个
+测试角色（不主动开口，附带两个示例触发器），免得每次调界面都要先建卡。
+
+回合进行中，输入框右边的发送键会变成红色的「停止」（Esc 同效），点一下打断她。
+语音合成与语音识别默认关闭，界面里不会出现报错刷屏；接上之后才会自动朗读、才会亮起麦克风。
 
 ```bash
 python build_ui.py --html                    # 只装配 src/ui/index.html
@@ -168,8 +176,8 @@ build/agent.exe --headless 8787 --ui src/ui/index.html
 ├── audio/                TTS 成品（保留两天）
 ├── mic/                  录音与上传的音频（保留两天）
 ├── live2d/
-│   ├── runtime/          运行时库（pixi / Cubism Core / pixi-live2d-display）
-│   └── models/<任意>/     模型（model3.json 及其贴图、动作、物理）
+│   ├── runtime/          运行时库（点「下载运行时」取回，不随 exe 分发）
+│   └── models/<任意>/     模型（自带一份默认的，第一次运行自动解出来）
 ├── config.json           模型供应商与当前模型（cell.cpp 的配置）
 ├── agent.json            语音服务、界面偏好、上次会话
 ├── .crypt / .key         加密库：所有 API Key 只在这里
@@ -256,7 +264,7 @@ WebView2 就是 Chromium，`http://127.0.0.1:8899` 属于可信来源（`isSecur
 | 会话 | `session.new` `sessions.list` `session.select` `session.delete` |
 | 记忆 | `memory.list` `memory.add` `memory.forget` `memory.clear` |
 | 语音 | `voice.record.start` `voice.record.stop`（宿主录音，兜底） `voice.transcribe` `voice.speak` `voice.stop` |
-| 舞台 | `live2d.scan` `live2d.open_dir` |
+| 舞台 | `live2d.scan` `live2d.open_dir` `live2d.fetch_runtime` |
 | 服务 | `service.set` `service.test` |
 | 模型 | `providers.add` `providers.rm` `providers.select` `provider.set_key` `models.fetch` `model.set` `think.set` |
 | 杂项 | `ui.pref` `open.data_dir` `app.quit` |
@@ -302,9 +310,14 @@ curl -sN http://127.0.0.1:8899/api/events    # SSE：一条事件一行 data:
 
 ## 舞台：Live2D 与触发器
 
-舞台右侧原来是一枚光球（情绪由颜色、眼睛、嘴形共同表达）。接入 Live2D 之后同一个位置换成一块画布；**没接模型时自动退回光球**，两种形态共用同一份情绪、动作和触发器。面板入口是情绪徽标右边那个旋钮图标。
+舞台右侧就是一块 Live2D 画布，情绪、动作、触发器都归它。**没有光球兜底**：模型或运行时不在时画布上给一句能点的提示，点一下直接打开舞台面板。面板入口是情绪徽标右边那个旋钮图标。
 
-### 接一个模型
+![舞台](assets/shots/stage.png)
+
+第一次运行会把 `assets/live2d/models/` 里的默认模型解到 `.agent/live2d/models/`
+（`build_live2d.py` 用 C++26 `#embed` 把它打进 exe，所以不需要额外文件）；
+已经有别的模型就一个字节都不动。**运行时核心不在 exe 里**（Cubism Core 的许可不允许再分发），
+点面板里的「下载运行时」取回本地即可，也可以打开「运行时走 CDN」先看效果。
 
 ```text
 .agent/live2d/
@@ -321,8 +334,8 @@ curl -sN http://127.0.0.1:8899/api/events    # SSE：一条事件一行 data:
         └── motions/*.motion3.json
 ```
 
-- **运行时库不随 exe 分发**（Cubism Core 的许可不允许再分发），由你自己放进 `runtime/`。本地没有时可以在面板里打开「运行时走 CDN」，从 unpkg 现取 —— 只适合先看效果，长期用还是放本地。
-- 模型放好后：旋钮图标 →「扫描资源」→ 选模型 → 保存并加载。模型加载完会把动作组 / 表情名写回角色卡（`live2d.groups` / `live2d.expressions`），拼提示词时会列出来，模型才知道自己有哪些动作可用。
+- 换模型：旋钮图标 →「扫描资源」→ 选一个 → 底部「保存并生效」。模型加载完会把动作组 / 表情名写回角色卡（`live2d.groups` / `live2d.expressions`），拼提示词时会列出来，模型才知道自己有哪些动作可用。
+- 缩放 / 偏移改了即时预览，点「保存并生效」才写进角色卡；面板顶部那条一直贴底的保存条会告诉你「有未保存的改动」。
 - **自定义动作模组**：`motion3.json` 放进模型目录，在 `model3.json` 的 `FileReferences.Motions` 里给它一个组名（Cubism 的标准做法）。组名就是面板里能选、触发器里能挂、提示词里能写的那个名字 —— 换一套动作不需要改一行代码。
 - 资源走 `GET /api/live2d/<…>`，逐段白名单 + 规范化路径校验，只认 `.agent/live2d/` 里面的文件。
 
@@ -330,7 +343,7 @@ curl -sN http://127.0.0.1:8899/api/events    # SSE：一条事件一行 data:
 
 | 字段 | 作用 |
 | --- | --- |
-| `live2d.model` | 相对 `.agent/live2d/` 的路径；空 = 用光球 |
+| `live2d.model` | 相对 `.agent/live2d/` 的路径；空 = 舞台留白 |
 | `live2d.scale` `x` `y` | 缩放与偏移（偏移是画布宽/高的比例，`0.1` = 10%） |
 | `live2d.emo` | 情绪 → `{expr, motion}`；`expr` 可以是序号也可以是表情名 |
 | `live2d.groups` `expressions` | 加载后自动写回，供提示词引用 |
@@ -345,7 +358,7 @@ curl -sN http://127.0.0.1:8899/api/events    # SSE：一条事件一行 data:
 | `[[motion:TapBody/2]]` | 指定第几个 | 同上 |
 | `[[expr:f01]]` | 切表情 | `expr` 事件 → 画布 |
 
-`[[emo:…]]` 仍然管情绪：它同时驱动光球配色、语音音色，以及 `live2d.emo` 里的表情 / 动作映射。
+`[[emo:…]]` 仍然管情绪：它同时驱动语气徽标、语音音色，以及 `live2d.emo` 里的表情 / 动作映射。
 
 ### 触发器：事件 → 动作
 
@@ -378,7 +391,7 @@ curl -sN http://127.0.0.1:8899/api/events    # SSE：一条事件一行 data:
 | `motion` | `group` `index` | 播放动作组 |
 | `expr` | `id` | 切表情（序号或名字） |
 | `param` | `id` `to` `ms` | 补间一个模型参数，例如 `ParamAngleZ` |
-| `emo` | `name` | 走一遍情绪链路（光球 + 语音音色 + 映射表情） |
+| `emo` | `name` | 走一遍情绪链路（语气徽标 + 语音音色 + 映射表情） |
 | `say` | `text` `ms` | 舞台台词气泡，不朗读 |
 | `speak` | `text` | 交给 TTS 念出来 |
 | `send` | `text` | **交回回合管线，她真的会回你** |

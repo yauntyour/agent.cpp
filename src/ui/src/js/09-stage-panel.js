@@ -11,6 +11,8 @@ let STAGE_VIEW = { kind: 'list' };
 
 function openStagePanel() {
   STAGE_VIEW = { kind: 'list' };
+  STAGE_DRAFT = null;   // 每次打开都从角色卡重新读一份草稿
+  STAGE_BAR = null;
   openDrawer('舞台', 'stage', (body) => buildStagePanel(body));
 }
 
@@ -28,16 +30,132 @@ function buildStagePanel(body) {
   body.appendChild(stageModelSection());
   body.appendChild(stageEmoSection());
   body.appendChild(stageTriggerSection());
+  body.appendChild(stageSaveBar());
+}
+
+/* ---------------- 草稿：改了不算数，点了保存才生效 ----------------
+   面板会被状态广播重建（换角色、回合结束、自动回报动作组），所以改动放在
+   一份独立的草稿里，重建时不会丢；保存 = 一次 persona.save。 */
+let STAGE_DRAFT = null;
+let STAGE_BAR = null;
+
+function stageDraft() {
+  if (STAGE_DRAFT) return STAGE_DRAFT;
+  const cfg = l2dCfg();
+  const src = cfg.emo && typeof cfg.emo === 'object' ? cfg.emo : {};
+  const emo = {};
+  for (const k of Object.keys(src)) {
+    const one = src[k] || {};
+    emo[k] = {
+      expr: one.expr == null ? '' : String(one.expr),
+      motion: Array.isArray(one.motion) ? String(one.motion[0] || '') : String(one.motion || ''),
+    };
+  }
+  STAGE_DRAFT = {
+    model: cfg.model || '',
+    scale: cfg.scale == null ? 1 : cfg.scale,
+    x: cfg.x || 0,
+    y: cfg.y || 0,
+    emo,
+  };
+  return STAGE_DRAFT;
+}
+
+/* 归一化后再比：草稿里是字符串，角色卡里可能是数字，键序也可能不同 */
+function stageNorm(v) {
+  const src = (v && v.emo && typeof v.emo === 'object') ? v.emo : {};
+  const emo = {};
+  for (const k of Object.keys(src).sort()) {
+    const one = src[k] || {};
+    const expr = one.expr == null ? '' : String(one.expr);
+    const motion = Array.isArray(one.motion) ? String(one.motion[0] || '') : String(one.motion || '');
+    if (expr === '' && motion === '') continue;
+    emo[k] = { expr, motion };
+  }
+  return JSON.stringify({
+    model: String((v && v.model) || '').trim(),
+    scale: Number(v && v.scale != null ? v.scale : 1),
+    x: Number((v && v.x) || 0),
+    y: Number((v && v.y) || 0),
+    emo,
+  });
+}
+
+function stageDirty() {
+  return stageNorm(stageDraft()) !== stageNorm(l2dCfg());
+}
+
+function stageSyncBar() {
+  if (!STAGE_BAR) return;
+  const dirty = stageDirty();
+  STAGE_BAR.bar.classList.toggle('dirty', dirty);
+  STAGE_BAR.text.textContent = dirty ? '有未保存的改动' : '已与角色卡一致';
+  STAGE_BAR.save.disabled = !dirty;
+  STAGE_BAR.undo.disabled = !dirty;
+}
+
+function stageRevert() {
+  STAGE_DRAFT = null;
+  const cfg = l2dCfg();
+  l2dPreview({ scale: cfg.scale == null ? 1 : cfg.scale, x: cfg.x || 0, y: cfg.y || 0 });
+  buildDrawer();
+}
+
+async function stageCommit() {
+  const p = S.persona || {};
+  if (!p.id) { toast('还没有打开角色', 'err'); return; }
+  const d = stageDraft();
+  const cur = l2dCfg();
+  const emo = {};
+  for (const k of Object.keys(d.emo)) {
+    const one = d.emo[k] || {};
+    const e = {};
+    if (one.expr !== '' && one.expr != null) e.expr = /^\d+$/.test(String(one.expr)) ? Number(one.expr) : one.expr;
+    if (one.motion) e.motion = one.motion;
+    if (Object.keys(e).length) emo[k] = e;
+  }
+  const next = Object.assign({}, cur, {
+    model: String(d.model || '').trim(),
+    scale: Number(d.scale) || 1,
+    x: Number(d.x) || 0,
+    y: Number(d.y) || 0,
+    emo,
+  });
+  const modelChanged = String(cur.model || '').trim() !== next.model;
+  await cmd('persona.save', { id: p.id, patch: { live2d: next } });
+  S.persona.live2d = next;
+  L2D.cfg = next;
+  STAGE_DRAFT = null;
+  if (modelChanged) await l2dReload();
+  else l2dPreview({ scale: next.scale, x: next.x, y: next.y });
+  toast('舞台设置已保存', 'ok');
+  buildDrawer();
+}
+
+function stageSaveBar() {
+  const bar = el('div', 'stage-bar');
+  const info = el('div', 'bar-text');
+  const dot = el('span', 'bar-dot');
+  const text = el('span', null, '已与角色卡一致');
+  info.append(dot, text);
+  const acts = el('div', 'bar-acts');
+  const undo = actionBtn('撤销', () => stageRevert(), 'btn sm ghost');
+  const save = actionBtn('保存并生效', () => stageCommit(), 'btn primary sm');
+  acts.append(undo, save);
+  bar.append(info, acts);
+  STAGE_BAR = { bar, text, save, undo };
+  stageSyncBar();
+  return bar;
 }
 
 /* ---------------- 状态 ---------------- */
 function stageStatusSection() {
   const s = el('div', 'sect');
-  s.appendChild(el('div', 'sect-h', '舞台形态'));
+  s.appendChild(el('div', 'sect-h', '舞台'));
 
   const card = el('div', 'card' + (L2D.status === 'ready' ? ' on' : ''));
   const top = el('div', 'card-top');
-  const title = L2D.status === 'ready' ? 'Live2D' : (L2D.status === 'loading' ? 'Live2D · 加载中' : '光球');
+  const title = L2D.status === 'ready' ? 'Live2D' : (L2D.status === 'loading' ? 'Live2D · 加载中' : 'Live2D · 未就绪');
   top.appendChild(el('div', 'card-name', title));
   const badge = el('span', 'badge ' + (L2D.status === 'ready' ? 'ok' : (L2D.status === 'error' ? 'warn' : '')),
     L2D.status === 'ready' ? '运行中' : (L2D.status === 'error' ? '出错' : '待接入'));
@@ -47,20 +165,32 @@ function stageStatusSection() {
   const model = (l2dCfg().model || '').trim();
   const sub = el('div', 'card-sub');
   if (model) sub.textContent = model;
-  else sub.textContent = '还没有选模型。把模型目录放进 .agent/live2d/models/，然后在上面的列表里选一个。';
+  else sub.textContent = '还没有选模型。自带模型已经解到 .agent/live2d/models/，在下面选一个。';
   card.appendChild(sub);
 
+  const rtState = L2D.scan && L2D.scan.runtime;
+  const rtMissing = !rtState || !rtState.ok;
   const rt = el('div', 'card-sub');
   if (L2D.status === 'ready') {
     rt.textContent = `运行时：${L2D.runtimeFrom === 'cdn' ? 'CDN' : '本地'} · 动作组 ${L2D.groups.length} 个 · 表情 ${L2D.expressions.length} 个`;
   } else {
-    const r = L2D.scan && L2D.scan.runtime;
-    rt.textContent = r && r.ok ? '运行时：本地已就绪' : '运行时：缺失（' + ((r && r.missing) || []).join(', ') + '）';
+    rt.textContent = rtMissing
+      ? '运行时核心：未安装（Cubism Core 不随程序分发，点下面的「下载运行时」取回本地）'
+      : '运行时核心：已就绪';
   }
   card.appendChild(rt);
   s.appendChild(card);
 
   const row = el('div', 'btn-row');
+  if (rtMissing) {
+    row.appendChild(actionBtn('下载运行时', async () => {
+      const r = await cmd('live2d.fetch_runtime');
+      L2D.scan = r.scan || L2D.scan;
+      toast(`已下载 ${(r.downloaded || []).length} 个文件`, 'ok');
+      await l2dReload();
+      buildDrawer();
+    }, 'btn primary sm'));
+  }
   row.appendChild(actionBtn('重新加载', async () => { await l2dReload(); buildDrawer(); }, 'btn sm'));
   row.appendChild(actionBtn('扫描资源', async () => {
     L2D.scan = await cmd('live2d.scan');
@@ -73,7 +203,9 @@ function stageStatusSection() {
   const cdnRow = el('div', 'switch-row');
   const left = el('div');
   left.appendChild(el('div', 'k', '运行时走 CDN'));
-  left.appendChild(el('div', 'd', '本地没有放 Cubism Core 时，从 unpkg 现取（要联网）。'));
+  left.appendChild(el('div', 'd', rtMissing
+    ? '不想下载也行：直接从 unpkg 现取（每次启动都要联网）。'
+    : '本地已经有运行时了，一般不用开。'));
   const sw = el('button', 'switch' + (localStorage.getItem('agent.l2d.cdn') === '1' ? ' on' : ''));
   sw.onclick = () => {
     const on = !sw.classList.contains('on');
@@ -95,7 +227,7 @@ function stageStatusSection() {
 function stageModelSection() {
   const s = el('div', 'sect');
   s.appendChild(el('div', 'sect-h', '模型'));
-  const cfg = l2dCfg();
+  const d = stageDraft();
   const models = (L2D.scan && L2D.scan.models) || [];
 
   const sel = document.createElement('select');
@@ -107,48 +239,46 @@ function stageModelSection() {
     const o = document.createElement('option');
     o.value = m.path;
     o.textContent = m.name + '  ·  ' + m.dir;
-    if (m.path === cfg.model) o.selected = true;
+    if (m.path === d.model) o.selected = true;
     sel.appendChild(o);
   }
-  s.appendChild(field('扫描到的模型', sel, '选完点下面的「保存」；也可以直接手填路径。'));
+  s.appendChild(field('扫描到的模型', sel, '选完记得点最下面的「保存并生效」。'));
 
-  const path = textInput(cfg.model || '', 'models/hiyori/hiyori.model3.json');
-  s.appendChild(field('模型路径', path, '相对 .agent/live2d/ 的路径，区分大小写。'));
+  const path = textInput(d.model || '', 'models/hiyori/hiyori.model3.json');
+  s.appendChild(field('模型路径', path, '相对 .agent/live2d/ 的路径，区分大小写；留空 = 舞台留白。'));
 
-  const scale = textInput(cfg.scale == null ? 1 : cfg.scale, '1', 'number');
-  const ox = textInput(cfg.x == null ? 0 : cfg.x, '0', 'number');
-  const oy = textInput(cfg.y == null ? 0 : cfg.y, '0', 'number');
+  const scale = textInput(d.scale, '1', 'number');
+  const ox = textInput(d.x, '0', 'number');
+  const oy = textInput(d.y, '0', 'number');
   const row = el('div', 'row');
   row.append(field('缩放', scale), field('水平偏移', ox));
   s.appendChild(row);
-  s.appendChild(field('垂直偏移', oy, '缩放 1 = 尽量填满画布；偏移是画布宽/高的比例（0.1 = 10%）。'));
+  s.appendChild(field('垂直偏移', oy, '缩放 1 = 尽量填满画布；偏移是画布宽/高的比例（0.1 = 10%）。拖动即时预览。'));
 
-  sel.onchange = () => { if (sel.value) path.value = sel.value; };
+  sel.onchange = () => {
+    if (!sel.value) return;
+    path.value = sel.value;
+    d.model = sel.value;
+    stageSyncBar();
+  };
+  path.oninput = () => { d.model = path.value; stageSyncBar(); };
+  const bindNum = (input, key) => {
+    input.oninput = () => {
+      d[key] = Number(input.value) || 0;
+      l2dPreview({ [key]: d[key] });
+      stageSyncBar();
+    };
+  };
+  bindNum(scale, 'scale');
+  bindNum(ox, 'x');
+  bindNum(oy, 'y');
 
   s.appendChild(el('div', 'btn-row',
-    actionBtn('保存并加载', async () => {
-      const next = Object.assign({}, cfg, {
-        model: path.value.trim(),
-        scale: Number(scale.value) || 1,
-        x: Number(ox.value) || 0,
-        y: Number(oy.value) || 0,
-      });
-      await cmd('persona.save', { id: (S.persona || {}).id, patch: { live2d: next } });
-      S.persona.live2d = next;
-      L2D.cfg = next;
-      L2D._path = '';
-      await l2dReload();
-      toast(next.model ? '模型已加载' : '已切回光球', 'ok');
-      buildDrawer();
-    }, 'btn primary sm'),
-    actionBtn('切回光球', async () => {
-      const next = Object.assign({}, cfg, { model: '' });
-      await cmd('persona.save', { id: (S.persona || {}).id, patch: { live2d: next } });
-      S.persona.live2d = next;
-      L2D.cfg = next;
-      L2D._path = '';
-      await l2dReload();
-      buildDrawer();
+    actionBtn('清空模型（舞台留白）', () => {
+      d.model = '';
+      path.value = '';
+      sel.value = '';
+      stageSyncBar();
     }, 'btn sm ghost')
   ));
   return s;
@@ -158,15 +288,18 @@ function stageModelSection() {
 function stageEmoSection() {
   const s = el('div', 'sect');
   s.appendChild(el('div', 'sect-h', '情绪 → 表情 / 动作'));
-  const cfg = l2dCfg();
-  const table = cfg.emo && typeof cfg.emo === 'object' ? cfg.emo : trigClone(L2D_EMO_DEFAULT);
+  const d = stageDraft();
   const exprs = L2D.expressions || [];
   const groups = L2D.groups || [];
 
-  const draft = {};
+  const touch = (name) => {
+    if (!d.emo[name]) d.emo[name] = { expr: '', motion: '' };
+    if (!d.emo[name].expr && !d.emo[name].motion) delete d.emo[name];
+    stageSyncBar();
+  };
+
   for (const name of Object.keys(EMO_ZH)) {
-    const cur = table[name] || {};
-    draft[name] = { expr: cur.expr == null ? '' : String(cur.expr), motion: Array.isArray(cur.motion) ? cur.motion[0] : (cur.motion || '') };
+    const cur = d.emo[name] || { expr: '', motion: '' };
     const row = el('div', 'map-row');
     row.appendChild(el('span', 'map-k', EMO_ZH[name]));
 
@@ -179,11 +312,15 @@ function stageEmoSection() {
       const o = document.createElement('option');
       o.value = String(i);
       o.textContent = '表情：' + n;
-      if (String(draft[name].expr) === String(i) || String(draft[name].expr) === n) o.selected = true;
+      if (String(cur.expr) === String(i) || String(cur.expr) === n) o.selected = true;
       exprSel.appendChild(o);
     });
     if (!exprs.length) exprSel.disabled = true;
-    exprSel.onchange = () => { draft[name].expr = exprSel.value; };
+    exprSel.onchange = () => {
+      if (!d.emo[name]) d.emo[name] = { expr: '', motion: '' };
+      d.emo[name].expr = exprSel.value;
+      touch(name);
+    };
 
     const moSel = document.createElement('select');
     const m0 = document.createElement('option');
@@ -194,31 +331,22 @@ function stageEmoSection() {
       const o = document.createElement('option');
       o.value = g;
       o.textContent = '动作：' + g;
-      if (g === draft[name].motion) o.selected = true;
+      if (g === cur.motion) o.selected = true;
       moSel.appendChild(o);
     }
-    moSel.onchange = () => { draft[name].motion = moSel.value; };
+    if (!groups.length) moSel.disabled = true;
+    moSel.onchange = () => {
+      if (!d.emo[name]) d.emo[name] = { expr: '', motion: '' };
+      d.emo[name].motion = moSel.value;
+      touch(name);
+    };
 
     row.append(exprSel, moSel);
     s.appendChild(row);
   }
 
   s.appendChild(el('div', 'btn-row',
-    actionBtn('保存映射', async () => {
-      const emo = {};
-      for (const k of Object.keys(draft)) {
-        const one = {};
-        if (draft[k].expr !== '') one.expr = /^\d+$/.test(draft[k].expr) ? Number(draft[k].expr) : draft[k].expr;
-        if (draft[k].motion) one.motion = draft[k].motion;
-        if (Object.keys(one).length) emo[k] = one;
-      }
-      const next = Object.assign({}, cfg, { emo });
-      await cmd('persona.save', { id: (S.persona || {}).id, patch: { live2d: next } });
-      S.persona.live2d = next;
-      L2D.cfg = next;
-      toast('映射已保存', 'ok');
-    }, 'btn primary sm'),
-    actionBtn('逐个试', async () => {
+    actionBtn('逐个试一遍', async () => {
       for (const k of Object.keys(EMO_ZH)) {
         setEmotion(k, true);
         await new Promise(r => setTimeout(r, 900));

@@ -63,7 +63,14 @@
 .send-btn:active { transform: translateY(0) scale(.97); }
 .send-btn:disabled { opacity: .4; box-shadow: none; cursor: not-allowed; transform: none; }
 .send-btn .i-stop { display: none; }
-.send-btn.stop { background: var(--card-2); color: var(--text); box-shadow: none; border: 1px solid var(--line-strong); }
+/* 回合进行中：发送键变成「停止」——用红色描边，一眼能看出来可以打断 */
+.send-btn.stop {
+  background: color-mix(in srgb, var(--err) 14%, var(--card-2));
+  color: color-mix(in srgb, var(--err) 88%, #fff);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--err) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--err) 42%, transparent);
+}
+.send-btn.stop:hover { background: color-mix(in srgb, var(--err) 22%, var(--card-2)); }
 .send-btn.stop .i-send { display: none; }
 .send-btn.stop .i-stop { display: block; }
 

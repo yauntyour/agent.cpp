@@ -152,7 +152,10 @@ function modelSection() {
 function serviceSection(which, svc) {
   const isTts = which === 'tts';
   const sect = el('div', 'sect');
-  sect.appendChild(el('div', 'sect-h', isTts ? '语音合成（TTS）' : '语音识别（ASR）'));
+  const head = el('div', 'sect-h', isTts ? '语音合成（TTS）' : '语音识别（ASR）');
+  const on = (svc.kind || 'off') !== 'off';
+  head.appendChild(el('span', 'badge' + (on ? ' ok' : ''), on ? '已开启' : '未开启'));
+  sect.appendChild(head);
 
   const state = Object.assign({}, svc);
   const kinds = isTts
@@ -204,24 +207,32 @@ function serviceSection(which, svc) {
         field('超时（秒）', mk('timeout_s', '60', 'number')),
       );
     }
+    if (state.kind === 'off') {
+      const empty = el('div', 'empty', isTts
+        ? '未开启。语音合成是可选的 —— 不配置也能正常聊天，回复只显示文字。需要时在上面选一种接法，填好点「保存」。'
+        : '未开启。语音识别是可选的 —— 不配置也能正常打字聊天。需要时在上面选一种接法，填好点「保存」。');
+      empty.style.lineHeight = '1.7';
+      fields.appendChild(empty);
+    }
+    if (!isTts) fields.appendChild(el('div', 'tip',
+      '麦克风由页面直接采集（getUserMedia + MediaRecorder），录音不经过宿主；'
+      + '窗口只对 127.0.0.1 的页面放行麦克风权限。'));
+    // 保存键一直在：关掉服务也要能存下来（否则「关闭」这个选择没法生效）
+    const row = el('div', 'btn-row');
+    row.appendChild(actionBtn('保存', async () => {
+      await cmd('service.set', { name: which, patch: state });
+      await refreshState();
+      toast(state.kind === 'off' ? '已关闭' : '已保存', 'ok');
+    }, 'btn primary'));
     if (state.kind !== 'off') {
-      if (!isTts) fields.appendChild(el('div', 'tip',
-        '麦克风由页面直接采集（getUserMedia + MediaRecorder），录音不经过宿主；'
-        + '窗口只对 127.0.0.1 的页面放行麦克风权限。'));
-      const row = el('div', 'btn-row');
-      row.appendChild(actionBtn('保存', async () => {
-        await cmd('service.set', { name: which, patch: state });
-        await refreshState();
-        toast('已保存', 'ok');
-      }, 'btn primary'));
       row.appendChild(actionBtn('试一下', async () => {
         const r = await cmd('service.test', { name: which });
         if (isTts) { enqueueClip({ url: r.url }); toast('正在播放测试音频', 'ok'); }
         else toast('识别结果：' + (r.text || ''), 'ok', 5000);
       }, 'btn'));
       if (!isTts) row.appendChild(actionBtn('上传音频转写', () => { closeDrawer(); pickAudio(); }, 'btn ghost'));
-      fields.appendChild(row);
     }
+    fields.appendChild(row);
     return fields;
   };
   function mk(key, ph, type) {
@@ -253,7 +264,9 @@ function serviceSection(which, svc) {
 function prefSection() {
   const sect = el('div', 'sect');
   sect.appendChild(el('div', 'sect-h', '偏好'));
-  sect.appendChild(switchRow('自动朗读回复', '关掉后仍然可以点消息下面的「重播」。', S.voice_reply, async (on) => {
+  sect.appendChild(switchRow('自动朗读回复',
+    S.tts.enabled ? '关掉后仍然可以点消息下面的「重播」。' : '语音合成还没开启，这一项现在不起作用。',
+    S.voice_reply, async (on) => {
     const r = await cmd('ui.pref', { voice_reply: on });
     S.voice_reply = r.voice_reply;
     if (!on) stopAudio();
