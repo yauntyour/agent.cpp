@@ -156,6 +156,22 @@ CMake 选项：
 
 > `cell.cpp` 是 submodule：`git submodule update --init --recursive`。
 
+### CI（GitHub Actions）
+
+`.github/workflows/build.yml`：三个平台各编一次，产物挂在 Actions 的 artifact 上。触发条件只有两个：
+
+- **push 到 `main` / `master`，且这次 push 的最新一条 commit 消息里含 `release`** —— 不区分大小写、只看首行（`release` / `release: v0.2` / `Release 0.2` 都算）。不含就整条流水线跳过，只留一个 `gate` job 记一行日志。
+- **手动 workflow_dispatch** —— 勾 `publish` 并填 `tag` 时，构建完顺便把三份产物打包发 Release（不勾就只构建）。
+
+| job | 环境 | 产物 |
+| --- | --- | --- |
+| windows | MSYS2 UCRT64（gcc / ninja / 静态 curl + libsodium） | `agent-windows-x64.zip`（单文件 exe） |
+| linux | ubuntu-24.04 + g++-14 + GTK3 / WebKitGTK | `agent-linux-x64.tar.gz` |
+| macos | macos-14（arm64）+ brew libsodium / boost | `agent-macos-arm64.tar.gz` |
+
+每个 job 先探测编译器认不认 `-std=c++26`，不认就退回 23。退回后没有 `#embed`，exe 里不自带默认
+Live2D 模型（`kAssetCount = 0`），其余功能不变；要连模型一起打进去需要 GCC ≥ 15。
+
 ---
 
 ## 运行

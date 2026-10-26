@@ -1,0 +1,268 @@
+name: build
+
+# 多平台 CMake 构建：Windows (MSYS2 UCRT64) / Linux (GCC) / macOS (Apple clang)。
+#
+# 触发条件（只有这两个）：
+#   1. push 到 main / master，且这次 push 的最新一条 commit 消息里含 "release"
+#      （不区分大小写，只看首行：`release` / `release: v0.2` / `Release 0.2` 都算）；
+#      不含就整条流水线跳过，只留一个 gate job 记一笔。
+#   2. 手动 workflow_dispatch；勾 publish 时构建完顺便发 Release（tag 由输入框给）。
+#
+# 关于 C++ 标准：CMakeLists 默认 AGENT_CXX_STANDARD=26，但 -std=c++26 需要
+# GCC >= 14 / Clang >= 17。每个 job 先探测一次，不支持就退回 23 —— 退回后
+# build_live2d.py 产出的 kAssetCount = 0（编译器没有 #embed），程序照常跑，
+# 只是 exe 里不自带默认 Live2D 模型。想看这一项生效，用 GCC >= 15。
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 构建完成后发 Release（需要填 tag）
+        type: boolean
+        default: false
+      tag:
+        description: 发布用的 tag，如 v0.2.0 / nightly-97（publish 勾上时必填）
+        type: string
+        required: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # 手动触发的那次不取消：可能正在发版
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
+permissions:
+  contents: read
+
+env:
+  # build_ui.py / build_live2d.py 是构建的一部分，别让 Python 写 __pycache__
+  PYTHONDONTWRITEBYTECODE: 1
+
+jobs:
+  # ------------------------------------------------------------------- Gate ---
+  # GitHub 的 on.push 不能按 commit 消息过滤，所以先开一道闸：
+  # 手动触发一律放行；push 时只有首行含 "release" 才放行，否则后面三个 job 全跳过。
+  gate:
+    name: Gate
+    runs-on: ubuntu-24.04
+    outputs:
+      build: ${{ steps.check.outputs.build }}
+    steps:
+      - name: Check the trigger
+        id: check
+        env:
+          EVENT: ${{ github.event_name }}
+          MSG: ${{ github.event.head_commit.message }}
+        run: |
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "手动触发 —— 继续构建"
+            exit 0
+          fi
+          first=$(printf '%s' "$MSG" | head -n 1)
+          if printf '%s' "$first" | grep -qi 'release'; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "提交信息命中 release —— 继续构建：$first"
+          else
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "提交信息不含 release —— 跳过构建：$first"
+          fi
+
+  # ---------------------------------------------------------------- Windows ---
+  windows:
+    name: Windows (MSYS2 UCRT64)
+    needs: gate
+    if: needs.gate.outputs.build == 'true'
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          cache: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-binutils
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-curl
+            mingw-w64-ucrt-x86_64-openssl
+            mingw-w64-ucrt-x86_64-libsodium
+            mingw-w64-ucrt-x86_64-boost
+            mingw-w64-ucrt-x86_64-nlohmann-json
+            mingw-w64-ucrt-x86_64-python
+
+      - name: Configure
+        run: |
+          std=$(printf 'int main(){}' | g++ -std=c++26 -x c++ -fsyntax-only - >/dev/null 2>&1 && echo 26 || echo 23)
+          echo "C++ standard: $std"
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DAGENT_CXX_STANDARD=$std
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Smoke (--help)
+        run: ./build/agent.exe --help
+
+      - name: Report artifact
+        run: |
+          ls -lh build/agent.exe
+          file build/agent.exe || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-windows-x64
+          path: build/agent.exe
+          if-no-files-found: error
+
+  # ------------------------------------------------------------------ Linux ---
+  linux:
+    name: Linux (GCC, GTK3 + WebKitGTK)
+    needs: gate
+    if: needs.gate.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential g++-14 \
+            cmake ninja-build pkg-config \
+            libgtk-3-dev libwebkit2gtk-4.1-dev \
+            libcurl4-openssl-dev libssl-dev libsodium-dev \
+            libboost-dev nlohmann-json3-dev
+
+      - name: Configure
+        run: |
+          # 24.04 默认 gcc-13 不认识 -std=c++26；装了 g++-14 就直接用它
+          cxx=g++
+          command -v g++-14 >/dev/null && cxx=g++-14
+          std=$(printf 'int main(){}' | $cxx -std=c++26 -x c++ -fsyntax-only - >/dev/null 2>&1 && echo 26 || echo 23)
+          echo "compiler: $($cxx --version | head -1) — C++ standard: $std"
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER=$cxx \
+            -DAGENT_CXX_STANDARD=$std
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Smoke (--help)
+        run: ./build/agent --help
+
+      - name: Report artifact
+        run: |
+          ls -lh build/agent
+          file build/agent
+          ldd build/agent | head -40
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-linux-x64
+          path: build/agent
+          if-no-files-found: error
+
+  # ------------------------------------------------------------------ macOS ---
+  macos:
+    name: macOS (Apple clang, arm64)
+    needs: gate
+    if: needs.gate.outputs.build == 'true'
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # brew 的 include 目录不在 clang 默认搜索路径里：CMakeLists 是靠
+      # find_path(boost/asio.hpp) 找到 /opt/homebrew/include 的，所以 boost 必须装
+      - name: Install dependencies
+        run: brew install ninja libsodium boost nlohmann-json
+
+      - name: Configure
+        run: |
+          std=$(printf 'int main(){}' | c++ -std=c++26 -x c++ -fsyntax-only - >/dev/null 2>&1 && echo 26 || echo 23)
+          echo "compiler: $(c++ --version | head -1) — C++ standard: $std"
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DAGENT_CXX_STANDARD=$std
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Smoke (--help)
+        run: ./build/agent --help
+
+      - name: Report artifact
+        run: |
+          ls -lh build/agent
+          file build/agent
+          otool -L build/agent
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-macos-arm64
+          path: build/agent
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------- Release ---
+  # 只有手动触发且勾了 publish 才发版：push 里写 release 只负责「构建」，
+  # 版本号/tag 得人来定，别让一条 commit 消息自动占掉 tag。
+  release:
+    name: Release
+    if: ${{ inputs.publish && needs.gate.outputs.build == 'true' }}
+    needs: [gate, windows, linux, macos]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Check the tag
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          if [ -z "$TAG" ]; then
+            echo "::error::勾了 publish 但没填 tag"
+            exit 1
+          fi
+          echo "release tag: $TAG"
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          cd dist
+          for d in agent-*/; do
+            d=${d%/}
+            case "$d" in
+              agent-windows-*) (cd "$d" && zip -q -r "../$d.zip" .) ;;
+              *)               tar -czf "$d.tar.gz" -C "$d" . ;;
+            esac
+            rm -rf "$d"
+          done
+          sha256sum ./* > SHA256SUMS.txt
+          ls -lh
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          files: dist/*
+          prerelease: ${{ contains(inputs.tag, 'nightly') }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
