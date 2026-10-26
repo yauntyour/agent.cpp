@@ -168,6 +168,23 @@ else()          # Linux — GTK3 + WebKitGTK
         CURL::libcurl ${SODIUM_LIBRARY} Threads::Threads)
 endif()
 
+# ---- OpenSSL（只有企业微信回调要它：SHA1 验签 + AES-256-CBC 解密）----------
+# 不自己实现密码学。Windows / Linux 上静态 libcurl 本就把 libssl/libcrypto 链了
+# 进来，这里只是把它的头文件和 target 正式声明一下；找不到就关掉 wecom 这一档，
+# 其余 IM 渠道（telegram / onebot / bridge）不受影响。
+find_package(OpenSSL QUIET COMPONENTS Crypto)
+if(NOT OpenSSL_FOUND AND APPLE)
+    find_package(OpenSSL QUIET COMPONENTS Crypto
+        HINTS /opt/homebrew/opt/openssl@3 /usr/local/opt/openssl@3)
+endif()
+if(OpenSSL_FOUND)
+    target_compile_definitions(agent PRIVATE AGENT_HAVE_OPENSSL=1)
+    target_link_libraries(agent PRIVATE OpenSSL::Crypto)
+    message(STATUS "agent: OpenSSL found — WeCom (企业微信) callbacks enabled")
+else()
+    message(STATUS "agent: OpenSSL not found — the WeCom channel will report itself unavailable")
+endif()
+
 # ---- embedded UI ------------------------------------------------------------
 # src/ui/src/{index.html,css/*.css,js/*.js}  →  src/agent-ui.hpp（C++ 唯一需要的产物）
 #                                              + src/ui/index.html（--ui 开发模式直接服务）

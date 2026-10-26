@@ -1,32 +1,32 @@
-/* Live2D 舞台：一块画布、一条台词气泡、几个演出用的临时效果。
-   画布尺寸跟着舞台列走（--stage），比例按 3:4 留出头顶与脚底。 */
+/* Live2D 画布：铺满整个窗口，是页面的背景。
+   尺寸跟着视口走；比例与位置由 l2dFit()（07-live2d.js）算，
+   这里只负责“填满容器、别出滚动条”。 */
 
 .l2d-wrap {
-  position: relative; width: 100%;
-  height: clamp(260px, 44vh, 400px);
+  position: absolute; inset: 0; z-index: 1;
   display: grid; place-items: center;
-  border-radius: var(--r-lg);
   overflow: hidden;
   /* 模型后面那层柔光：不抢戏，但让角色不是浮在空气里 */
   background:
-    radial-gradient(70% 55% at 50% 74%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 72%),
-    radial-gradient(60% 40% at 50% 12%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 70%);
+    radial-gradient(70% 55% at 50% 74%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 72%),
+    radial-gradient(60% 40% at 50% 12%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 70%);
   transition: background 1s var(--ease);
 }
 .l2d-wrap canvas {
   display: block; width: 100%; height: 100%;
   touch-action: manipulation; cursor: pointer;
-  filter: drop-shadow(0 18px 26px rgba(0, 0, 0, .42));
+  /* 不要给画布加 filter: drop-shadow —— 满屏画布每帧都在重绘，
+     整屏滤镜会把 GPU 吃光；需要“浮起来”的感觉交给 .stage-glow。 */
 }
 .l2d-wrap.loading canvas { opacity: 0; }
-.l2d-wrap.ready canvas { animation: l2d-in .55s var(--ease) both; }
-@keyframes l2d-in { from { opacity: 0; transform: translateY(8px) scale(.985); } }
+.l2d-wrap.ready canvas { animation: l2d-in .8s var(--ease) both; }
+@keyframes l2d-in { from { opacity: 0; transform: scale(1.015); } }
 
 /* 加载中 / 没模型 / 出错时压在画布上的状态行（可点，直接打开舞台面板） */
 .l2d-status {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
   display: none; align-items: center; gap: 7px;
-  padding: 8px 14px; border-radius: 999px;
+  padding: 9px 16px; border-radius: 999px;
   font-size: 11.5px; color: var(--text-2); text-align: center; line-height: 1.5;
   background: rgba(10, 10, 14, .78);
   border: 1px solid var(--line-strong);
@@ -48,49 +48,30 @@
 @keyframes spin { to { transform: rotate(360deg); } }
 .l2d-wrap.error .l2d-status { color: var(--err); border-color: color-mix(in srgb, var(--err) 34%, transparent); }
 
-/* ---------------- 台词气泡 ----------------
-   舞台这一列只有 ~300px，气泡放哪都会压到人，所以干脆做成「字幕条」：
-   贴着画布底部、圆角胶囊、没有小尾巴，读起来是她说的一句旁白。 */
-.stage-bubble {
-  position: absolute; left: 50%; bottom: 10px; transform: translate(-50%, 6px);
-  max-width: 92%; padding: 8px 14px;
-  font-size: 12.5px; line-height: 1.55; color: var(--text);
-  background: color-mix(in srgb, var(--card) 92%, transparent);
-  border: 1px solid var(--line-strong); border-radius: 999px;
-  box-shadow: var(--shadow-2);
-  backdrop-filter: blur(10px);
-  opacity: 0; pointer-events: none;
-  transition: opacity .3s var(--ease), transform .3s var(--ease);
-  z-index: 3;
-}
-.stage-bubble.on { opacity: 1; transform: translate(-50%, 0); }
-
 /* ---------------- 演出效果（触发器可以挂） ---------------- */
 .fx-shake { animation: fx-shake .5s var(--ease); }
 @keyframes fx-shake {
   0%, 100% { transform: translateX(0); }
-  22% { transform: translateX(-6px) rotate(-.6deg); }
-  48% { transform: translateX(5px) rotate(.5deg); }
+  22% { transform: translateX(-7px) rotate(-.35deg); }
+  48% { transform: translateX(6px) rotate(.3deg); }
   74% { transform: translateX(-3px); }
 }
-.fx-pulse .l2d-wrap, .fx-pulse .orb { animation: fx-pulse .7s var(--ease); }
+.fx-pulse .l2d-wrap { animation: fx-pulse .7s var(--ease); }
 @keyframes fx-pulse {
-  40% { filter: brightness(1.16) drop-shadow(0 0 26px color-mix(in srgb, var(--accent) 55%, transparent)); }
+  40% { filter: brightness(1.14) drop-shadow(0 0 30px color-mix(in srgb, var(--accent) 50%, transparent)); }
 }
-.fx-dim .l2d-wrap { filter: brightness(.82) saturate(.9); transition: filter .6s var(--ease); }
+.fx-dim .l2d-wrap { filter: brightness(.8) saturate(.88); transition: filter .6s var(--ease); }
 .fx-dim.off .l2d-wrap { filter: none; }
-.stage-frame.fx-flash::before {
-  content: ""; position: absolute; inset: 0; z-index: 4; pointer-events: none;
-  background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 46%, transparent), transparent 76%);
+#stage-frame.fx-flash::after {
+  content: ""; position: absolute; inset: 0; z-index: 3; pointer-events: none;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 42%, transparent), transparent 78%);
   animation: fx-flash .6s ease-out both;
 }
 @keyframes fx-flash { from { opacity: 0; } 30% { opacity: 1; } to { opacity: 0; } }
 
 /* 舞台发起的那条消息（戳一下、摸头）比手打的淡一档 */
-.msg.from-stage .bubble {
-  background: transparent; border: 1px dashed var(--line-strong);
-  color: var(--muted); font-style: italic;
-}
+.msg.from-stage .bubble { color: var(--faint); font-style: italic; }
+.msg.from-stage .bubble-text::before { content: "她"; opacity: .7; }
 
 /* ---------------- 面板 ---------------- */
 .tip code {

@@ -1,20 +1,27 @@
+/* 输入区：浮在舞台底部的一条玻璃。宽度和字幕轨对齐，
+   两边留白，舞台上仍然看得见她的下半身和画面。 */
 #composer {
   flex: 0 0 auto;
-  padding: 10px clamp(16px, 5vw, 64px) 18px;
-  background: linear-gradient(180deg, transparent, rgba(10, 10, 14, .65) 45%);
+  width: 100%; max-width: var(--lane);
+  margin: 0 auto;
+  padding: 10px 0 14px;
+  pointer-events: none;
 }
+#composer > * { pointer-events: auto; }
 .composer-box {
   display: flex; align-items: flex-end; gap: 8px;
   padding: 7px 7px 7px 8px;
-  background: linear-gradient(180deg, var(--card), #17171f);
+  background: rgba(14, 14, 20, .72);
   border: 1px solid var(--line-strong);
-  border-radius: 20px;
-  box-shadow: 0 10px 34px rgba(0, 0, 0, .38), inset 0 1px 0 rgba(255, 255, 255, .045);
-  transition: border-color .2s, box-shadow .2s;
+  border-radius: 22px;
+  backdrop-filter: blur(20px) saturate(1.25);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(255, 255, 255, .05);
+  transition: border-color .2s, box-shadow .2s, background .2s;
 }
 .composer-box:focus-within {
+  background: rgba(16, 16, 24, .86);
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  box-shadow: 0 10px 34px rgba(0, 0, 0, .38), 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .55), 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
 }
 #input {
   flex: 1; min-height: 38px; max-height: 168px; resize: none;
@@ -23,14 +30,15 @@
 }
 #input::placeholder { color: var(--faint); }
 
-.mic-btn, .send-btn {
+.mic-btn, .attach-btn, .send-btn {
   position: relative; flex: 0 0 38px; width: 38px; height: 38px; border-radius: 50%;
   display: grid; place-items: center;
   transition: background .16s, color .16s, transform .12s;
 }
-.mic-btn { color: var(--muted); }
-.mic-btn:hover { background: rgba(255, 255, 255, .05); color: var(--text); }
-.mic-btn svg { width: 17px; height: 17px; position: relative; z-index: 1; }
+.mic-btn, .attach-btn { color: var(--muted); }
+.mic-btn:hover, .attach-btn:hover { background: rgba(255, 255, 255, .05); color: var(--text); }
+.mic-btn svg, .attach-btn svg { width: 17px; height: 17px; position: relative; z-index: 1; }
+.attach-btn:disabled { opacity: .35; cursor: not-allowed; }
 .mic-btn.rec { color: #fff; background: color-mix(in srgb, var(--err) 80%, #000); }
 .mic-btn.rec .mic-ring {
   position: absolute; inset: 0; border-radius: 50%;
@@ -80,3 +88,61 @@
   transition: color .2s;
 }
 .composer-hint.rec { color: color-mix(in srgb, var(--err) 80%, #fff); }
+
+/* ---------------- 附件托盘（输入框上方） ---------------- */
+#attach-tray {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  margin: 0 0 8px; padding: 0 2px;
+  animation: msg-in .18s var(--ease) both;
+}
+.attach-item {
+  position: relative; display: flex; align-items: center; gap: 8px;
+  max-width: 224px; padding: 5px 8px 5px 5px;
+  background: linear-gradient(180deg, var(--card-2), var(--card));
+  border: 1px solid var(--line-strong); border-radius: 12px;
+  box-shadow: var(--shadow-1);
+}
+.attach-item .thumb {
+  flex: 0 0 38px; width: 38px; height: 38px; border-radius: 8px;
+  overflow: hidden; display: grid; place-items: center;
+  background: var(--bg-2); color: var(--muted);
+}
+.attach-item .thumb img { width: 100%; height: 100%; object-fit: cover; cursor: zoom-in; }
+.attach-item .thumb svg { width: 17px; height: 17px; }
+.attach-item .info { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.attach-item .nm {
+  font-size: 12px; max-width: 150px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.attach-item .sz { font-size: 10.5px; color: var(--faint); }
+/* 删除按钮压在右上角，hover 才露出来 */
+.attach-item .rm {
+  position: absolute; top: -6px; right: -6px;
+  width: 18px; height: 18px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--card); border: 1px solid var(--line-strong);
+  color: var(--muted); opacity: 0;
+  transition: opacity .15s, color .15s, border-color .15s;
+}
+.attach-item:hover .rm { opacity: 1; }
+.attach-item .rm:hover { color: var(--err); border-color: color-mix(in srgb, var(--err) 45%, transparent); }
+.attach-item .rm svg { width: 10px; height: 10px; }
+
+/* ---------------- 拖拽文件进对话区 ---------------- */
+#drop-overlay {
+  position: absolute; inset: 0; z-index: 6;
+  display: grid; place-items: center;
+  pointer-events: none; opacity: 0;
+  background: color-mix(in srgb, var(--accent) 7%, rgba(8, 8, 12, .7));
+  backdrop-filter: blur(2px);
+  transition: opacity .15s;
+}
+#chat.drag-over #drop-overlay { opacity: 1; }
+.drop-card {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 20px; border-radius: 999px;
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 55%, transparent);
+  background: rgba(20, 20, 28, .86); color: var(--text);
+  font-size: 13.5px; box-shadow: var(--shadow-2);
+}
+.drop-card svg { width: 20px; height: 20px; color: var(--accent); }

@@ -15,12 +15,24 @@ const DEMO = {
   },
   memory: [{ t: Date.now() / 1000 - 86400, text: '她记得你喜欢在深夜聊天' }],
   history: [],
+  // 演示用的一张贴纸（内联 SVG，不依赖外部文件）
+  stickers: [{
+    name: '微笑',
+    url: 'data:image/svg+xml;utf8,' + encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160">'
+      + '<rect width="160" height="160" rx="26" fill="#20202a"/>'
+      + '<circle cx="58" cy="66" r="9" fill="#8b7cff"/><circle cx="102" cy="66" r="9" fill="#8b7cff"/>'
+      + '<path d="M50 102q30 26 60 0" stroke="#8b7cff" stroke-width="7" fill="none" stroke-linecap="round"/>'
+      + '</svg>'),
+  }],
 };
 
 function mockState() {
   return Object.assign({ ok: true, t: 'hello', active: 'xier', busy: false, emotion: 'neutral',
     model: 'demo:companion', providers: [], thinking: 0, voice_reply: false, asr_auto_send: true,
-    tts: { kind: 'off' }, asr: { kind: 'off' }, voice: { tts: false, asr: false, recording: false } }, DEMO);
+    tts: { kind: 'off' }, asr: { kind: 'off' }, voice: { tts: false, asr: false, recording: false },
+    attach: { max_files: 8, max_bytes: 48 * 1024 * 1024 },
+    autoallow: true, compact_auto: true, tools: true }, DEMO);
 }
 
 async function mockCmd(name, args) {
@@ -37,10 +49,25 @@ async function mockCmd(name, args) {
       await wait(18);
     }
     handleEvent({ t: 'emo', name: 'happy' });
+    // 演示 AI 发表情包：走和真实回合一样的 sticker 事件
+    if (DEMO.stickers && DEMO.stickers.length) {
+      handleEvent({ t: 'sticker', persona: 'xier', name: DEMO.stickers[0].name, url: DEMO.stickers[0].url });
+    }
     handleEvent({ t: 'turn_end', natural: true });
     return { ok: true };
   }
   if (name === 'stop') { handleEvent({ t: 'turn_end' }); return { ok: true }; }
+  if (name === 'sticker.list') return { ok: true, stickers: DEMO.stickers || [] };
+  if (name === 'sticker.add') {
+    const nm = args.name || 'sticker';
+    DEMO.stickers = (DEMO.stickers || []).filter(s => s.name !== nm);
+    DEMO.stickers.push({ name: nm, url: 'data:' + (mimeByExt('x.' + (args.ext || 'png'))) + ';base64,' + (args.data_b64 || '') });
+    return { ok: true, name: nm };
+  }
+  if (name === 'sticker.del') {
+    DEMO.stickers = (DEMO.stickers || []).filter(s => s.name !== args.name);
+    return { ok: true };
+  }
   if (name === 'voice.record.start') { S.recording = true; return { ok: true }; }
   if (name === 'voice.record.stop') { S.recording = false; return { ok: true, path: '', seconds: 2 }; }
   if (name === 'voice.transcribe') { handleEvent({ t: 'asr', text: '演示模式听写结果', auto_send: false }); return { ok: true, text: '演示模式听写结果' }; }

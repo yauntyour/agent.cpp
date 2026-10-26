@@ -1,15 +1,51 @@
 'use strict';
 /* =====================================================================
-   05-settings —— 设置：模型服务、模型、语音服务、偏好
+   05-settings —— 设置：模型服务、模型、语音服务、IM 接入、偏好
    ===================================================================== */
+
+/* 设置是一列模块：点哪一个进哪一个的子页（pushDrawer / drawerBack 在 04-panels）。
+   加一个模块 = 在 SETTINGS_MODULES 里加一行，别的地方不用动。 */
+const SETTINGS_MODULES = [
+  { key: 'providers', name: '模型服务', sub: () => S.providers.length ? `${S.providers.length} 个 · ${S.provider || '未选'}` : '还没有配置', build: () => providerSection() },
+  { key: 'model', name: '模型', sub: () => (S.model && S.model !== '(none)') ? S.model : '未选择', build: () => modelSection() },
+  { key: 'tts', name: '语音合成', sub: () => voiceStateText(S.tts), build: () => serviceSection('tts', S.tts) },
+  { key: 'asr', name: '语音识别', sub: () => voiceStateText(S.asr), build: () => serviceSection('asr', S.asr) },
+  { key: 'im', name: 'IM 接入', sub: () => imStatusText(), build: () => imSection() },
+  { key: 'stickers', name: '表情包', sub: () => stickerStatusText(), build: () => stickerSection() },
+  { key: 'pref', name: '偏好', sub: () => `${S.voice_reply ? '自动朗读' : '手动朗读'} · ${S.autoallow ? '工具自动执行' : '工具逐次确认'}`, build: () => prefSection() },
+];
+
+/* 表情包列表由服务端随 state 一起下发；打开设置时再拉一次，防止别处加过没刷新 */
+let STICKERS_LOADED = false;
+const STICKER_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp'];
+const STICKER_MAX_BYTES = 8 * 1024 * 1024; // 和 app-core 的 kMaxSticker 一致
+
+function stickerStatusText() {
+  const n = (S.stickers || []).length;
+  return n ? `${n} 个` : '还没有';
+}
+
+function voiceStateText(svc) {
+  const kind = (svc && svc.kind) || 'off';
+  return kind === 'off' ? '未开启' : kind;
+}
 
 function openSettings() {
   openDrawer('设置', 'settings', (body) => {
-    body.appendChild(providerSection());
-    body.appendChild(modelSection());
-    body.appendChild(serviceSection('tts', S.tts));
-    body.appendChild(serviceSection('asr', S.asr));
-    body.appendChild(prefSection());
+    const list = el('div', 'mod-list');
+    for (const m of SETTINGS_MODULES) {
+      const row = el('button', 'mod-row');
+      const left = el('div', 'mod-main');
+      left.appendChild(el('div', 'mod-name', m.name));
+      left.appendChild(el('div', 'mod-sub', m.sub()));
+      row.append(left, el('span', 'mod-go', '›'));
+      row.onclick = () => pushDrawer(m.name, 'settings/' + m.key, (b) => {
+        b.appendChild(drawerBack('设置'));
+        b.appendChild(m.build());
+      });
+      list.appendChild(row);
+    }
+    body.appendChild(list);
   });
 }
 
@@ -276,6 +312,29 @@ function prefSection() {
     const r = await cmd('ui.pref', { asr_auto_send: on });
     S.asr_auto_send = r.asr_auto_send;
   }));
+  // 这两个是 app-core 新加的能力：全工具常开，但要不要逐次审批由这里决定
+  sect.appendChild(switchRow('允许工具自动执行（autoallow）',
+    '开启后，她调用工具（读写文件、跑命令、查资料）不需要你逐次点确认；'
+    + '关掉则每次都要批准，更安全但更打断。',
+    S.autoallow, async (on) => {
+      const r = await cmd('ui.pref', { autoallow: on });
+      S.autoallow = r.autoallow !== undefined ? !!r.autoallow : on;
+    }));
+  sect.appendChild(switchRow('长对话自动压缩（compact）',
+    '开启后上下文变长时自动把旧对话压成摘要，长聊也不容易超出模型窗口；'
+    + '关掉则不再自动压缩。',
+    S.compact_auto, async (on) => {
+      const r = await cmd('ui.pref', { compact_auto: on });
+      S.compact_auto = r.compact_auto !== undefined ? !!r.compact_auto : on;
+    }));
+
+  if (S.tools) {
+    const toolTip = el('div', 'tip',
+      '基础工具已全部开启：ls / read / write / edit / rg / exec / find / tw / notice / msg。'
+      + '图片与音频可以用 read 直接打开成多模态内容。');
+    toolTip.style.cssText = 'margin-top:12px;font-size:11px;color:var(--faint);line-height:1.7';
+    sect.appendChild(toolTip);
+  }
 
   const row = el('div', 'btn-row');
   row.appendChild(actionBtn('打开数据目录', async () => { await cmd('open.data_dir'); }, 'btn sm'));
@@ -290,3 +349,113 @@ function prefSection() {
   sect.appendChild(tip);
   return sect;
 }
+
+/* ---------------- 表情包管理 ----------------
+   文件在 .agent/personas/<pid>/stickers/（优先）与 .agent/stickers/（全局）；
+   名字 = 文件名去扩展名。这里只管上传 / 删除 / 打开目录，发不发由模型决定。 */
+function stickerSection() {
+  const sect = el('div', 'sect');
+  const head = el('div', 'sect-h', '表情包');
+  if (S.active) head.appendChild(el('span', 'badge', (S.stickers || []).length + ' 个'));
+  sect.appendChild(head);
+
+  if (!S.active) {
+    const empty = el('div', 'empty', '先创建一个角色，再给她准备表情包。');
+    empty.style.lineHeight = '1.7';
+    sect.appendChild(empty);
+    return sect;
+  }
+
+  // 第一次打开时拉一次（state 里的列表可能还没包含别处刚加的）
+  if (!STICKERS_LOADED) {
+    STICKERS_LOADED = true;
+    cmd('sticker.list').then((r) => {
+      const arr = Array.isArray(r.stickers) ? r.stickers : (Array.isArray(r.list) ? r.list : null);
+      if (arr) S.stickers = arr;
+      if (!$('#drawer').classList.contains('hidden')) paintDrawer();
+    }).catch(() => { STICKERS_LOADED = false; });
+  }
+
+  const list = S.stickers || [];
+  if (!list.length) {
+    const empty = el('div', 'empty', '还没有表情包。上传几张 png / gif / webp，聊天时她会在合适的时候发给你。');
+    empty.style.lineHeight = '1.7';
+    sect.appendChild(empty);
+  } else {
+    const grid = el('div', 'sticker-grid');
+    for (const s of list) {
+      const cell = el('div', 'sticker-cell');
+      const img = document.createElement('img');
+      img.src = s.url || '';
+      img.alt = s.name || '表情包';
+      img.loading = 'lazy';
+      img.title = (s.name || '') + '（点开看大图）';
+      img.onclick = () => openLightbox(s.url, s.name);
+      const name = el('div', 'sticker-name', s.name || '');
+      const del = el('button', 'sticker-del');
+      del.type = 'button';
+      del.title = '删除「' + (s.name || '') + '」';
+      del.innerHTML = icon('trash');
+      del.onclick = async () => {
+        if (!confirm('删除表情包「' + (s.name || '') + '」？')) return;
+        try {
+          await cmd('sticker.del', { name: s.name });
+          await refreshState();
+          toast('已删除', 'ok');
+        } catch (e) { toast(e.message, 'err'); }
+      };
+      cell.append(img, name, del);
+      grid.appendChild(cell);
+    }
+    sect.appendChild(grid);
+  }
+
+  const row = el('div', 'btn-row');
+  row.appendChild(actionBtn('上传表情包', pickSticker, 'btn primary sm'));
+  row.appendChild(actionBtn('打开表情包目录', async () => { await cmd('open.stickers_dir'); }, 'btn sm ghost'));
+  row.appendChild(actionBtn('刷新', async () => { await refreshState(); }, 'btn sm ghost'));
+  sect.appendChild(row);
+
+  const tip = el('div', 'tip');
+  tip.style.cssText = 'margin-top:12px;font-size:11px;color:var(--faint);line-height:1.7';
+  tip.innerHTML = '支持 png / jpg / gif / webp，单个不超过 ' + fmtSize(STICKER_MAX_BYTES) + '；名字就是文件名。'
+    + '<br>当前角色的在 <code>.agent/personas/&lt;角色&gt;/stickers/</code>，'
+    + '全局的 <code>.agent/stickers/</code> 对所有角色可见。';
+  sect.appendChild(tip);
+  return sect;
+}
+
+function pickSticker() {
+  if (!S.active) { toast('先创建一个角色', 'err'); return; }
+  $('#sticker-file').click();
+}
+
+$('#sticker-file').addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';
+  if (!files.length) return;
+  let ok = 0;
+  for (const f of files) {
+    const ext = extOf(f.name);
+    if (STICKER_EXTS.indexOf(ext) < 0) {
+      toast('「' + (f.name || '文件') + '」不是支持的图片格式', 'err');
+      continue;
+    }
+    if (f.size > STICKER_MAX_BYTES) {
+      toast('「' + (f.name || '文件') + '」太大：单张上限 ' + fmtSize(STICKER_MAX_BYTES), 'err');
+      continue;
+    }
+    try {
+      const dataUrl = await fileToDataUrl(f);
+      const name = String(f.name || 'sticker').replace(/\.[^.]+$/, '');
+      await cmd('sticker.add', { name, ext, data_b64: b64OfDataUrl(dataUrl) });
+      ok++;
+    } catch (err) {
+      toast(err.message || '上传失败', 'err');
+    }
+  }
+  if (ok) {
+    await refreshState();
+    toast('已添加 ' + ok + ' 个表情包', 'ok');
+  }
+});

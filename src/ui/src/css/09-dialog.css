@@ -1,0 +1,61 @@
+/* 确认弹窗：给「清空上下文」这类收不回来的动作一个说清楚的地方。
+   三个按钮竖排：主选项在最后，取消永远在最上面，闭着眼点也不会点错。 */
+#ask-modal {
+  position: fixed; inset: 0; z-index: 85;
+  display: grid; place-items: center;
+  background: rgba(4, 4, 8, .64); backdrop-filter: blur(3px);
+  animation: fade .18s both;
+}
+.ask-card {
+  width: min(380px, 92vw);
+  padding: 20px 22px 18px;
+  background: linear-gradient(180deg, #15151c, #101016);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2);
+  animation: ask-in .22s var(--ease) both;
+}
+@keyframes ask-in { from { opacity: 0; transform: translateY(10px) scale(.98); } }
+
+.ask-head {
+  font-size: 14.5px; font-weight: 600; letter-spacing: .02em;
+  margin-bottom: 10px;
+}
+.ask-text {
+  font-size: 13px; line-height: 1.75; color: var(--text-2);
+}
+.ask-note {
+  margin-top: 8px; font-size: 12px; line-height: 1.7; color: var(--faint);
+}
+.ask-note.err { color: var(--err); }
+.ask-actions {
+  display: flex; flex-direction: column; gap: 8px;
+  margin-top: 18px;
+}
+.ask-actions .btn { width: 100%; justify-content: center; }
+.ask-actions .btn[disabled] { opacity: .55; cursor: default; }
+
+/* ---------------- 图片全屏预览（lightbox） ----------------
+   点缩略图打开；Esc、关闭按钮、点背景都能关。z-index 压在抽屉和确认弹窗之上。 */
+#lightbox {
+  position: fixed; inset: 0; z-index: 95;
+  display: flex; align-items: center; justify-content: center;
+  padding: 4vh 4vw;
+  background: rgba(4, 4, 8, .84); backdrop-filter: blur(6px);
+  animation: fade .16s both;
+}
+#lightbox img {
+  max-width: 100%; max-height: 92vh;
+  border-radius: 10px; box-shadow: var(--shadow-2);
+  object-fit: contain; background: rgba(255, 255, 255, .02);
+}
+.lightbox-close {
+  position: absolute; top: 18px; right: 18px;
+  width: 38px; height: 38px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: rgba(28, 28, 36, .86); border: 1px solid var(--line-strong);
+  color: var(--text-2);
+  transition: background .16s, color .16s;
+}
+.lightbox-close:hover { background: var(--card-2); color: var(--text); }
+.lightbox-close svg { width: 17px; height: 17px; }

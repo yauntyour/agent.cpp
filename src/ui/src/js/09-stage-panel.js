@@ -253,7 +253,7 @@ function stageModelSection() {
   const row = el('div', 'row');
   row.append(field('缩放', scale), field('水平偏移', ox));
   s.appendChild(row);
-  s.appendChild(field('垂直偏移', oy, '缩放 1 = 尽量填满画布；偏移是画布宽/高的比例（0.1 = 10%）。拖动即时预览。'));
+  s.appendChild(field('垂直偏移', oy, '舞台铺满整个窗口：缩放 1 时立绘按高度撑满、场景图铺满后裁边。偏移是画布宽/高的比例（0.1 = 10%）。拖动即时预览。'));
 
   sel.onchange = () => {
     if (!sel.value) return;

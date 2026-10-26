@@ -1,20 +1,40 @@
+/* 骨架：舞台铺满整个窗口，界面浮在它上面。
+   #app 只有两列 —— 角色栏 + 内容列；Live2D 是 fixed 的独立层（见 07-live2d.css），
+   不占栅格，所以窗口怎么缩，模型都是满屏的。 */
+
 #app {
+  position: relative;
   display: grid;
-  grid-template-columns: var(--rail) minmax(0, 1fr) var(--stage);
+  grid-template-columns: var(--rail) minmax(0, 1fr);
+  /* 显式把唯一那行钉在视口高度上。不写这条时隐式行是 auto，字幕一多就把整行
+     撑得比视口还高：#stream 永远 clientHeight == scrollHeight（不滚），
+     撑出去的部分被 body{overflow:hidden} 裁掉，既看不见也滚不到。 */
+  grid-template-rows: minmax(0, 1fr);
   height: 100vh; height: 100dvh;
+  background: var(--bg);
+}
+
+/* ---------------- 舞台层 ---------------- */
+/* 整块画布 + 一层压暗。pointer-events 保持默认：空白处的点击要能落到模型上
+   （#chat 的空白区域是穿透的，见下面的 pointer-events 规则）。 */
+#stage-frame {
+  position: fixed; inset: 0;
+  z-index: 0;
+  overflow: hidden;
   background:
-    radial-gradient(1100px 620px at 78% -12%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 62%),
-    linear-gradient(180deg, var(--bg-2), var(--bg) 42%);
+    radial-gradient(1200px 720px at 50% 14%, color-mix(in srgb, var(--accent) 11%, transparent), transparent 66%),
+    linear-gradient(180deg, #0b0b11, #07070b 62%);
 }
 
 /* ---------------- 左侧角色栏 ---------------- */
 #rail {
+  position: relative; z-index: 3;
   display: flex; flex-direction: column; align-items: center;
   gap: 10px; padding: 16px 0 14px;
   border-right: 1px solid var(--line);
-  background: rgba(10, 10, 14, .55);
-  backdrop-filter: blur(8px);
-  z-index: 3;
+  /* 贴着画布的一层玻璃，不遮住角色 */
+  background: linear-gradient(90deg, rgba(8, 8, 12, .78), rgba(8, 8, 12, .34));
+  backdrop-filter: blur(10px);
 }
 .rail-mark { width: 44px; height: 44px; display: grid; place-items: center; margin-bottom: 8px; }
 .rail-logo {
@@ -56,23 +76,46 @@
 .rail-btn.active { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
 .rail-btn svg { width: 19px; height: 19px; }
 
-/* ---------------- 中间对话 ---------------- */
-#chat { display: flex; flex-direction: column; min-width: 0; position: relative; }
-
-#chat-head {
-  height: 60px; flex: 0 0 60px;
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 0 22px 0 26px;
-  border-bottom: 1px solid var(--line);
-  background: linear-gradient(180deg, rgba(16, 16, 22, .86), rgba(16, 16, 22, .32));
-  backdrop-filter: blur(12px);
-  z-index: 2;
+/* ---------------- 内容列 ---------------- */
+/* min-height:0 不能少：flex/grid 子项的 auto 最小尺寸会让它按内容撑开，
+   #stream 就永远没有可滚动的余地。
+   pointer-events:none 让空白处的点击穿到画布上（戳一下她）；只有真正要点的
+   几块（顶栏、字幕、输入框）自己把事件收回来。 */
+#chat {
+  position: relative; z-index: 1;
+  display: flex; flex-direction: column;
+  min-width: 0; min-height: 0;
+  pointer-events: none;
 }
-.head-main { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
-#head-name { font-size: 15px; font-weight: 600; letter-spacing: .01em; }
+#chat > * { pointer-events: auto; }
+#subs { pointer-events: none; }        /* 字幕轨本身不挡模型，只有字幕条收事件 */
+#subs > * { pointer-events: auto; }
+
+/* ---------------- 顶栏：她的名字 + 状态 ---------------- */
+#chat-head {
+  flex: 0 0 auto;
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+  padding: 16px clamp(18px, 3vw, 34px) 0 24px;
+  pointer-events: none;
+}
+#chat-head > * { pointer-events: auto; }
+.head-id { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.head-line { display: flex; align-items: center; gap: 10px; min-width: 0; }
+#stage-name {
+  font-size: 19px; font-weight: 600; letter-spacing: .14em;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, .8), 0 0 30px rgba(0, 0, 0, .5);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.head-sub {
+  font-size: 11.5px; letter-spacing: .12em; color: var(--muted);
+  text-shadow: 0 1px 10px rgba(0, 0, 0, .8);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .head-status {
-  font-size: 12px; color: var(--muted);
+  flex: 0 0 auto;
+  font-size: 11px; color: var(--muted); letter-spacing: .04em;
   display: inline-flex; align-items: center; gap: 6px;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, .8);
 }
 .head-status::before {
   content: ""; width: 6px; height: 6px; border-radius: 50%;
@@ -80,41 +123,69 @@
 }
 .head-status.busy::before { background: var(--accent); box-shadow: 0 0 10px var(--accent); animation: pulse 1.2s infinite; }
 .head-status.off::before { background: var(--faint); box-shadow: none; }
-.head-tools { display: flex; gap: 4px; }
+
+/* 工具栏平时半透明，指上去才亮起来：舞台上别挂一排按钮 */
+.head-tools {
+  flex: 0 0 auto;
+  display: flex; align-items: center; gap: 4px;
+  opacity: .58; transition: opacity .25s var(--ease);
+}
+.head-tools:hover, .head-tools:focus-within { opacity: 1; }
 
 .ico-btn {
-  width: 34px; height: 34px; border-radius: 10px;
-  display: grid; place-items: center; color: var(--muted);
-  transition: background .16s, color .16s;
+  width: 34px; height: 34px; border-radius: 11px;
+  display: grid; place-items: center; color: var(--text-2);
+  background: rgba(10, 10, 15, .42);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(10px);
+  transition: background .16s, color .16s, border-color .16s;
 }
-.ico-btn:hover { background: var(--card); color: var(--text); }
-.ico-btn.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.ico-btn:hover { background: rgba(28, 28, 38, .82); color: var(--text); border-color: var(--line-strong); }
+.ico-btn.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, rgba(10, 10, 15, .5)); }
 .ico-btn svg { width: 17px; height: 17px; }
 
-/* ---------------- 右侧舞台 ---------------- */
-#stage {
-  position: relative;
-  display: flex; flex-direction: column; align-items: center;
-  padding: 34px 26px 22px;
-  border-left: 1px solid var(--line);
-  background:
-    radial-gradient(420px 320px at 50% 6%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 70%),
-    linear-gradient(180deg, rgba(18, 18, 25, .55), rgba(10, 10, 14, .2));
-  overflow: hidden;
+/* 正在出声：名字旁边跳几根小竖条 */
+.voice-bars {
+  display: flex; align-items: flex-end; gap: 2.5px; height: 14px;
+  opacity: 0; transition: opacity .25s;
+  pointer-events: none;
 }
-.stage-glow {
-  position: absolute; inset: -20% -30% auto -30%; height: 62%;
-  background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 22%, transparent), transparent 72%);
-  filter: blur(28px); opacity: .55; pointer-events: none;
-  transition: background 1.2s var(--ease), opacity 1.2s var(--ease);
+.voice-bars.on { opacity: 1; }
+.voice-bars i {
+  width: 2.5px; height: 4px; border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 82%, #fff);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 55%, transparent);
+  animation: bar .9s ease-in-out infinite;
+}
+.voice-bars i:nth-child(2) { animation-delay: .12s; }
+.voice-bars i:nth-child(3) { animation-delay: .24s; }
+.voice-bars i:nth-child(4) { animation-delay: .36s; }
+.voice-bars i:nth-child(5) { animation-delay: .48s; }
+@keyframes bar { 50% { height: 13px; } }
+
+/* 情绪徽标 */
+.stage-mood {
+  display: inline-flex; align-items: center; gap: 7px;
+  margin-right: 4px; padding: 5px 11px; border-radius: 999px;
+  background: color-mix(in srgb, var(--mood, var(--accent)) 14%, rgba(10, 10, 15, .5));
+  border: 1px solid color-mix(in srgb, var(--mood, var(--accent)) 30%, transparent);
+  backdrop-filter: blur(10px);
+  font-size: 11.5px; color: var(--text-2); letter-spacing: .04em;
+  transition: background .6s var(--ease), border-color .6s var(--ease);
+}
+.stage-mood .dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--mood, var(--accent));
+  box-shadow: 0 0 8px var(--mood, var(--accent));
+  transition: background .6s, box-shadow .6s;
 }
 
 @media (max-width: 1120px) {
-  :root { --stage: 300px; }
+  #stage-name { font-size: 17px; }
 }
 @media (max-width: 920px) {
-  #app { grid-template-columns: 64px minmax(0, 1fr); }
-  #stage { display: none; }
   :root { --rail: 64px; }
   .persona-dot { width: 40px; height: 40px; }
+  #chat-head { padding-left: 18px; }
+  .stage-mood { display: none; }
 }

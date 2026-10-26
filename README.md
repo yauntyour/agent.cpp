@@ -14,15 +14,18 @@
 
 ## 它是什么，不是什么
 
-**是**：一张角色卡 = 一个独立的 cell::engine 上下文（独立会话、独立工作线程、独立人设与记忆）。切角色等于换一个人，不是换一个 prompt。
+**是**：一张角色卡 = 一个独立的 cell::engine 上下文（独立会话、独立工作线程、独立人设与记忆）。切角色等于换一个人，不是换一个 prompt；**多个角色可以同时跑** —— 桌面切走的角色、绑定了不同 IM 渠道的角色，各跑各的 agent loop，互不阻塞。
 
-**不是**：工具型助手。`tools` 永久关闭、沙箱 `read-only`、审批通道直接拒绝 —— 陪伴型智能体不需要在你机器上执行命令，它需要的是记得住、说得像、有反应。
+**也是**：把 cell.cpp 的基础工具全量继承下来的智能体。`ls / read / write / edit / rg / exec / find / tw / notice` 九个核心工具默认全部对模型可见，另外两个是外壳自己挂上去的宿主工具：`msg`（发到别的 IM 渠道）和 `act`（指挥 Live2D 身体）。沙箱 `full-access`，`autoallow` 与 `compact` 自动压缩默认开启（都能在 **设置 → 偏好** 里关掉）。桌面拖入 / 粘贴的文件、IM 发来的图片 / 语音 / 视频 / 文件，统一落盘成附件；模型用 `read` 打开看内容（图片、音频会变成多模态块），回复里还能用 `[[sticker:名字]]` 发表情包。
 
-由此带来的三个设计约束，贯穿整份代码：
+**不是**：一个只会输出文字的黑盒。模型的输出是「剧本」——情绪、动作、表情包、语音都从同一段流式文本里解析出来，按各自通道演出或发送。
+
+由此带来的四个设计约束，贯穿整份代码：
 
 1. **演出优先**。模型输出不是最终产物，是「剧本」：情绪标记驱动表情与语音音色，星号里的动作只演不念，正文按句切给 TTS。接了 Live2D 之后，`[[motion:]]` / `[[expr:]]` 还能直接指挥身体。
-2. **服务可插拔**。TTS / ASR 都是可选服务，默认关闭（`off`），配了才生效；各是一份配置（`openai` / `http` / `command` / `off`），界面里改完即时生效，不重新编译。
-3. **传输层无特权**。桌面窗口和浏览器打开的是同一个页面、同一条 HTTP + SSE 通道，没有「只有窗口能调」的私有接口。
+2. **一切输入先落盘**。桌面粘贴 / 拖入的文件、IM 收到的图片语音视频，先变成 `.agent/uploads/` 里的一份文件和一行 `[attach:…]` 清单。上下文里只有路径，模型要用 `read` 打开 —— 会话 JSONL 不会被 base64 撑爆，换模型供应商也不会因为别家的 `image_url` 块报错。
+3. **服务可插拔**。TTS / ASR / IM 都是可选服务，默认关闭（`off`），配了才生效；各是一份配置（TTS·ASR：`openai` / `http` / `command` / `off`，IM：`wechat` / `onebot` / `telegram` / `wecom` / `bridge`），界面里改完即时生效，不重新编译。
+4. **传输层无特权**。桌面窗口和浏览器打开的是同一个页面、同一条 HTTP + SSE 通道，没有「只有窗口能调」的私有接口。
 
 ---
 
@@ -32,7 +35,10 @@
 cell.cpp/cell.cpp        单文件智能体内核（main 改名后整份编进来）
         │
 src/agent-core.hpp       角色内核：角色卡 / 回合管线 / 长期记忆 / 命令总线 / 事件总线
+src/agent-media.hpp      附件层：落盘、清单、历史解析、表情包目录
 src/agent-voice.hpp      服务层：TTS、ASR、宿主侧录音（MCI，浏览器采集失败时的兜底）
+src/agent-im.hpp         接入层：微信(iLink) / QQ(OneBot) / Telegram / 企业微信 / HTTP 桥（全媒体收发）
+src/qr.hpp               二维码编码器（iLink 的登录码是 URL，要本地编码）
 src/agent-http.hpp       本机服务：页面、命令、SSE、音频与头像
 src/agent-ui.hpp         内嵌页面（build_ui.py 生成的 raw string）
 src/agent.cpp            入口：窗口、托盘、单实例、命令行
@@ -43,7 +49,10 @@ src/ui/src/**            页面源码（css / js 分层，按文件名顺序拼�
 | --- | --- | --- |
 | `src/agent.cpp` | 进程外壳 | WebView2 窗口、托盘、单实例互斥、`--serve/--headless/--ui/--smoke` |
 | `src/agent-core.hpp` | 角色内核 | `persona` / `persona_ctx` / `turn_pipeline` / `app_core` |
+| `src/agent-media.hpp` | 附件与表情包 | `media::save` 落盘、`[attach:…]` 清单、历史反解、贴纸目录 |
 | `src/agent-voice.hpp` | 语音服务 | 四种 `kind`，全部走 libcurl + `cell::net::ca_bundle()`；宿主录音是兜底 |
+| `src/agent-im.hpp` | IM 接入 | 五种 `kind`；协议层负责全媒体解析 / 下载 / 发送，回合仍走 `persona_ctx` |
+| `src/qr.hpp` | 二维码 | 字节模式、版本 1–10、四种纠错；输出 SVG，不依赖第三方库 |
 | `src/agent-http.hpp` | 本机服务 | `servic.hpp` + `router`，SSE 每条事件一个 `data:` 行 |
 | `src/agent-ui.hpp` | 内嵌页面 | 生成物，不进版本库手工改 |
 | `src/agent-live2d.hpp` | 自带的默认模型 | `build_live2d.py` 用 `#embed` 打进去的字节表 |
@@ -51,6 +60,8 @@ src/ui/src/**            页面源码（css / js 分层，按文件名顺序拼�
 | `src/ui/src/js/07-live2d.js` | 舞台 | 运行时加载、模型、动作 / 表情 / 口型 |
 | `src/ui/src/js/08-triggers.js` | 触发器引擎 | 事件 → 动作序列，含冷却与内置默认规则 |
 | `src/ui/src/js/09-stage-panel.js` | 舞台面板 | 换模型、情绪映射、规则编辑器 |
+| `src/ui/src/js/11-im.js` | IM 设置 | 渠道子页、扫码、绑定角色 |
+| `src/ui/src/js/12-attach.js` | 附件输入 | 回形针 / 拖拽 / 粘贴、托盘预览、图片 lightbox、贴纸消息 |
 | `build_ui.py` | 装配器 | 骨架 + css/* + js/* → 单页 HTML + C++ 字符串；`@asset(路径)` 换成 data URI |
 
 ### 一次对话怎么走完
@@ -103,6 +114,14 @@ run_turn ──► cell::engine::runner::run_turn
 - **图标只有一张母版**。`assets/icon.png` 是母版，`python assets/make_icon.py` 派生四份：`icon.ico`（16–256，exe / 窗口 / 托盘）、`icon-512.png`（发布用）、`ui-logo.png`（深色界面里的白描版）、`favicon.png`（浏览器标签）。界面里的图不是走路由，而是 `@asset(assets/ui-logo.png)` 在装配时内联成 data URI —— 单文件 exe 里也带着 logo。
 - **窗口关闭 ≠ 退出**。`webview.h` 在 `WM_CLOSE` 时销毁窗口，所以换掉窗口过程只把窗口藏起来，图标挂在自己的隐藏窗口上（`assets/icon.rc` 的图标被 `LoadImageW` 取出来）；托盘菜单里有「显示主窗口 / 打开数据目录 / 退出」。
 - **webview.h 有一处本地改动**（麦克风权限放行，见下面「麦克风」一节）。它是 vendored 的单头文件，升级时注意别覆盖掉。
+- **servic.hpp 有一处本地改动**：补了 chunked 请求体的解码。Node 系的客户端（NapCat 的 OneBot HTTP 上报、
+  各种 wechaty 桥）默认用 `Transfer-Encoding: chunked` 推事件，原版直接回 411，消息一条都进不来。
+- **cell.cpp 是 fork，不是原版**：除了宿主工具扩展点（每个引擎注册一个
+  `host_tools_provider`，`msg` / `act` 就是这么来的）和配套的工具表重建
+  （`mark_tools_dirty` + `shared_ptr` 快照），还补了 provider 级的请求体透传
+  （`provider_entry.extra_body`，本地推理服务的 `enable_thinking` 走这条）、非流式请求的
+  中止探针，以及给宿主工具用的通用上下文槽 `runtime.host_ctx`（核心不读、原样转交）。
+  升级 submodule 时要把这些改动一起带过去。
 - **单实例**。`Local\agent-cpp-desktop` 互斥体；重复启动只是把已有窗口拉到前台（藏在托盘里也能拉出来）。
 
 ### 构建
@@ -158,6 +177,11 @@ agent.exe --debug            开发模式：空数据根时自动生成一个测
 回合进行中，输入框右边的发送键会变成红色的「停止」（Esc 同效），点一下打断她。
 语音合成与语音识别默认关闭，界面里不会出现报错刷屏；接上之后才会自动朗读、才会亮起麦克风。
 
+**换头像**：角色设定里点「换头像」选图之后，会先弹一个截取窗——正方形视口、
+圆形Mask 圈出最终范围，拖动平移、滚轮 / 滑块缩放（图片始终被钳在覆盖视口的范围内，
+裁不出黑边），确认后按当前变换裁出 512×512 PNG 上传。左栏、会话消息、角色设定
+三处的头像都走 `GET /api/avatar/<id>`（`Cache-Control: no-store`），换图即刷新。
+
 ```bash
 python build_ui.py --html                    # 只装配 src/ui/index.html
 build/agent.exe --headless 8787 --ui src/ui/index.html
@@ -173,16 +197,73 @@ build/agent.exe --headless 8787 --ui src/ui/index.html
 │   ├── memory.jsonl      长期记忆，一行一条 {t,text}
 │   └── avatar.png        头像（没有就用界面生成的渐变脸）
 ├── sessions/             cell.cpp 的会话存储（每个角色一个 cwd key）
+├── uploads/<owner>/      聊天附件：桌面拖入/粘贴的、IM 收到的（owner = 角色 id 或 im-<渠道 id>）
+├── stickers/             全局表情包（也可以放在 personas/<id>/stickers/，角色自己的优先）
 ├── audio/                TTS 成品（保留两天）
 ├── mic/                  录音与上传的音频（保留两天）
 ├── live2d/
 │   ├── runtime/          运行时库（点「下载运行时」取回，不随 exe 分发）
 │   └── models/<任意>/     模型（自带一份默认的，第一次运行自动解出来）
 ├── config.json           模型供应商与当前模型（cell.cpp 的配置）
-├── agent.json            语音服务、界面偏好、上次会话
+├── agent.json            语音服务、IM 渠道、界面偏好、上次会话
 ├── .crypt / .key         加密库：所有 API Key 只在这里
 └── logs/cell.log
 ```
+
+---
+
+## 多模态输入
+
+桌面输入框支持把「不止文字」的东西交给她：
+
+- **回形针** 选文件（可以多选）；**拖拽**到对话区任意位置；**粘贴**剪切板里的截图或文件。
+- 选中的附件先进入输入框上方的托盘：图片显示缩略图，视频 / 音频 / 其它文件显示名字、大小和类型；
+  可以逐个删除。上限 **8 个 / 单文件 48 MiB**（后端硬限制；页面按 `state.attach` 展示）。
+- 发送之后消息流立刻显示本地预览；回合一结束，历史里也是同样的缩略图 / 播放器 / 文件卡片。
+  图片点开可以看大图（lightbox，Esc 或点背景关闭）。
+
+服务端不把文件塞进上下文，而是：
+
+```text
+.agent/uploads/<角色 id>/<时间-随机-原名>.<ext>
+[attach:image] 截图.png | D:\...\.agent\uploads\debug\173000-3f2a-截图.png
+```
+
+正文后面跟一行清单 + 一句提示。模型要看内容时调用 `read`，`read_multimodal` 会把图片 / 音频
+变成多模态块（视频 / PDF 返回元数据）；不想看就不看，不会白白占用上下文。
+历史接口把清单反解成 `attachments[]`，页面据此画附件；IM 进来的媒体走同一条路。
+
+表情包也是附件的一种：`.agent/personas/<id>/stickers/`（优先）或 `.agent/stickers/` 里放
+png / jpg / gif / webp，文件名（去扩展名）就是名字。提示词里会列出可用名字，模型在回复里写
+`[[sticker:名字]]` 就能发（一次最多两个）；桌面画在消息流里，IM 作为图片发回原会话。
+**设置 → 表情包** 可以上传 / 删除 / 打开目录。`msg` 工具也支持 `sticker` 参数，用来发到别的会话。
+
+## 工具、审批与上下文压缩
+
+这一版把 cell.cpp 的**全部基础工具**都继承了下来：
+
+| 工具 | 用途 |
+| --- | --- |
+| `ls` `read` `rg` `find` | 看目录、读文件（含多模态）、搜内容、按规则找文件 |
+| `write` `edit` | 新建 / 改写文件（edit 有 read-before-edit 保护） |
+| `exec` | 跑命令（默认 30s，最长 300s；结果以 `exitcode=N` 结尾） |
+| `tw` `notice` | cell.cpp 的 Teamwork 子代理与消息总线（多个子 agent 并行干活） |
+| `msg` | 往别的 IM 渠道 / 会话说一句（支持贴纸） |
+
+默认设置：
+
+- **沙箱 `full-access`**：工具能读写整个工作目录并执行命令。
+- **`autoallow` 开**：`exec` / `tw run` 不再逐条弹审批，而是先让一次独立的 LLM 安全检查判断
+  这条动作是否安全；其余写操作直接放行。日志里会留一行 `[autoallow]`。
+- **`compact` 自动压缩开**：长回合（三次以上工具调用 / 上下文过大）结束后自动把前文压成摘要，
+  上下文不会越聊越爆。也可以在设置里手动触发一次 `context.compact`。
+
+两项都能在 **设置 → 偏好** 里关掉；关掉 autoallow 后需要审批的工具会直接拒绝（本机界面没有
+逐条审批弹窗），所以默认保持开启。`state` 里带 `tools / autoallow / compact_auto`，脚本可以检查。
+
+> 这是一个「把电脑交给她」级别的开关。默认开启是用户明确要求的；不放心就先去偏好里关掉。
+> 工具的默认 cwd 是角色自己的目录（`.agent/personas/<id>/`），但 full-access 下 `exec` 可以访问
+> 绝对路径；沙箱仍会挡敏感路径（`.agent/.crypt`、密钥）和 `..` 穿越。
 
 ---
 
@@ -249,6 +330,321 @@ WebView2 就是 Chromium，`http://127.0.0.1:8899` 属于可信来源（`isSecur
 - **兜底**：浏览器通道拿不到麦克风（旧运行时、没有设备、权限被拒）时自动退回宿主的 `voice.record.start`（Windows MCI），提示会说明切换了来源；两条都不通就直说原因，并指向「上传音频转写」。
 - **浏览器里打开**：`--headless 8787 --ui src/ui/index.html` 时页面跑在真浏览器里，权限框由浏览器自己弹，行为和普通网页一致。
 
+---
+
+## IM 接入（微信 / QQ / Telegram / 企业微信 / 桥）
+
+她本来只在桌面窗口里。接一个渠道之后，你在手机上说一句，回到桌面上还能接着聊 ——
+**同一个人、同一段会话、同一份记忆**，只是换了个入口。
+
+- 每条进来的消息就是一次普通回合：进的是 `persona_ctx::queue_turn`，跑的是同一个
+  `cell::engine::runner::run_turn`（多轮、工具调用、打断、上下文压缩照旧），回复通过这次回合的回调送回原会话 —— 没有第二条管线。
+- **文字之外的输入也接住了**：图片、语音、视频、文件、表情包都会下载 / 解密 / 落盘到
+  `.agent/uploads/im-<渠道 id>/`，上下文里出现 `[attach:…]` 清单，模型用 `read` 打开看内容。
+  语音如果平台给了转写就直用；没给且配了 ASR，会 best-effort 转写一段。
+- 回复可以带 `[[sticker:名字]]`：表情包作为图片发回原会话；文字先到、贴纸后到。
+- 渠道可以**绑定角色**：不同渠道绑不同角色时各自跑自己的 engine 线程（多角色并行）；留空则跟随桌面上当前选中的角色。
+- 私聊 / 群聊是两套独立策略（开放 / 仅白名单；群里关闭 / 任何人 @ / 白名单 @ / 白名单任意消息），见下面「谁能跟她说话」。
+
+### 五种接法
+
+| `kind` | 平台 | 收 | 发 | 媒体 | 要公网地址 | 要本地客户端 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `wechat` | **微信个人号（iLink / ClawBot，官方）** | `getupdates` 长轮询 35s | `sendmessage`（必须带 context_token） | 图片 / 语音 / 视频 / 文件 / 表情包（CDN，AES-128-ECB） | 不要 | 不要 |
+| `onebot` | QQ（NapCat / go-cqhttp / Lagrange） | 反向 HTTP 推到 `/api/im/<id>` | `send_private_msg` / `send_group_msg` | 图片 / 语音 / 视频 / 文件 / 表情包 / CQ 码 / 引用 / 合并转发 / 戳一戳 | 不要 | 要 |
+| `telegram` | Telegram Bot | `getUpdates` 长轮询 25s | `sendMessage` + `sendPhoto` 等 | 图片 / 语音 / 视频 / 文件 / 动图 / 贴纸 | 不要 | 不要 |
+| `wecom` | 企业微信自建应用 | 加密回调 `/api/im/<id>` | `cgi-bin/message/send` | 图片 / 语音 / 视频 / 文件 | 要（frp / ngrok） | 不要 |
+| `bridge` | 任何本地桥（个人微信 hook / wechaty / 自己的脚本） | POST `/api/im/<id>` | POST 到配置的地址 | JSON 里带 `media`（base64 / url / path） | 不要 | 要 |
+
+**微信优先走 `wechat`（iLink）**：腾讯 2026-03-22 开放的官方个人号 Bot API，纯 HTTP/JSON，
+扫码绑定，不用装任何客户端、也不用公网地址。企业微信那档留着给「必须有企业应用」的场景。
+
+界面里：**设置 → IM 接入 → 添加渠道 → 点进渠道子页**。子页里依次是状态、扫码登录（会上二维码）、
+凭据、私聊 / 群聊策略、**绑定角色**；保存后线程在后台起来，「测试连接」会去要一次身份
+（`getMe` / `get_login_info` / `gettoken`），拿得到才算通。
+
+> 设置本身是一列模块（模型服务 / 模型 / 语音合成 / 语音识别 / IM 接入 / 表情包 / 偏好），
+> 点进去是各自的子页，左上角退回。加一个模块 = 往 `src/ui/src/js/05-settings.js` 的
+> `SETTINGS_MODULES` 里加一行，别的文件不用动。
+
+### 能收什么
+
+| 平台 | 图片 | 语音 | 视频 | 文件 | 表情包 | 其它 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Telegram | photo / document 图片 | voice / audio | video / animation / video_note | document | sticker（静态 webp / 动态 tgs 落成文件） | caption 并进正文 |
+| QQ（OneBot） | image（url / base64 / 本地路径 / get_image 兜底） | record | video | file（群文件） | mface / 带表情标记的 image | CQ 码、at、reply、forward、json/xml 卡片、dice/rps、戳一戳 |
+| 微信（iLink） | image_item（CDN 解密） | voice_item（有转写用转写，否则 audio） | video_item | file_item | 微信没有独立贴纸类型，按图片收 | ref_msg 引用进正文、group_id 分群 |
+| 企业微信 | image（PicUrl / media_id） | voice（media_id） | video（media_id） | file（media_id） | — | — |
+| 桥 | `media[].kind=image/sticker` | `kind=audio` | `kind=video` | `kind=file` | `kind=sticker` | 顶层 `image` / `sticker` / `file` 兼容 |
+
+进上下文的形式统一是：
+
+```text
+From 微信@[私聊]-o9cq80…：你看这张
+[attach:image] photo.jpg | D:\...\.agent\uploads\im-wx\173000-3f2a-photo.jpg
+（对方发来了 1 个附件。图片 / 音频可以用 read 工具打开对应路径看清内容…）
+```
+
+### Telegram
+
+1. `@BotFather` → `/newbot` → 拿到 `123456:ABC…`；
+2. 渠道里**只填 token** 就能收发（`getMe` 通过即视为接通）。国内直连 `api.telegram.org`
+   不通时再补代理（`http://127.0.0.1:7890` 之类）；只有走自建反代才需要填 API 根；
+3. 保存。私聊直接说话；群里要 @ 它，或者回复它的消息。
+4. 媒体：入站走 `getFile` + `/file/bot<token>/<path>` 下载；出站按类型用
+   `sendPhoto` / `sendSticker` / `sendVoice` / `sendAudio` / `sendVideo` / `sendDocument`，
+   自己拼 multipart，不依赖第三方库。
+
+### QQ（OneBot v11）
+
+要让 NapCat 开两样东西：**HTTP 服务器**（我们调它发消息）和 **HTTP 事件上报**
+（它把消息推给我们）。图形界面在 WebUI（默认 `http://127.0.0.1:6099`，token 看
+`NapCat.Shell/config/webui.json`）→ 网络配置 → 新建；也可以直接改
+`NapCat.Shell/config/onebot11_<QQ号>.json`：
+
+```jsonc
+{
+  "network": {
+    "httpServers": [{
+      "name": "agent-http", "enable": true, "host": "127.0.0.1", "port": 3000,
+      "enableCors": true, "enableWebsocket": false,
+      "messagePostFormat": "array", "token": ""
+    }],
+    "httpClients": [{                       // 反向 HTTP：事件推到我们这儿
+      "name": "agent-post", "enable": true,
+      "url": "http://127.0.0.1:8899/api/im/qq",
+      "messagePostFormat": "array", "reportSelfMessage": false, "token": ""
+    }]
+  }
+}
+```
+
+改完**重启 NapCat**（配置文件只在启动时读）。验证一句就够：
+
+```bash
+curl -s --noproxy '*' http://127.0.0.1:3000/get_login_info   # 应返回昵称和 QQ 号
+```
+
+渠道里「HTTP API 地址」填 `http://127.0.0.1:3000`。`token` 两边要么都留空（只接受本机
+回调），要么填同一个（对端放 `Authorization: Bearer`）。反向 HTTP 的端口必须等于服务端口 ——
+桌面模式默认在 8899..8918 里挑，想固定就 `agent.exe --serve 8899`。
+
+这一版针对 QQ 做了这些处理（OneBot 的报文各家实现不完全一致，所以尽量多兜一层）：
+
+- **两种 message 形态**：数组和 CQ 码字符串都认，`&#91; &#93; &#44; &amp;` 反转义。
+- **群里的 at**：`at` 到自己 → 算 mention 并从正文去掉；at 别人 → `@昵称`；`at qq=all` → `@全体成员`。
+- **引用 / 合并转发**：`reply` 在正文前加 `（回复 <id>）`；`forward` 有 `content` 就拍平成文本。
+- **表情**：`face` 的常见编号映射成 emoji（14 🙂 / 5 😭 / 178 🤔，其余 `[face:id]`）；
+  `mface`（魔法表情）按贴纸收，带 url / emoji_id / summary。
+- **戳一戳**：`notice_type=notify, sub_type=poke` 且目标是机器人 → 进一条「（戳了戳你）」，mention=true，她能反应。
+- **图片**：`url` / `data.base64` / `file` 本地路径依次尝试；都没有就调对端 `get_image`。
+  `sub_type==1` 或 summary 带「表情」的按贴纸处理。
+- **语音 / 视频 / 文件**：`record` / `video` / `file` 段；下载失败时用 `get_record` / `get_file` 兜底。
+- **出站**：优先发本地绝对路径（NapCat 同机可读），失败再用 `base64://` 重试；贴纸走 image 段
+  `sub_type=1`；文件走 file 段。
+- **回调状态码**：OneBot 的上报不止消息（心跳、输入状态、撤回、戳一戳…）。所有鉴权通过的
+  上报都回 200（不认识的事件直接忽略），否则 NapCat 会在自己日志里刷「新消息事件 HTTP 上报
+  返回快速操作失败 Error: Unexpected status code: 400」。
+
+### 微信（iLink / ClawBot）
+
+2026-03-22 起，微信个人号有了官方 Bot API：iLink（产品名叫 ClawBot）。
+纯 HTTP/JSON、长轮询、扫码绑定 —— 不用 hook、不用公网地址。
+
+1. 渠道类型选「微信（iLink / ClawBot）」，保存；
+2. 子页里会出一张二维码（`get_bot_qrcode` 返回的是一个**待编码 URL**，
+   由 `src/qr.hpp` 在本地编码成 SVG，不联网、不引第三方库）；
+3. 手机微信扫码 → 手机上点确认 → `get_qrcode_status` 变成 `confirmed`，
+   `bot_token` / `baseurl` / `ilink_bot_id` 直接写进本地加密库；
+4. 之后后台就靠 `getupdates` 长轮询收消息（35 秒挂起 + 游标），
+   回复走 `sendmessage`，**必须带上入站消息的 `context_token`**（协议规定，不带你送不出去），
+   正文放在 `item_list[0] = {type:1, text_item:{text}}` 里，且 `message_type`/`message_state`
+   要是 2、`from_user_id` 要是机器人自己的 `ilink_user_id`（缺字段服务端只回一个 `ret`，
+   消息静默丢掉 —— 所以这里把「空响应 / 非 JSON」也当失败报出来，不谎报成功）。
+
+媒体（这一版打通了）：
+
+- 入站 `item_list` 的 type 1/2/3/4/5（文字 / 图片 / 语音 / 文件 / 视频）都会解析；
+  图片、语音、文件、视频挂着 CDN 引用（`media.encrypt_query_param` + `aes_key`），
+  下载后按 AES-128-ECB 解密。`aes_key` 有两种编码（base64(16 字节) 与 base64(hex ascii)），
+  图片还可能带 `image_item.aeskey`（32 位 hex，优先用它），两种都兼容。
+- 语音如果带服务端转写（`voice_item.text`）就直接进正文；否则落成音频附件。
+- 出站媒体：`getuploadurl`（filekey / rawsize / md5 / aeskey / 密文长）→ AES-128-ECB 加密 →
+  CDN `/upload`（响应头 `x-encrypted-param` 就是引用）→ `sendmessage` 的
+  `image_item` / `file_item` / `video_item` / `voice_item`。贴纸按图片发。
+- CDN 地址默认 `novac2c.cdn.weixin.qq.com/c2c`；`bot_base` 是回环地址时用
+  `<bot_base>/c2c`（这样假服务端可以完整联调）。
+
+已经登录过的渠道不会再要二维码（子页直接显示「已登录」）；要换号点「重新扫码」。
+会话过期（`ret: -14`）时后台会**清掉这组 token** 并让子页重新出现二维码，扫一次即可。
+
+### 企业微信（另一种微信接入）
+
+建自建应用，记下 `corpid` / `AgentId` / `Secret`；在「接收消息」里配公网回调
+`https://<你的域名>/api/im/<渠道 id>`、`Token`、`EncodingAESKey`。回调是 AES-256-CBC 加密的，
+验签与解密在 `agent-im.hpp` 里（SHA1 / AES 走 OpenSSL）。收到消息**立刻回空串**
+（企业微信要求 5 秒内应答），真正的回答走 `message/send` 主动推送，长回合不会被 5 秒卡死。
+
+媒体：入站 `image` / `voice` / `video` / `file`（PicUrl 优先，否则 `media/get`）；
+出站先 multipart 上传 `media/upload` 拿 `media_id`，再按 msgtype 发。
+语音要 amr，非 amr 会由服务端 errcode 报错；42001 / 40014 会自动清 token 缓存重取。
+
+### 个人微信兜底：通用桥
+
+万一 iLink 不能用（老版本、账号限制），还有 `bridge`：跑一个本地桥（wechaty / WeChatFerry /
+自己的脚本），它 POST 给我们、我们 POST 回它。协议就两条 JSON：
+
+```jsonc
+// 桥 → 她    POST /api/im/<id>     Header: X-Im-Secret: <渠道 token>
+{ "chat_id": "wxid_xxx", "user_id": "wxid_xxx", "user_name": "小王", "text": "在吗", "group": false,
+  "media": [{ "kind": "image", "name": "a.jpg", "mime": "image/jpeg", "url": "https://…" }] }
+
+// 她 → 桥    POST <渠道里填的「桥的接收地址」>
+{ "chat_id": "wxid_xxx", "text": "*笑了一下* 在呢。",
+  "media": [{ "kind": "sticker", "name": "happy", "mime": "image/png", "data_b64": "iVBOR…" }] }
+```
+
+`media` 每项三选一：`url`（http 直链）、`data_b64`（内联 base64）、`path`（本机绝对路径）。
+单条出站媒体 ≤ 24 MiB。
+
+### 扫码登录
+
+二维码不归这个程序「造」，只有三种来源，界面统一画在渠道子页里：
+
+| `kind` | 码从哪来 | 谁算登录成功 |
+| --- | --- | --- |
+| `wechat` | iLink `get_bot_qrcode` 返回的 URL，本地编码 | `get_qrcode_status` = `confirmed`，拿到 `bot_token` |
+| `onebot` | **不显示二维码**：NapCat 登录在它自己的界面里做 | 渠道子页只查一次 `get_login_info`，拿到 `user_id` 就显示「已登录：昵称」，不轮询、不闪烁 |
+| `bridge` | 桥自己 POST 上来：`{"qr": "<base64 png>", "state": "wait"}` | 桥再推一条 `"state": "online"` |
+
+个人 QQ / 个人微信的**登录协议本身**不在这个仓库里 —— 那是 NapCat / wechaty 的活。
+我们只负责把码显示出来、轮询状态、登录成功后自动把线程拉起来。
+
+OneBot（NapCat）没有取码接口：子页只做一次 `get_login_info` 检查，在 NapCat 自己的界面里
+登录好，这里就显示「已登录：昵称」。状态变了点「重新检查」再查一次 —— 不做自动轮询，
+避免「正在取二维码」和「已登录」互相覆盖的闪烁。
+面板状态存在页面级缓存里（按渠道 id），抽屉重绘不会重新取码 —— 否则二维码和「已登录」
+会互相覆盖，看起来就是闪。
+
+### 来源标记、工具与回复投递
+
+每条进来的消息都按普通 `role: user` 进上下文，正文带一行来源前缀：
+
+```text
+From QQ@[私聊]-2742466374：你好呀
+From 微信@[群聊：摸鱼群]-wxid_abc：晚上聚餐吗
+```
+
+平台名是 `微信 / QQ / Telegram / 企业微信 / 桥`。模型靠它知道该用什么语气、回给谁。
+
+回复默认送回**这条消息所在**的会话，不需要任何工具。工具现在是 cell.cpp 的全量基础工具
+（read / write / exec / tw …），`msg` 只是其中一个，用于「确实要发到别的渠道 / 会话」：
+
+```jsonc
+{ "text": "记得吃饭", "channel": "wx", "chat": "wxid_abc" }          // 两个可选字段留空 = 原会话
+{ "text": "", "sticker": "happy", "channel": "qq", "chat": "12345" } // 发个表情包
+```
+
+- 发往「本回合来源会话」的 `msg` 调用会被拒绝并提示「直接正常回复」；
+- 工具正文会过一次标记清洗，`[[emo:…]]`、`*动作*` 的处理和正常回复一致；
+- 表情包名字来自当前角色的 sticker 目录（提示词里会列出来），模型更常用的是直接在正文里写
+  `[[sticker:名字]]`。
+
+### 谁能跟她说话（私聊 / 群聊分开）
+
+渠道子页里是两块独立策略，不再用一个白名单同时管两边：
+
+**私聊**（`private_mode`）
+
+| 值 | 行为 |
+| --- | --- |
+| `open`（默认） | 谁都能私聊 |
+| `allow` | 只有 `private_allow` 里的 user id |
+
+**群聊**（`group_mode`）
+
+| 值 | 行为 |
+| --- | --- |
+| `off`（默认） | 群里完全不响应 |
+| `mention` | 群里**任何人** @ 她就回（不要求白名单，适合公开群） |
+| `allow_mention` | `group_allow` 里的人 **@ 她** 才回（旧版非空白名单的语义） |
+| `allow` | `group_allow` 里的人**任意消息**都回（不用 @，适合熟人小群） |
+
+**群白名单**（`group_ids`）：最外层的一道门，填了就只处理这些群（群号 / chat id，
+逗号分隔），空 = 不限制。它跟上面的群聊模式是「与」的关系。
+
+`user id` / 群 id 就是平台自己的 id（Telegram 数字 id、QQ 号、群号、企业微信 userid、
+桥给的 `user_id`）。被挡下的消息会留一行日志（`ignored chan=… user=… group=…`），
+不会静默消失。
+
+> 从旧版本升级：老配置里的单一 `allow` 会自动迁移 —— 空 = 私聊开放 + 群聊关闭；
+> 非空 = 私聊白名单 + 群里白名单用户 @ 才回，行为和以前一致。新配置不再写这个字段。
+
+### 多角色并行
+
+每个角色本来就是一个独立的 `cell::engine` 上下文 + 独立工作线程。打开过的角色不会被关掉，
+所以多角色是**真并行**的：
+
+```text
+QQ 渠道（绑角色 A） ──┐
+微信渠道（绑角色 B） ──┤   各自 queue_turn 到自己的 persona_ctx
+桌面（当前角色 C）   ──┘   三条 worker 线程各跑各的 run_turn
+```
+
+- 渠道子页的「绑定角色」留空 = 跟随桌面当前角色；填了 = 固定交给那个角色。
+- 绑定到还没打开的角色时，第一条消息会顺手把它打开（不抢桌面 active），
+  之后它就一直活着；切回桌面只是换显示，不会打断 IM 里正在跑的回合。
+- 所有角色共享同一份供应商 / 模型配置与加密库，但会话、记忆、人设各自独立。
+- 需要「一个角色里再开多个子 agent」时用 `tw` 工具（cell.cpp 的 Teamwork），
+  子 agent 并行跑、进度经 `notice` 总线回来。
+
+### 线程模型
+
+```text
+渠道 A: [轮询线程(telegram/wechat)] → 入站队列 ┄┐
+        [发送线程]                  ← 渠道队列 ┄┤
+渠道 B: [发送线程]                  ← 渠道队列 ┄┤
+                                              └→ 一条入站分发线程（按序变回合）
+                                                     └→ persona_ctx::queue_turn
+                                                           └→ 角色的回合线程（每角色一条，天然串行）
+```
+
+- **渠道之间完全并行**：某个 bot 被限流、反代挂了、OneBot 断线，只堵它自己那条发送线程。
+- 同一渠道内保序：长回复按句分条（Telegram 4096 字 / OneBot 4000 字 / 企业微信 1800 字节），
+  分片不会乱序，也不会串到别的会话；贴纸永远排在文字之后。
+- 媒体下载 / 解密在轮询线程或回调线程里做，**不占命令锁**（桌面不会被一张大图卡住）。
+- 改配置会换掉该渠道的线程。网络调用带中止探针，所以换配置、退出都不会卡在超时上。
+- 线程只拿自己的配置快照，从不碰 `cmd_mx` —— 否则改配置时 join 会自锁。
+
+### 安全
+
+`/api/im/<id>` 是**唯一**不做 loopback Host 校验的路由：企业微信的回调必须经过反向代理，
+Host 到这里已经是公网域名。鉴权因此下沉到渠道自己：
+
+| 渠道 | 凭据 |
+| --- | --- |
+| `wecom` | `msg_signature`（token / timestamp / nonce / 密文的 SHA1）+ AES 解密 |
+| `onebot` / `bridge` | `Authorization: Bearer <token>` / `X-Im-Secret: <secret>` |
+| 没配 token 的渠道 | 只接受**本机直连**（Host 是 127.0.0.1），经代理来的一律 403 |
+
+浏览器发起的跨站请求（`Sec-Fetch-Site: cross-site`）在路由入口就挡掉。
+密钥只进 `.agent/.crypt`，`agent.json` 里只有 `has_token` 这类布尔。
+
+内存里也一样：`im::channel` 的 `token` / `aes_key` / `corp_secret` / `bot_token` 是
+`im::secret`（= `cell::encrypt::secure_string`，`sodium_malloc` 出来的 mlock 页，
+析构 `sodium_memzero`），不是 `std::string`；渠道结构体被线程快照、扫码请求到处拷贝，
+这样每份拷贝也跟着锁内存、跟着清零。拼 URL / 请求头这类一次性明文用完立刻 `wipe`
+（Telegram 的 token 在 URL 里、企业微信的 `corpsecret` 在 query 里，都是协议强制的）。
+
+进来媒体的落盘位置是 `.agent/uploads/im-<渠道 id>/`，页面通过
+`GET /api/uploads/<owner>/<file>` 取（路径白名单 + `weakly_canonical` 校验，防目录穿越）。
+
+### 还没做
+
+- 主动开口推到 IM：`proactive` 现在只在桌面上说话，还没有「她在微信上先找你」；
+- OneBot 大文件分片上传（普通图片 / 视频 / 文件够用）；
+- 企业微信语音只认 amr（不是转码器，收到别的格式由服务端报错）；
+- 真实平台联调仍需要各自的凭据；仓库里的 e2e 用假服务端覆盖协议形状。
 
 ---
 
@@ -260,14 +656,16 @@ WebView2 就是 Chromium，`http://127.0.0.1:8899` 属于可信来源（`isSecur
 | --- | --- |
 | 状态 | `state` |
 | 角色 | `personas.list` `persona.select` `persona.save` `persona.delete` `persona.avatar` |
-| 对话 | `send` `stop` |
-| 会话 | `session.new` `sessions.list` `session.select` `session.delete` |
+| 对话 | `send`（可带 `attachments`） `stop` |
+| 会话 | `session.new` `sessions.list` `session.select` `session.delete` `context.clear`（`{"remember":true}` 先把这段对话整理成长期记忆再清空） `context.compact`（立即压缩一次上下文） |
 | 记忆 | `memory.list` `memory.add` `memory.forget` `memory.clear` |
 | 语音 | `voice.record.start` `voice.record.stop`（宿主录音，兜底） `voice.transcribe` `voice.speak` `voice.stop` |
 | 舞台 | `live2d.scan` `live2d.open_dir` `live2d.fetch_runtime` |
 | 服务 | `service.set` `service.test` |
+| IM | `im.set` `im.del` `im.test` `im.qr`（渠道 / 凭据 / 扫码登录 / 绑定角色；改完后台重启该渠道的线程） |
+| 表情包 | `sticker.list` `sticker.add`（`{data_b64,ext,name?}`） `sticker.del` `open.stickers_dir` |
 | 模型 | `providers.add` `providers.rm` `providers.select` `provider.set_key` `models.fetch` `model.set` `think.set` |
-| 杂项 | `ui.pref` `open.data_dir` `app.quit` |
+| 杂项 | `ui.pref`（`voice_reply` / `asr_auto_send` / `autoallow` / `compact_auto`） `open.data_dir` `app.quit` |
 
 ```bash
 # 用脚本跟她说话（host 头必须是回环地址，服务只认自己）
@@ -284,10 +682,16 @@ curl -sN http://127.0.0.1:8899/api/events    # SSE：一条事件一行 data:
 | `GET /api/events` | SSE 事件流 |
 | `GET /api/audio/<file>` | TTS 成品（文件名白名单，防目录穿越） |
 | `GET /api/avatar/<id>` | 角色头像 |
+| `GET /api/uploads/<owner>/<file>` | 聊天附件（图片 / 语音 / 视频 / 文件；UTF-8 文件名白名单 + 规范化校验） |
+| `GET /api/stickers/<pid>/<name>` | 表情包图片（名字来自 stickers 目录） |
 | `GET /api/live2d/<…>` | 舞台资源（运行时库 + 模型文件，逐段白名单） |
+| `GET\|POST /api/im/<id>` | IM 平台回调（唯一不做 loopback 校验的路由，见「IM 接入」） |
 | `POST /api/cmd/<name>` | 命令总线 |
 
-事件：`hello` `turn_begin` `answer_begin` `answer` `reason` `status` `progress` `error` `emo` `act` `motion` `expr` `round` `turn_end` `voice` `voice_error` `voice_stop` `memory` `asr` `voice_state` `quit`。除 `hello` 外每条都带 `persona`，页面按角色分流。
+事件：`hello` `turn_begin` `answer_begin` `answer` `reason` `status` `progress` `error` `emo` `act` `motion` `expr` `sticker` `round` `turn_end` `voice` `voice_error` `voice_stop` `memory` `asr` `voice_state` `quit`。除 `hello` 外每条都带 `persona`，页面按角色分流。
+
+- `sticker`：`{"name":"happy","url":"/api/stickers/<pid>/happy"}` —— 桌面回合里模型写了 `[[sticker:名字]]`；IM 回合则作为媒体发回来源会话。
+- `hello` / `state` 新增 `stickers` `attach`（`max_files` / `max_bytes`）`tools` `autoallow` `compact_auto`。
 
 ---
 
@@ -302,6 +706,7 @@ curl -sN http://127.0.0.1:8899/api/events    # SSE：一条事件一行 data:
 | `[[expr:f01]]` | 模型表情（装了 Live2D 才有） | 画布 |
 | `*轻轻抱住你*` | 动作 / 神态 | 舞台字幕，**不朗读** |
 | `[[remember]]一句话事实[[/remember]]` | 值得长期记住的事 | `memory.jsonl`，下一轮进入 system prompt |
+| `[[sticker:名字]]` | 发表情包（一次最多两个） | 桌面：贴着正文画一张；IM：作为图片发回原会话 |
 | `[[idle]]`（用户侧注入） | 主动开口的时刻 | 触发一次「她先说话」 |
 
 流式输出会把标记切碎，所以 `marker_stream` 做增量解析：遇到可能的标记前缀就按住不放，确定不是标记再原样吐出来。回合结束时正文会被改写成「干净版」，标记不进入下一轮上下文，刷新页面也看不到。
@@ -310,7 +715,11 @@ curl -sN http://127.0.0.1:8899/api/events    # SSE：一条事件一行 data:
 
 ## 舞台：Live2D 与触发器
 
-舞台右侧就是一块 Live2D 画布，情绪、动作、触发器都归它。**没有光球兜底**：模型或运行时不在时画布上给一句能点的提示，点一下直接打开舞台面板。面板入口是情绪徽标右边那个旋钮图标。
+整块窗口就是舞台。Live2D 铺满背景（不是右栏里的一小块），对话改成压在画面下沿的**字幕**：
+最新一句最亮、最大，往上翻是历史，越旧越淡；台词之间的空隙是穿透的，点上去就是在戳她。
+立绘按高度撑满，场景图（方形 / 横向）铺满后裁掉溢出的边；情绪变了，背景那团柔光也跟着换颜色。
+
+**没有光球兜底**：模型或运行时不在时画布上给一句能点的提示，点一下直接打开舞台面板。面板入口在顶栏（旋钮图标），紧挨着情绪徽标。
 
 ![舞台](assets/shots/stage.png)
 
@@ -344,13 +753,32 @@ curl -sN http://127.0.0.1:8899/api/events    # SSE：一条事件一行 data:
 | 字段 | 作用 |
 | --- | --- |
 | `live2d.model` | 相对 `.agent/live2d/` 的路径；空 = 舞台留白 |
-| `live2d.scale` `x` `y` | 缩放与偏移（偏移是画布宽/高的比例，`0.1` = 10%） |
+| `live2d.scale` `x` `y` | 缩放与偏移。`scale` 在取景结果上再乘一档（`1` = 立绘按高度撑满 / 场景图铺满窗口），偏移是视口宽/高的比例，`0.1` = 10% |
 | `live2d.emo` | 情绪 → `{expr, motion}`；`expr` 可以是序号也可以是表情名 |
 | `live2d.groups` `expressions` | 加载后自动写回，供提示词引用 |
 
 ### 模型直接演
 
-装了模型以后 `compose_prompt` 会多一段「舞台」约定，于是模型可以自己指挥身体：
+装了模型以后，模型有两种方式指挥身体。**优先用 `act` 工具**：它是外壳注册的宿主工具，
+参数表跟着模型走 —— `motion` / `expr` 的 `enum` 就是从角色卡 `live2d.groups` /
+`live2d.expressions` 里现取的（页面加载完模型会自己写回去），所以换模型之后模型看到的
+可选项也跟着换，不需要改一行代码。
+
+```jsonc
+act({ "motion": "TapHead",        // 动作组，播一次
+      "expr": "smile",            // 表情
+      "emo": "shy",               // 情绪：表情 / 音色 / 灯光一起变
+      "act": "headpat",           // 具名动作，界面配中文字幕
+      "say": "……别、别摸头",       // 舞台上飘一句，不进正文、不朗读
+      "params": { "ParamAngleX": 20 }, "ms": 300,
+      "fx": "pulse" })            // 演出效果：shake / pulse / flash / dim
+```
+
+一次调用 = 一个连贯动作，工具会把它拆成 `emo` / `expr` / `motion` / `act` / `stage_say` /
+`param` / `fx` 几条事件推给页面，和标记法走同一个广播。名字写错不会静默失败 ——
+返回的是「这个模型有哪些」，模型可以自己改。
+
+旧的标记法仍然有效（旧角色卡还在用）：
 
 | 标记 | 含义 | 去向 |
 | --- | --- | --- |
@@ -359,6 +787,28 @@ curl -sN http://127.0.0.1:8899/api/events    # SSE：一条事件一行 data:
 | `[[expr:f01]]` | 切表情 | `expr` 事件 → 画布 |
 
 `[[emo:…]]` 仍然管情绪：它同时驱动语气徽标、语音音色，以及 `live2d.emo` 里的表情 / 动作映射。
+
+### 宿主工具：核心不认识的那些
+
+`cell.cpp` 的 `build_tools` 只硬编码九个核心工具（`ls read write edit rg exec find tw notice`）。
+其余的都从宿主注册的 `host_tools_provider` 来：外壳按**每个引擎**注册一个提供者，返回一组
+`host_tool`（名字 / 描述 / JSON Schema / 策略 / 执行函数），`build_tools` 把它们当成普通工具
+挂进工具表。`msg` 和 `act` 都是这样定义的，代码全在 `src/agent-core.hpp` 里 —— 核心不认识
+「IM 渠道」，也不认识「Live2D」。
+
+```cpp
+// 一个角色一个引擎，各自注册；提供者自己决定「这一轮要挂哪些工具」
+u->eng = std::make_unique<cell::engine::runner>(u->pcfg, vault, u->h, false,
+                                                [this, pc] { return host_tools(*pc); });
+```
+
+执行函数直接填 `cell::ToolOutput`（正文 / 多模态 blocks / 失败原因），返回 `false` 表示
+没做成；宿主工具因此和内置工具一样能回图片，不需要核心再加能力。
+
+参数表是**可以重建**的：换模型之后调 `eng->mark_tools_dirty()`，下一回合开头在回合线程上
+重建一次。重建换的是 `shared_ptr` 快照，所以 `tw` 的后台作业即使还在跑，手里那份旧表也
+不会被释放。`act` 的 `enum` 就是这么跟着模型走的 —— 建表时把角色卡的 `live2d` 快照下来，
+不再借 `thread_local` 传上下文。
 
 ### 触发器：事件 → 动作
 
@@ -431,7 +881,11 @@ build/agent.exe --smoke-engine   # 期望输出 SMOKE_UI_OK (probing engine) + S
 ## 边界
 
 - **录音在页面里做**（`getUserMedia` + `MediaRecorder`），三个平台一条路；宿主的 MCI 录音只是 Windows 上的兜底，正常流程不会走到它。
-- **不做工具调用**。这是取舍，不是缺功能：陪伴型智能体不需要在你机器上执行命令，也就不需要审批 UI。
+- **工具默认全开，这是把电脑交给她**。cell.cpp 的十个基础工具（含 `exec` / `tw`）都在模型视野里，
+  沙箱 `full-access`、`autoallow` 默认开。不喜欢就去 **设置 → 偏好** 关掉 autoallow（关掉后需要审批的
+  工具会被直接拒绝）；工具以角色目录为默认 cwd，但 full-access 下 `exec` 能访问绝对路径。
+- **附件与贴纸都是磁盘上的一等公民**：`.agent/uploads/` 与 `.agent/stickers/` 由服务端按白名单读取，
+  页面走 `/api/uploads`、`/api/stickers`；不认识的路径一律 404，不做任意文件读取。
 - **服务密钥只在本机加密库里**，`agent.json` 永远只有 `has_key`。
 - **服务只绑 127.0.0.1**，并校验 `Host` / `Origin` / `Sec-Fetch-Site`。想从别的机器访问，请自己套一层反向代理并加上认证 —— 默认配置下它不是网络服务。
 

@@ -1,0 +1,83 @@
+/* 头像截取弹窗：选图之后先裁再上传。
+   正方形视口 + 圆形遮罩（界面里所有头像都是圆的），拖动平移、滚轮/滑块缩放。 */
+#crop-modal {
+  position: fixed; inset: 0; z-index: 80;
+  display: grid; place-items: center;
+  background: rgba(4, 4, 8, .62); backdrop-filter: blur(3px);
+  animation: fade .2s both;
+}
+.crop-card {
+  width: min(360px, 92vw);
+  padding: 20px 22px 18px;
+  background: linear-gradient(180deg, #15151c, #101016);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2);
+  animation: crop-in .24s var(--ease) both;
+}
+@keyframes crop-in { from { opacity: 0; transform: translateY(10px) scale(.98); } }
+
+.crop-head {
+  font-size: 14px; font-weight: 600; letter-spacing: .04em;
+  margin-bottom: 14px; text-align: center;
+}
+
+.crop-stage {
+  position: relative;
+  width: min(272px, 66vw); height: min(272px, 66vw);
+  margin: 0 auto;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  cursor: grab;
+  touch-action: none;
+}
+.crop-stage:active { cursor: grabbing; }
+#crop-canvas { display: block; width: 100%; height: 100%; }
+
+/* 圆形Mask：圈出最终头像的范围，圈外压暗 */
+.crop-ring {
+  position: absolute; inset: 0; margin: auto;
+  width: 86%; height: 86%;
+  border-radius: 50%;
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 80%, #fff);
+  box-shadow: 0 0 0 9999px rgba(4, 4, 8, .46);
+  pointer-events: none;
+}
+
+.crop-zoom-row {
+  display: flex; align-items: center; gap: 12px;
+  margin: 14px 4px 0;
+}
+.crop-zoom-ico { color: var(--muted); display: inline-flex; }
+.crop-zoom-ico svg { width: 16px; height: 16px; }
+#crop-zoom {
+  flex: 1; height: 18px; background: none; -webkit-appearance: none; appearance: none;
+}
+#crop-zoom::-webkit-slider-runnable-track {
+  height: 4px; border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent) var(--fill, 0%), var(--card-2) var(--fill, 0%));
+}
+#crop-zoom::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 14px; height: 14px; margin-top: -5px; border-radius: 50%;
+  background: #fff; border: 0; box-shadow: var(--shadow-1);
+}
+#crop-zoom::-moz-range-track { height: 4px; border-radius: 999px; background: var(--card-2); }
+#crop-zoom::-moz-range-progress { height: 4px; border-radius: 999px; background: var(--accent); }
+#crop-zoom::-moz-range-thumb {
+  width: 14px; height: 14px; border-radius: 50%;
+  background: #fff; border: 0; box-shadow: var(--shadow-1);
+}
+
+.crop-tip {
+  margin-top: 10px; text-align: center;
+  font-size: 11px; color: var(--faint); line-height: 1.6;
+}
+
+.crop-actions {
+  display: flex; gap: 8px; justify-content: flex-end;
+  margin-top: 16px;
+}
+.crop-actions .btn { min-width: 84px; }

@@ -11,6 +11,20 @@
 <body>
 <div id="app">
 
+  <!-- ================= 全屏舞台 =================
+       Live2D 不再是右栏里的一个小方块，而是铺满整个窗口的背景层：
+       界面浮在上面（字幕、输入、角色栏），模型在下面演。
+       舞台层是 fixed + z-index:0，所以它不参与 #app 的栅格。 -->
+  <div id="stage-frame">
+    <div class="stage-glow" id="stage-glow"></div>
+    <div class="l2d-wrap idle" id="l2d-wrap">
+      <canvas id="l2d-canvas"></canvas>
+      <button class="l2d-status" id="l2d-status">Live2D 还没就绪 · 点这里接入</button>
+    </div>
+    <!-- 压暗层：底部给字幕让位，四周收一圈暗角 -->
+    <div class="stage-veil"></div>
+  </div>
+
   <!-- ================= 左侧角色栏 ================= -->
   <aside id="rail">
     <div class="rail-mark" title="agent">
@@ -29,35 +43,66 @@
     </button>
   </aside>
 
-  <!-- ================= 中间对话 ================= -->
+  <!-- ================= 中间：字幕轨 ================= -->
   <main id="chat">
     <header id="chat-head">
-      <div class="head-main">
-        <span id="head-name">—</span>
-        <span class="head-status" id="head-status">连接中</span>
+      <div class="head-id">
+        <div class="head-line">
+          <span id="stage-name">—</span>
+          <span class="head-status" id="head-status">连接中</span>
+          <div class="voice-bars" id="voice-bars"><i></i><i></i><i></i><i></i><i></i></div>
+        </div>
+        <div class="head-sub" id="stage-sub"></div>
       </div>
       <div class="head-tools">
+        <div class="stage-mood"><span class="dot" id="mood-dot"></span><span id="mood-text">平静</span></div>
+        <button class="ico-btn" id="btn-stage" title="Live2D 与触发器">
+          <svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 12h4M12 12h8M4 17h12M20 17h0"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="17" r="2"/></svg>
+        </button>
         <button class="ico-btn" id="btn-sessions" title="会话记录">
           <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
         </button>
         <button class="ico-btn" id="btn-voice" title="朗读回复">
           <svg viewBox="0 0 24 24"><path d="M11 5 6.5 9H3v6h3.5L11 19V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18 6a8.5 8.5 0 0 1 0 12"/></svg>
         </button>
-        <button class="ico-btn" id="btn-new-session" title="新会话">
-          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+        <button class="ico-btn" id="btn-clear-context" title="清空上下文">
+          <svg viewBox="0 0 24 24"><path d="m13.5 10.5 8-8"/><path d="M15 12.2c.8.8.9 2 .2 2.9L10.5 21l-7.5-7.5 5.7-4.9c.9-.7 2.1-.6 2.9.2Z"/><path d="m7.4 10.3 6.3 6.3"/><path d="m4.6 17.6 1.6-1.6"/></svg>
         </button>
       </div>
     </header>
 
-    <div id="stream" aria-live="polite"></div>
+    <!-- 字幕轨：从下往上堆，越旧的越淡；拖动滚轮可以回看历史 -->
+    <section id="subs">
+      <div class="stage-bubble" id="stage-bubble"></div>
+      <div class="stage-act" id="stage-act"></div>
+      <div id="stream" aria-live="polite"></div>
 
-    <div id="typing" class="typing hidden">
-      <span class="tdot"></span><span class="tdot"></span><span class="tdot"></span>
-      <span id="typing-label">正在想</span>
-    </div>
+      <div id="typing" class="typing hidden">
+        <span class="tdot"></span><span class="tdot"></span><span class="tdot"></span>
+        <span id="typing-label">正在想</span>
+      </div>
+
+      <!-- 舞台状态条：主动关怀 / 角色设定 / 记忆 -->
+      <div class="stage-stats">
+        <button class="stat" id="btn-proactive">
+          <span class="stat-k">主动关怀</span>
+          <span class="stat-v" id="proactive-v">关</span>
+        </button>
+        <button class="stat" id="btn-edit-persona">
+          <span class="stat-k">角色设定</span>
+          <span class="stat-v">编辑</span>
+        </button>
+        <span class="stage-mem" id="stage-mem">记忆 0 条</span>
+      </div>
+    </section>
 
     <footer id="composer">
+      <!-- 附件托盘：图片显示缩略图，其它显示文件 chip，每个都能删 -->
+      <div id="attach-tray" class="hidden"></div>
       <div class="composer-box">
+        <button class="attach-btn" id="btn-attach" title="添加图片或文件（也可以拖进来 / 粘贴）">
+          <svg viewBox="0 0 24 24"><path d="m21.4 11.6-8.9 8.9a6 6 0 0 1-8.5-8.5l8.9-8.9a4 4 0 0 1 5.7 5.7l-8.9 8.9a2 2 0 0 1-2.8-2.8l8.2-8.2"/></svg>
+        </button>
         <button class="mic-btn" id="btn-mic" title="点击开始 / 结束录音">
           <span class="mic-lvl"></span>
           <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"/></svg>
@@ -71,47 +116,15 @@
       </div>
       <div class="composer-hint" id="composer-hint"></div>
     </footer>
-  </main>
 
-  <!-- ================= 右侧角色舞台 ================= -->
-  <aside id="stage">
-    <div class="stage-glow" id="stage-glow"></div>
-
-    <div class="stage-frame" id="stage-frame">
-      <!-- 舞台就是 Live2D：模型画在这块画布上。
-           模型或运行时不在的时候这里给一句能点的提示，不再有备用的光球。 -->
-      <div class="l2d-wrap idle" id="l2d-wrap">
-        <canvas id="l2d-canvas"></canvas>
-        <button class="l2d-status" id="l2d-status">Live2D 还没就绪 · 点这里接入</button>
+    <!-- 拖拽文件进对话区时的提示（拖动中才显示） -->
+    <div id="drop-overlay">
+      <div class="drop-card">
+        <svg viewBox="0 0 24 24"><path d="m21.4 11.6-8.9 8.9a6 6 0 0 1-8.5-8.5l8.9-8.9a4 4 0 0 1 5.7 5.7l-8.9 8.9a2 2 0 0 1-2.8-2.8l8.2-8.2"/></svg>
+        <span>松开，作为附件发给她</span>
       </div>
-      <div class="voice-bars" id="voice-bars"><i></i><i></i><i></i><i></i><i></i></div>
-      <div class="stage-bubble" id="stage-bubble"></div>
     </div>
-
-    <div class="stage-name" id="stage-name">—</div>
-    <div class="stage-sub" id="stage-sub"></div>
-    <div class="stage-mood-row">
-      <div class="stage-mood"><span class="dot" id="mood-dot"></span><span id="mood-text">平静</span></div>
-      <button class="stage-tune" id="btn-stage" title="Live2D 与触发器">
-        <svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 12h4M12 12h8M4 17h12M20 17h0"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="17" r="2"/></svg>
-      </button>
-    </div>
-
-    <div class="stage-act" id="stage-act"></div>
-
-    <div class="stage-stats">
-      <button class="stat" id="btn-proactive">
-        <span class="stat-k">主动关怀</span>
-        <span class="stat-v" id="proactive-v">关</span>
-      </button>
-      <button class="stat" id="btn-edit-persona">
-        <span class="stat-k">角色设定</span>
-        <span class="stat-v">编辑</span>
-      </button>
-    </div>
-
-    <div class="stage-mem" id="stage-mem">记忆 0 条</div>
-  </aside>
+  </main>
 </div>
 
 <!-- ================= 抽屉：设置 / 记忆 / 角色编辑 / 会话 ================= -->
@@ -124,9 +137,52 @@
   <div class="drawer-body" id="drawer-body"></div>
 </section>
 
+<!-- 图片全屏预览：Esc 或点背景关闭（逻辑在 12-attach.js） -->
+<div id="lightbox" class="hidden" role="dialog" aria-modal="true" aria-label="图片预览">
+  <button class="lightbox-close" id="lightbox-close" title="关闭">
+    <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+  </button>
+  <img id="lightbox-img" alt="">
+</div>
+
 <div id="toasts"></div>
 <input type="file" id="avatar-file" accept="image/png,image/jpeg,image/webp,image/gif" class="hidden">
 <input type="file" id="audio-file" accept="audio/*" class="hidden">
+<!-- 输入框附件 / 表情包上传：真正的读取在 12-attach.js 与 05-settings.js -->
+<input type="file" id="attach-file" multiple class="hidden">
+<input type="file" id="sticker-file" accept="image/png,image/jpeg,image/gif,image/webp" multiple class="hidden">
+
+<!-- ================= 头像截取 ================= -->
+<div id="crop-modal" class="hidden">
+  <div class="crop-card">
+    <div class="crop-head">截取头像</div>
+    <div class="crop-stage" id="crop-stage">
+      <canvas id="crop-canvas"></canvas>
+      <div class="crop-ring"></div>
+    </div>
+    <div class="crop-zoom-row">
+      <span class="crop-zoom-ico">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.6-4.6M11 8.5v5M8.5 11h5"/></svg>
+      </span>
+      <input type="range" id="crop-zoom" min="0" max="100" step="1" value="0" aria-label="缩放">
+    </div>
+    <div class="crop-tip">拖动调整位置 · 滚轮或滑块缩放 · 圆形区域为最终头像</div>
+    <div class="crop-actions">
+      <button class="btn ghost" id="crop-cancel">取消</button>
+      <button class="btn primary" id="crop-ok">使用这张</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 确认弹窗（清空上下文这类不可撤销的动作） ================= -->
+<div id="ask-modal" class="hidden">
+  <div class="ask-card" role="dialog" aria-modal="true" aria-labelledby="ask-title">
+    <div class="ask-head" id="ask-title">确认</div>
+    <div class="ask-text" id="ask-text"></div>
+    <div class="ask-note hidden" id="ask-note"></div>
+    <div class="ask-actions" id="ask-actions"></div>
+  </div>
+</div>
 
 <script>/*@js*/</script>
 </body>

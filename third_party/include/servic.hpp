@@ -252,11 +252,58 @@ namespace servic
                                  co_await self->respond_and_close("HTTP/1.1 400 Bad Request", "invalid content-length");
                                  co_return;
                              }
-                             if (!header_value(request, "Transfer-Encoding").empty())
+                             // chunked 请求体：Node 系客户端（NapCat 的 OneBot HTTP 上报、各种 wechaty 桥）
+                             // 默认就是这么发的。老版本这里直接回 411，于是事件一条都进不来。
+                             std::string transfer = header_value(request, "Transfer-Encoding");
+                             for (char &c : transfer)
+                                 c = (char)std::tolower((unsigned char)c);
+                             if (transfer.find("chunked") != std::string::npos)
                              {
-                                 co_await self->respond_and_close("HTTP/1.1 411 Length Required",
-                                                                  "chunked request bodies are not supported");
-                                 co_return;
+                                 std::string chunked = request.substr(head_size);
+                                 request.resize(head_size);
+                                 auto pull = [&]() -> asio::awaitable<void>
+                                 {
+                                     asio::streambuf buf(2048);
+                                     size_t got = co_await self->socket_.async_read_some(buf.prepare(2048), asio::use_awaitable);
+                                     buf.commit(got);
+                                     chunked.append(asio::buffers_begin(buf.data()), asio::buffers_end(buf.data()));
+                                 };
+                                 size_t pos = 0;
+                                 for (;;)
+                                 {
+                                     size_t eol;
+                                     while ((eol = chunked.find("\r\n", pos)) == std::string::npos)
+                                     {
+                                         if (chunked.size() > self->max_buf_)
+                                         {
+                                             co_await self->respond_and_close("HTTP/1.1 413 Payload Too Large", "request body too large");
+                                             co_return;
+                                         }
+                                         co_await pull();
+                                     }
+                                     std::string size_line = chunked.substr(pos, eol - pos);
+                                     if (auto semi = size_line.find(';'); semi != std::string::npos)
+                                         size_line.resize(semi); // 忽略 chunk 扩展
+                                     unsigned long long n = std::strtoull(size_line.c_str(), nullptr, 16);
+                                     if (n == 0)
+                                         break; // 结束块；末尾的 trailer 不需要
+                                     if (n > self->max_buf_ || request.size() + n > self->max_buf_)
+                                     {
+                                         co_await self->respond_and_close("HTTP/1.1 413 Payload Too Large", "request body too large");
+                                         co_return;
+                                     }
+                                     while (chunked.size() < eol + 2 + (size_t)n + 2)
+                                     {
+                                         if (chunked.size() > self->max_buf_ + (size_t)n)
+                                         {
+                                             co_await self->respond_and_close("HTTP/1.1 413 Payload Too Large", "request body too large");
+                                             co_return;
+                                         }
+                                         co_await pull();
+                                     }
+                                     request.append(chunked, eol + 2, (size_t)n);
+                                     pos = eol + 2 + (size_t)n + 2;
+                                 }
                              }
                              if (content_length < 0 || (size_t)content_length > self->max_buf_)
                              {

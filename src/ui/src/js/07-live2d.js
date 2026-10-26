@@ -115,20 +115,29 @@ function l2dCollectInfo() {
   L2D.expressions = (settings.expressions || []).map(e => e.Name).filter(Boolean);
 }
 
+/* 取景：画布铺满整个窗口，所以不是「塞进一个框」，而是「让画面填满视口」。
+   - 立绘（高明显大于宽）：按高度撑满，人站在画面中央，左右留白交给光晕；
+   - 场景图（方形 / 横向）：铺满窗口，多出来的部分裁掉 —— 上下各裁一点，
+     并且往下压 10% 的溢出量，让头顶留白多一点（下面那截反正被字幕压着）。
+   cfg.scale / x / y 依然有效：在取景结果上再乘一档、再偏一点。 */
 function l2dFit() {
   const app = L2D.app, model = L2D.model;
   if (!app || !model) return;
   const res = app.renderer.resolution || 1;
   const W = app.renderer.width / res;
   const H = app.renderer.height / res;
+  if (W < 2 || H < 2) return;
   const cfg = L2D.cfg;
   const iw = model.internalModel.width || 1;
   const ih = model.internalModel.height || 1;
-  const scale = Math.min(W / iw, H / ih) * (Number(cfg.scale) || 1) * 1.02;
+  const fitW = W / iw, fitH = H / ih;
+  const base = ih > iw * 1.15 ? fitH : Math.max(fitW, fitH);
+  const scale = base * (Number(cfg.scale) || 1);
   model.scale.set(scale);
   model.anchor.set(0.5, 0.5);
   model.x = W * (0.5 + (Number(cfg.x) || 0));
-  model.y = H * (0.5 + (Number(cfg.y) || 0));
+  const overflow = Math.max(0, ih * scale - H);
+  model.y = H * (0.5 + (Number(cfg.y) || 0)) + overflow * 0.1;
 }
 
 function l2dDestroy() {
@@ -212,11 +221,12 @@ async function l2dMountInner(path, token) {
     l2dSetStatus('loading', '加载模型…');
     l2dDestroy();
     L2D.canvas = $('#l2d-canvas');
-    const rect = L2D.canvas.getBoundingClientRect();
+    // 用 offsetWidth/Height（布局尺寸）而不是 getBoundingClientRect：
+    // 舞台上有呼吸缩放，rect 会带上 transform，量出来的尺寸会越滚越大
     L2D.app = new PIXI.Application({
       view: L2D.canvas,
-      width: Math.max(2, Math.round(rect.width)),
-      height: Math.max(2, Math.round(rect.height)),
+      width: Math.max(2, L2D.canvas.offsetWidth || 2),
+      height: Math.max(2, L2D.canvas.offsetHeight || 2),
       backgroundAlpha: 0,
       antialias: true,
       autoDensity: true,
@@ -370,10 +380,28 @@ function l2dStartTicker() {
   });
 }
 
-/* ---------------- 点哪里算哪里 ---------------- */
-function l2dZoneFromPoint(cx, cy) {
+/* ---------------- 点哪里算哪里 ----------------
+   画布铺满整屏，不能按视口切三段（那样点空白也算摸头）。
+   先算出模型在屏幕上的实际方框，落在框外就不算。 */
+function l2dModelBox() {
+  const m = L2D.model, app = L2D.app;
+  if (!m || !app) return null;
+  const res = app.renderer.resolution || 1;
+  const W = app.renderer.width / res, H = app.renderer.height / res;
+  const b = m.getBounds();                 // 世界坐标就是 CSS 像素
   const rect = L2D.canvas.getBoundingClientRect();
-  const y = (cy - rect.top) / Math.max(1, rect.height);
+  const kx = rect.width / Math.max(1, W), ky = rect.height / Math.max(1, H);
+  return {
+    x: rect.left + b.x * kx, y: rect.top + b.y * ky,
+    w: b.width * kx, h: b.height * ky,
+  };
+}
+
+function l2dZoneFromPoint(cx, cy) {
+  const box = l2dModelBox();
+  if (!box || box.w < 8 || box.h < 8) return 'body';
+  if (cx < box.x || cx > box.x + box.w || cy < box.y || cy > box.y + box.h) return '';
+  const y = (cy - box.y) / box.h;
   if (y < 0.34) return 'head';
   if (y < 0.78) return 'body';
   return 'hand';
@@ -383,7 +411,7 @@ function l2dBindPointer() {
   const c = L2D.canvas;
   if (!c || c.__l2dBound) return;
   c.__l2dBound = true;
-  // 模型自己声明了 HitAreas 就听它的；否则按画布高度切三段
+  // 模型自己声明了 HitAreas 就听它的；否则按模型方框的高度切三段
   if (L2D.model) {
     try {
       L2D.model.on('hit', (names) => {
@@ -399,7 +427,9 @@ function l2dBindPointer() {
     // 库的 hit 走的是 pointertap（pointerup 上发），等它先出手再兜底
     setTimeout(() => {
       if (L2D.hitFired) return;
-      if (typeof TRIG !== 'undefined') TRIG.fire('click', { zone: l2dZoneFromPoint(x, y) });
+      const zone = l2dZoneFromPoint(x, y);
+      if (!zone) return;   // 点在画布上但没有模型：不算戳她
+      if (typeof TRIG !== 'undefined') TRIG.fire('click', { zone });
     }, 40);
   });
 }
@@ -410,9 +440,10 @@ function l2dScheduleResize() {
   if (l2dRoTimer) clearTimeout(l2dRoTimer);
   l2dRoTimer = setTimeout(() => {
     if (!L2D.app || !L2D.model || !L2D.canvas) return;
-    const rect = L2D.canvas.getBoundingClientRect();
-    if (rect.width < 2 || rect.height < 2) return;
-    L2D.app.renderer.resize(Math.round(rect.width), Math.round(rect.height));
+    // 同上：布局尺寸，不带呼吸缩放的 transform
+    const w = L2D.canvas.offsetWidth, h = L2D.canvas.offsetHeight;
+    if (w < 2 || h < 2) return;
+    L2D.app.renderer.resize(w, h);
     l2dFit();
   }, 140);
 }

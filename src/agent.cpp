@@ -15,6 +15,7 @@
 //   cell.cpp（单文件智能体内核，main 改名后整份编进来）
 //   agent-core.hpp   角色内核 + 命令总线 + 事件总线
 //   agent-voice.hpp  TTS / ASR / 原生录音
+//   agent-im.hpp     IM 接入：Telegram / QQ(OneBot) / 企业微信 / HTTP 桥
 //   agent-http.hpp   HTTP + SSE + 音频/头像静态资源
 //   agent-ui.hpp     内嵌的界面（build_ui.py 生成）
 //
@@ -350,16 +351,20 @@ namespace app
 
         app_core core;
 
-        // 智能体只负责说话与记事：工具永远关闭，沙箱收到只读
+        // 默认继承 cell.cpp 的全部基础工具（ls/read/write/edit/rg/exec/find/tw/notice/msg）：
+        // 沙箱 full-access、autoallow（由 LLM 做执行前的安全判断）、长对话自动压缩。
+        // 这里只是进程级初值；core.start() 读到 agent.json 之后会按用户偏好覆盖
+        // autoallow / compact_auto（默认都是开）。
         if (auto res = cell::config::load())
             core.cfg = *res;
         else
             log.warn("app", std::format("config load: {}", res.error()));
-        core.cfg.tools = false;
-        core.cfg.sandbox_mode = "read-only";
+        core.cfg.tools = true;
+        core.cfg.sandbox_mode = "full-access";
         core.cfg.compact_auto = true;
-        cell::box::sandbox_mode() = cell::box::SandboxMode::ReadOnly;
-        cell::box::autoallow_enabled() = false;
+        core.cfg.autoallow = true;
+        cell::box::sandbox_mode() = cell::box::SandboxMode::FullAccess;
+        cell::box::autoallow_enabled() = true;
         cell::sys::pool_max_setting() = 4;
 
         // 默认空角色：只有开发模式（--debug / --smoke*）才自动生成测试角色

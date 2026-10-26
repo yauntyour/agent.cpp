@@ -286,10 +286,24 @@ function showAct(name) {
 }
 
 let moodTimer = null;
+
+/* 情绪 → 舞台打光的颜色。角色卡的主色管界面，这一层只管「光」：
+   开心偏暖、难过偏冷、生气偏红，换情绪时整块背景的柔光跟着换。 */
+const MOOD_LIGHT = {
+  neutral: '#8b7cff', happy: '#ffc46b', sad: '#6b9cff', angry: '#ff6b6b',
+  shy: '#ff8fb8', surprised: '#ffd166', thinking: '#7fd3ff', affection: '#ff7fb0',
+};
+
+function setMoodLight(name) {
+  const c = MOOD_LIGHT[name] || MOOD_LIGHT.neutral;
+  document.documentElement.style.setProperty('--mood', c);
+}
+
 function setEmotion(name, fromVoice) {
   const emo = (name || 'neutral').toLowerCase();
   S.emotion = emo;
   $('#mood-text').textContent = EMO_ZH[emo] || emo;
+  setMoodLight(emo);
   // 表情交给模型：映射写在角色卡 live2d.emo 里
   l2dSetEmotion(emo);
   if (!fromVoice) {
@@ -298,6 +312,7 @@ function setEmotion(name, fromVoice) {
     moodTimer = setTimeout(() => {
       if (!AUDIO.playing) {
         $('#mood-text').textContent = EMO_ZH.neutral;
+        setMoodLight('neutral');
         l2dSetEmotion('neutral');
       }
     }, 14000);
@@ -309,6 +324,7 @@ function paintStage() {
   $('#stage-name').textContent = p.name || '—';
   $('#stage-sub').textContent = p.subtitle || '';
   $('#mood-text').textContent = EMO_ZH[S.emotion] || '平静';
+  setMoodLight(S.emotion);
   $('#stage-mem').textContent = `记忆 ${S.memory.length} 条`;
   const pro = $('#btn-proactive');
   pro.classList.toggle('on', !!p.proactive);

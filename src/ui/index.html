@@ -51,6 +51,8 @@
 
   --rail: 74px;
   --stage: 348px;
+  /* 字幕轨 / 输入框共用的内容宽度：一屏里读起来最舒服的行长 */
+  --lane: 760px;
   --ease: cubic-bezier(.22, .61, .36, 1);
 }
 
@@ -81,9 +83,9 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 :focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent); outline-offset: 2px; }
 ::selection { background: color-mix(in srgb, var(--accent) 38%, transparent); }
 
-/* 细长的提示条 */
+/* 细长的提示条：浮在输入框上方，别压住输入框 */
 #toasts {
-  position: fixed; left: 50%; bottom: 122px; transform: translateX(-50%);
+  position: fixed; left: 50%; bottom: 196px; transform: translateX(-50%);
   display: flex; flex-direction: column; gap: 8px; align-items: center;
   z-index: 90; pointer-events: none;
 }
@@ -102,23 +104,43 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 
 /* ==== css/02-shell.css ================================================ */
 
+/* 骨架：舞台铺满整个窗口，界面浮在它上面。
+   #app 只有两列 —— 角色栏 + 内容列；Live2D 是 fixed 的独立层（见 07-live2d.css），
+   不占栅格，所以窗口怎么缩，模型都是满屏的。 */
+
 #app {
+  position: relative;
   display: grid;
-  grid-template-columns: var(--rail) minmax(0, 1fr) var(--stage);
+  grid-template-columns: var(--rail) minmax(0, 1fr);
+  /* 显式把唯一那行钉在视口高度上。不写这条时隐式行是 auto，字幕一多就把整行
+     撑得比视口还高：#stream 永远 clientHeight == scrollHeight（不滚），
+     撑出去的部分被 body{overflow:hidden} 裁掉，既看不见也滚不到。 */
+  grid-template-rows: minmax(0, 1fr);
   height: 100vh; height: 100dvh;
+  background: var(--bg);
+}
+
+/* ---------------- 舞台层 ---------------- */
+/* 整块画布 + 一层压暗。pointer-events 保持默认：空白处的点击要能落到模型上
+   （#chat 的空白区域是穿透的，见下面的 pointer-events 规则）。 */
+#stage-frame {
+  position: fixed; inset: 0;
+  z-index: 0;
+  overflow: hidden;
   background:
-    radial-gradient(1100px 620px at 78% -12%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 62%),
-    linear-gradient(180deg, var(--bg-2), var(--bg) 42%);
+    radial-gradient(1200px 720px at 50% 14%, color-mix(in srgb, var(--accent) 11%, transparent), transparent 66%),
+    linear-gradient(180deg, #0b0b11, #07070b 62%);
 }
 
 /* ---------------- 左侧角色栏 ---------------- */
 #rail {
+  position: relative; z-index: 3;
   display: flex; flex-direction: column; align-items: center;
   gap: 10px; padding: 16px 0 14px;
   border-right: 1px solid var(--line);
-  background: rgba(10, 10, 14, .55);
-  backdrop-filter: blur(8px);
-  z-index: 3;
+  /* 贴着画布的一层玻璃，不遮住角色 */
+  background: linear-gradient(90deg, rgba(8, 8, 12, .78), rgba(8, 8, 12, .34));
+  backdrop-filter: blur(10px);
 }
 .rail-mark { width: 44px; height: 44px; display: grid; place-items: center; margin-bottom: 8px; }
 .rail-logo {
@@ -160,23 +182,46 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .rail-btn.active { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
 .rail-btn svg { width: 19px; height: 19px; }
 
-/* ---------------- 中间对话 ---------------- */
-#chat { display: flex; flex-direction: column; min-width: 0; position: relative; }
-
-#chat-head {
-  height: 60px; flex: 0 0 60px;
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 0 22px 0 26px;
-  border-bottom: 1px solid var(--line);
-  background: linear-gradient(180deg, rgba(16, 16, 22, .86), rgba(16, 16, 22, .32));
-  backdrop-filter: blur(12px);
-  z-index: 2;
+/* ---------------- 内容列 ---------------- */
+/* min-height:0 不能少：flex/grid 子项的 auto 最小尺寸会让它按内容撑开，
+   #stream 就永远没有可滚动的余地。
+   pointer-events:none 让空白处的点击穿到画布上（戳一下她）；只有真正要点的
+   几块（顶栏、字幕、输入框）自己把事件收回来。 */
+#chat {
+  position: relative; z-index: 1;
+  display: flex; flex-direction: column;
+  min-width: 0; min-height: 0;
+  pointer-events: none;
 }
-.head-main { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
-#head-name { font-size: 15px; font-weight: 600; letter-spacing: .01em; }
+#chat > * { pointer-events: auto; }
+#subs { pointer-events: none; }        /* 字幕轨本身不挡模型，只有字幕条收事件 */
+#subs > * { pointer-events: auto; }
+
+/* ---------------- 顶栏：她的名字 + 状态 ---------------- */
+#chat-head {
+  flex: 0 0 auto;
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+  padding: 16px clamp(18px, 3vw, 34px) 0 24px;
+  pointer-events: none;
+}
+#chat-head > * { pointer-events: auto; }
+.head-id { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.head-line { display: flex; align-items: center; gap: 10px; min-width: 0; }
+#stage-name {
+  font-size: 19px; font-weight: 600; letter-spacing: .14em;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, .8), 0 0 30px rgba(0, 0, 0, .5);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.head-sub {
+  font-size: 11.5px; letter-spacing: .12em; color: var(--muted);
+  text-shadow: 0 1px 10px rgba(0, 0, 0, .8);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .head-status {
-  font-size: 12px; color: var(--muted);
+  flex: 0 0 auto;
+  font-size: 11px; color: var(--muted); letter-spacing: .04em;
   display: inline-flex; align-items: center; gap: 6px;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, .8);
 }
 .head-status::before {
   content: ""; width: 6px; height: 6px; border-radius: 50%;
@@ -184,231 +229,403 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 }
 .head-status.busy::before { background: var(--accent); box-shadow: 0 0 10px var(--accent); animation: pulse 1.2s infinite; }
 .head-status.off::before { background: var(--faint); box-shadow: none; }
-.head-tools { display: flex; gap: 4px; }
+
+/* 工具栏平时半透明，指上去才亮起来：舞台上别挂一排按钮 */
+.head-tools {
+  flex: 0 0 auto;
+  display: flex; align-items: center; gap: 4px;
+  opacity: .58; transition: opacity .25s var(--ease);
+}
+.head-tools:hover, .head-tools:focus-within { opacity: 1; }
 
 .ico-btn {
-  width: 34px; height: 34px; border-radius: 10px;
-  display: grid; place-items: center; color: var(--muted);
-  transition: background .16s, color .16s;
+  width: 34px; height: 34px; border-radius: 11px;
+  display: grid; place-items: center; color: var(--text-2);
+  background: rgba(10, 10, 15, .42);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(10px);
+  transition: background .16s, color .16s, border-color .16s;
 }
-.ico-btn:hover { background: var(--card); color: var(--text); }
-.ico-btn.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.ico-btn:hover { background: rgba(28, 28, 38, .82); color: var(--text); border-color: var(--line-strong); }
+.ico-btn.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, rgba(10, 10, 15, .5)); }
 .ico-btn svg { width: 17px; height: 17px; }
 
-/* ---------------- 右侧舞台 ---------------- */
-#stage {
-  position: relative;
-  display: flex; flex-direction: column; align-items: center;
-  padding: 34px 26px 22px;
-  border-left: 1px solid var(--line);
-  background:
-    radial-gradient(420px 320px at 50% 6%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 70%),
-    linear-gradient(180deg, rgba(18, 18, 25, .55), rgba(10, 10, 14, .2));
-  overflow: hidden;
-}
-.stage-glow {
-  position: absolute; inset: -20% -30% auto -30%; height: 62%;
-  background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 22%, transparent), transparent 72%);
-  filter: blur(28px); opacity: .55; pointer-events: none;
-  transition: background 1.2s var(--ease), opacity 1.2s var(--ease);
-}
-
-@media (max-width: 1120px) {
-  :root { --stage: 300px; }
-}
-@media (max-width: 920px) {
-  #app { grid-template-columns: 64px minmax(0, 1fr); }
-  #stage { display: none; }
-  :root { --rail: 64px; }
-  .persona-dot { width: 40px; height: 40px; }
-}
-
-/* ==== css/03-stage.css ================================================ */
-
-/* 角色舞台：一块 Live2D 画布。
-   表情和动作由模型自己演，界面只负责排版、台词和状态。
-   画布上没有模型时给一句能点的提示（见 07-live2d.css 的 .l2d-status）。 */
-
-.stage-frame {
-  position: relative; width: 100%;
-  display: grid; place-items: center;
-  margin-top: 6px; flex: 0 0 auto;
-}
-
+/* 正在出声：名字旁边跳几根小竖条 */
 .voice-bars {
-  position: absolute; bottom: -6px; left: 50%; transform: translateX(-50%);
-  display: flex; align-items: flex-end; gap: 3px; height: 22px;
+  display: flex; align-items: flex-end; gap: 2.5px; height: 14px;
   opacity: 0; transition: opacity .25s;
   pointer-events: none;
 }
 .voice-bars.on { opacity: 1; }
 .voice-bars i {
-  width: 3px; height: 6px; border-radius: 3px;
-  background: color-mix(in srgb, var(--accent) 80%, #fff);
+  width: 2.5px; height: 4px; border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 82%, #fff);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 55%, transparent);
   animation: bar .9s ease-in-out infinite;
 }
 .voice-bars i:nth-child(2) { animation-delay: .12s; }
 .voice-bars i:nth-child(3) { animation-delay: .24s; }
 .voice-bars i:nth-child(4) { animation-delay: .36s; }
 .voice-bars i:nth-child(5) { animation-delay: .48s; }
-@keyframes bar { 50% { height: 20px; } }
+@keyframes bar { 50% { height: 13px; } }
 
-/* ---------------- 舞台文字 ---------------- */
-.stage-name {
-  margin-top: 26px; font-size: 19px; font-weight: 600; letter-spacing: .04em;
-}
-.stage-sub { margin-top: 4px; font-size: 12.5px; color: var(--muted); text-align: center; }
-.stage-mood-row { margin-top: 14px; display: flex; align-items: center; gap: 8px; }
+/* 情绪徽标 */
 .stage-mood {
   display: inline-flex; align-items: center; gap: 7px;
-  padding: 5px 12px; border-radius: 999px;
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
-  font-size: 12px; color: var(--text-2);
-  transition: background .4s, border-color .4s;
+  margin-right: 4px; padding: 5px 11px; border-radius: 999px;
+  background: color-mix(in srgb, var(--mood, var(--accent)) 14%, rgba(10, 10, 15, .5));
+  border: 1px solid color-mix(in srgb, var(--mood, var(--accent)) 30%, transparent);
+  backdrop-filter: blur(10px);
+  font-size: 11.5px; color: var(--text-2); letter-spacing: .04em;
+  transition: background .6s var(--ease), border-color .6s var(--ease);
 }
-.stage-mood .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
-.stage-tune {
-  width: 26px; height: 26px; border-radius: 50%;
-  display: grid; place-items: center; color: var(--faint);
-  border: 1px solid transparent;
-  transition: color .16s, border-color .16s, background .16s, transform .3s var(--ease);
+.stage-mood .dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--mood, var(--accent));
+  box-shadow: 0 0 8px var(--mood, var(--accent));
+  transition: background .6s, box-shadow .6s;
 }
-.stage-tune:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 34%, transparent);
-  background: color-mix(in srgb, var(--accent) 8%, transparent); transform: rotate(45deg); }
-.stage-tune svg { width: 14px; height: 14px; }
 
+@media (max-width: 1120px) {
+  #stage-name { font-size: 17px; }
+}
+@media (max-width: 920px) {
+  :root { --rail: 64px; }
+  .persona-dot { width: 40px; height: 40px; }
+  #chat-head { padding-left: 18px; }
+  .stage-mood { display: none; }
+}
+
+/* ==== css/03-stage.css ================================================ */
+
+/* 舞台上的“演出”装饰：压暗层、光晕、台词、动作提示、状态条。
+   画布本身在 07-live2d.css。 */
+
+/* ---------------- 压暗层 ----------------
+   底部给字幕和输入框让位（不然白字压在亮画面上读不清），
+   四周收一圈暗角，把视线收到中间的角色身上。 */
+.stage-veil {
+  position: absolute; inset: 0; z-index: 2;
+  pointer-events: none;
+  background:
+    linear-gradient(to top,
+      rgba(4, 4, 8, .94) 0%,
+      rgba(4, 4, 8, .86) 12%,
+      rgba(4, 4, 8, .64) 30%,
+      rgba(4, 4, 8, .36) 48%,
+      rgba(4, 4, 8, .14) 66%,
+      transparent 82%),
+    linear-gradient(to bottom, rgba(4, 4, 8, .62), transparent 24%),
+    radial-gradient(120% 92% at 50% 44%, transparent 46%, rgba(0, 0, 0, .42) 100%);
+}
+
+/* 角色身后那团柔光：情绪变了光色跟着变（setEmotion 改 --mood） */
+.stage-glow {
+  position: absolute; left: 50%; top: -14%;
+  width: min(1100px, 92vw); height: 68%;
+  transform: translateX(-50%);
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--mood, var(--accent)) 26%, transparent), transparent 74%);
+  filter: blur(34px); opacity: .55; pointer-events: none;
+  transition: background 1.1s var(--ease), opacity 1.1s var(--ease);
+}
+
+/* 镜头呼吸：极慢的推拉，让满屏的画面不是一张静止的图 */
+.l2d-wrap { animation: stage-breathe 26s ease-in-out infinite; }
+@keyframes stage-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.014); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .l2d-wrap { animation: none; }
+}
+
+/* ---------------- 她“说”的那一句（触发器 say） ----------------
+   字幕轨里的一段引文：比正文字幕更亮、更飘，像从她那儿直接递过来的。 */
+.stage-bubble {
+  display: none;
+  align-self: center;
+  max-width: min(760px, 92%);
+  margin-bottom: 6px; padding: 9px 20px;
+  font-size: 14px; line-height: 1.6; text-align: center;
+  color: var(--text);
+  background: rgba(14, 14, 20, .58);
+  border: 1px solid var(--line-strong); border-radius: 999px;
+  box-shadow: var(--shadow-2);
+  backdrop-filter: blur(12px);
+  pointer-events: none;
+  animation: sub-in .3s var(--ease) both;
+}
+.stage-bubble.on { display: block; }
+
+/* ---------------- 动作提示（*抱住你* 那一层） ---------------- */
 .stage-act {
-  margin-top: 18px; min-height: 40px; max-width: 260px;
-  text-align: center; font-size: 12.5px; color: var(--accent);
-  font-style: italic; letter-spacing: .02em;
-  opacity: 0; transform: translateY(4px);
-  transition: opacity .5s var(--ease), transform .5s var(--ease);
+  display: none;
+  align-self: center;
+  max-width: min(680px, 92%);
+  margin-bottom: 2px;
+  text-align: center; font-size: 12.5px; letter-spacing: .1em;
+  color: color-mix(in srgb, var(--accent) 78%, #fff);
+  font-style: italic;
+  pointer-events: none;
+  text-shadow: 0 1px 12px rgba(0, 0, 0, .9);
 }
-.stage-act.on { opacity: .9; transform: none; }
+.stage-act.on { display: block; animation: sub-in .45s var(--ease) both; }
 
+/* ---------------- 底部状态条 ---------------- */
 .stage-stats {
-  margin-top: auto; width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; max-width: var(--lane);
+  margin: 8px auto 0;
+  padding: 0 2px;
+  justify-content: flex-end;
+  font-size: 11px;
+  opacity: .62; transition: opacity .2s;
 }
+.stage-stats:hover { opacity: 1; }
 .stat {
-  display: flex; flex-direction: column; gap: 3px; align-items: flex-start;
-  padding: 10px 12px; border-radius: var(--r-md);
-  border: 1px solid var(--line); background: rgba(255, 255, 255, .018);
+  display: inline-flex; align-items: baseline; gap: 6px;
+  padding: 3px 10px; border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(12, 12, 18, .42);
+  backdrop-filter: blur(8px);
   transition: background .16s, border-color .16s;
-  text-align: left;
 }
-.stat:hover { background: var(--card); border-color: var(--line-strong); }
-.stat-k { font-size: 11px; color: var(--faint); letter-spacing: .06em; }
-.stat-v { font-size: 12.5px; color: var(--text-2); }
+.stat:hover { background: rgba(30, 30, 42, .8); border-color: var(--line-strong); }
+.stat-k { font-size: 10.5px; color: var(--faint); letter-spacing: .08em; }
+.stat-v { font-size: 11px; color: var(--text-2); }
 .stat.on .stat-v { color: var(--accent); }
-.stage-mem { margin-top: 12px; font-size: 11.5px; color: var(--faint); letter-spacing: .04em; }
+.stage-mem { margin-left: 2px; font-size: 10.5px; color: var(--faint); letter-spacing: .06em; }
 
 /* ==== css/04-chat.css ================================================= */
 
+/* 字幕轨：对话不再是气泡列表，而是一条从下往上走的字幕。
+   最新的一句最亮、最大；往上翻是历史，越旧越淡，顶部有渐隐。 */
+
+#subs {
+  position: relative;
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column; justify-content: flex-end;
+  padding: 0 clamp(20px, 5vw, 96px);
+}
+/* 字幕底下的一滩暗：只在文字附近压暗，画面的边角还留着，
+   比整块渐变少吃掉一点角色。 */
+#subs::before {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 78%;
+  z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(58% 54% at 50% 76%, rgba(4, 4, 8, .78), rgba(4, 4, 8, .42) 58%, transparent 80%);
+}
+
 #stream {
-  flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
-  padding: 26px clamp(20px, 5vw, 72px) 8px;
-  scroll-behavior: smooth;
+  flex: 0 1 auto;
+  min-height: 0; max-height: min(44vh, 100%);
+  width: 100%; max-width: var(--lane); margin: 0 auto;
+  overflow-y: auto; overflow-x: hidden;
+  display: flex; flex-direction: column;
+  padding: 6px 0 2px;
+  /* 只有台词本身收鼠标：字幕条之间的空隙要能穿过去点模型 */
+  pointer-events: none;
+  /* 不要用 scroll-behavior: smooth：流式渲染每个 token 都要贴底，
+     平滑动画每次都重头开始，永远追不上，还会把「粘底」状态弄丢 */
+  scroll-behavior: auto;
+  /* 往上翻的时候，旧台词从顶部淡出去 */
+  -webkit-mask-image: linear-gradient(to top, #000 0, #000 84%, transparent 100%);
+  mask-image: linear-gradient(to top, #000 0, #000 84%, transparent 100%);
 }
-#stream::-webkit-scrollbar { width: 8px; }
+.msg, .welcome { pointer-events: auto; }
+/* 滚动条不画：回看历史靠滚轮，别在画面中间横一条杠 */
+#stream::-webkit-scrollbar { width: 0; height: 0; }
 
-/* 空状态：角色先开口 */
+/* ---------------- 空状态：她先开口 ----------------
+   一句话，摆在字幕该在的位置，像片头的那行字。 */
 .welcome {
-  max-width: 560px; margin: 12vh auto 0; text-align: center;
-  animation: fade-up .5s var(--ease) both;
+  margin: auto auto 0; max-width: 720px; text-align: center;
+  padding-bottom: 4px;
+  animation: fade-up .6s var(--ease) both;
 }
-.welcome .hi { font-size: 13px; color: var(--faint); letter-spacing: .18em; text-transform: uppercase; }
+.welcome .hi {
+  font-size: 10.5px; color: var(--text-2);
+  letter-spacing: .42em; text-transform: uppercase; opacity: .8;
+}
 .welcome .say {
-  margin: 16px auto 0; max-width: 460px;
-  font-size: 17px; line-height: 1.8; color: var(--text);
+  margin: 18px auto 0; max-width: 640px;
+  font-size: clamp(18px, 1.7vw, 23px); line-height: 1.75; color: #f6f5fb;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .95), 0 2px 18px rgba(0, 0, 0, .9);
 }
-.welcome .hint { margin-top: 22px; font-size: 12.5px; color: var(--faint); }
+.welcome .hint { margin-top: 16px; font-size: 12px; color: var(--text-2); letter-spacing: .04em; opacity: .82; }
 @keyframes fade-up { from { opacity: 0; transform: translateY(10px); } }
+@keyframes sub-in { from { opacity: 0; transform: translateY(7px); } }
 
-/* ---------------- 消息 ---------------- */
-.msg { display: flex; gap: 12px; margin-bottom: 22px; animation: msg-in .28s var(--ease) both; }
-@keyframes msg-in { from { opacity: 0; transform: translateY(6px); } }
-
-.msg .ava {
-  flex: 0 0 30px; width: 30px; height: 30px; border-radius: 50%; margin-top: 2px;
-  background: linear-gradient(140deg, color-mix(in srgb, var(--accent) 70%, #fff), var(--accent));
-  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 26%, transparent);
-  overflow: hidden; display: grid; place-items: center;
-  font-size: 12px; font-weight: 700; color: var(--accent-ink);
+/* ---------------- 一条字幕 ---------------- */
+.msg {
+  width: 100%; max-width: var(--lane);
+  margin: 0 auto; padding: 9px 0;
+  text-align: center;
+  animation: sub-in .38s var(--ease) both;
+  /* 历史淡下去，最新的一句是焦点 */
+  opacity: .5;
+  transition: opacity .5s var(--ease);
 }
-.msg .ava img { width: 100%; height: 100%; object-fit: cover; }
-.msg .body { min-width: 0; max-width: min(680px, 82%); }
-.msg .meta { display: flex; align-items: baseline; gap: 8px; margin-bottom: 3px; }
-.msg .who { font-size: 12.5px; font-weight: 600; color: var(--text-2); }
-.msg .time { font-size: 11px; color: var(--faint); }
+.msg:last-child { opacity: 1; }
+/* 想把旧台词看清楚：指到字幕上就整体提亮 */
+#stream:hover .msg { opacity: .78; }
+#stream:hover .msg:last-child { opacity: 1; }
 
+.msg .body { min-width: 0; }
+
+/* 她的台词：大字幕 */
+.msg .who {
+  font-size: 10.5px; letter-spacing: .3em; text-transform: uppercase;
+  color: color-mix(in srgb, var(--accent) 88%, #fff);
+  margin-bottom: 7px; opacity: .92;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, .9);
+}
 .msg .text {
-  font-size: 14.5px; line-height: 1.78; color: var(--text);
+  font-size: clamp(17px, 1.45vw, 21px);
+  line-height: 1.78; color: #f5f4fa;
   white-space: pre-wrap; word-break: break-word;
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, .95),
+    0 2px 14px rgba(0, 0, 0, .9),
+    0 0 42px rgba(0, 0, 0, .8);
 }
 .msg .text.streaming::after {
   content: ""; display: inline-block; width: 2px; height: 1.05em;
-  margin-left: 2px; vertical-align: -2px; background: var(--accent);
+  margin-left: 3px; vertical-align: -2px; background: var(--accent);
   animation: caret 1s steps(2) infinite;
 }
 @keyframes caret { 50% { opacity: 0; } }
 
 /* 动作描写（*抱住你*）低饱和斜体，不抢正文 */
 .msg .text .act {
-  color: color-mix(in srgb, var(--accent) 72%, var(--muted));
+  color: color-mix(in srgb, var(--accent) 68%, var(--muted));
   font-style: italic; opacity: .92;
 }
 
-/* 用户消息 */
-.msg.user { justify-content: flex-end; }
-.msg.user .body { max-width: min(600px, 78%); }
+/* 你的一句：小一号、退一档，让她的台词始终是主角 */
 .msg.user .bubble {
-  background: linear-gradient(180deg, var(--card-2), var(--card));
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  font-size: 14px; line-height: 1.7; color: var(--text-2);
+  white-space: pre-wrap; word-break: break-word;
+  text-shadow: 0 1px 12px rgba(0, 0, 0, .92);
+}
+.msg.user .bubble-text::before {
+  content: "你";
+  display: inline-block; margin-right: 8px;
+  padding: 1px 7px; border-radius: 999px;
+  font-size: 10px; letter-spacing: .1em; color: var(--text-2);
+  background: rgba(255, 255, 255, .07);
   border: 1px solid var(--line-strong);
-  padding: 10px 15px; border-radius: 16px 16px 4px 16px;
-  font-size: 14.5px; white-space: pre-wrap; word-break: break-word;
-  box-shadow: var(--shadow-1);
+  vertical-align: 2px;
+}
+
+/* ---------------- 字幕里的附件 ----------------
+   user / assistant 共用：图片缩略图（点击 lightbox）、视频/音频控件、文件 chip。 */
+.msg .atts { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.msg .atts:not(:last-child) { margin-bottom: 8px; }
+.msg .atts:first-child { margin-top: 4px; }
+
+/* 图片：缩略图最高 220，点击全屏 */
+.att-img {
+  display: block; max-width: min(360px, 100%);
+  padding: 0; border: 0; background: none; line-height: 0;
+}
+.att-img img {
+  display: block; max-width: 100%; max-height: 220px;
+  border-radius: 12px; border: 1px solid var(--line-strong);
+  object-fit: cover; cursor: zoom-in;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .45);
+  transition: border-color .16s, transform .12s;
+}
+.att-img:hover img { border-color: color-mix(in srgb, var(--accent) 45%, transparent); transform: translateY(-1px); }
+
+/* 视频 / 音频 */
+.att-video {
+  display: block; max-width: min(420px, 100%); max-height: 280px;
+  border-radius: 12px; border: 1px solid var(--line-strong); background: #000;
+}
+.att-audio { display: block; width: min(360px, 100%); height: 38px; }
+
+/* 文件 chip：图标 + 名字 + 大小，整块可点下载 */
+.att-file {
+  display: inline-flex; align-items: center; gap: 8px;
+  max-width: min(340px, 100%); padding: 7px 12px;
+  background: rgba(18, 18, 26, .78); border: 1px solid var(--line-strong); border-radius: 10px;
+  color: var(--text); text-decoration: none;
+  backdrop-filter: blur(8px);
+  transition: background .16s, border-color .16s;
+}
+.att-file:hover { background: rgba(30, 30, 42, .9); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.att-file .i { display: flex; flex: 0 0 16px; }
+.att-file svg { width: 16px; height: 16px; color: var(--muted); }
+.att-file .n { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.att-file .s { flex: 0 0 auto; font-size: 10.5px; color: var(--faint); }
+
+/* AI 发来的贴纸：无气泡的小图，点击也能放大 */
+.att-sticker {
+  display: block; max-width: 150px; max-height: 150px;
+  border-radius: 12px; cursor: zoom-in;
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .5);
+}
+/* 实时 sticker 事件画出来的一条消息（只有图，不带气泡） */
+.msg .sticker-msg {
+  display: block; margin: 0 auto; max-width: 150px; max-height: 150px;
+  border-radius: 12px; cursor: zoom-in;
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .5);
 }
 
 /* 推理折叠 */
 .reason {
-  margin: 2px 0 8px; border-left: 2px solid var(--line-strong);
-  padding-left: 10px;
+  margin: 2px auto 8px; max-width: 620px;
+  border-left: 2px solid var(--line-strong);
+  padding-left: 10px; text-align: left;
 }
 .reason summary {
-  list-style: none; cursor: pointer; font-size: 12px; color: var(--faint);
+  list-style: none; cursor: pointer; font-size: 11.5px; color: var(--faint);
   display: flex; align-items: center; gap: 6px; user-select: none;
 }
 .reason summary::-webkit-details-marker { display: none; }
 .reason summary::before { content: "▸"; transition: transform .2s; }
 .reason[open] summary::before { transform: rotate(90deg); }
 .reason .rbody {
-  margin-top: 6px; font-size: 12.5px; line-height: 1.7; color: var(--faint);
-  white-space: pre-wrap; max-height: 240px; overflow: auto;
+  margin-top: 6px; font-size: 12px; line-height: 1.7; color: var(--faint);
+  white-space: pre-wrap; max-height: 220px; overflow: auto;
+}
+/* 只有思考、没有正文的回合：说清楚「她没说出来」，别让人对着空字幕等 */
+.msg .noanswer {
+  margin-top: 4px; font-size: 13px; line-height: 1.7;
+  color: var(--faint); font-style: italic;
 }
 
-/* 一条消息的操作 */
-.msg .actions { display: flex; gap: 4px; margin-top: 6px; opacity: 0; transition: opacity .18s; }
+/* 一条消息的操作：平时藏起来，指到这一条才浮出来 */
+.msg .actions {
+  display: flex; justify-content: center; gap: 4px;
+  margin-top: 8px; opacity: 0; transition: opacity .18s;
+}
 .msg:hover .actions, .msg .actions.pin { opacity: 1; }
 .act-btn {
-  font-size: 11.5px; color: var(--faint); padding: 3px 8px; border-radius: 7px;
+  font-size: 11px; color: var(--faint); padding: 3px 9px; border-radius: 999px;
   display: inline-flex; align-items: center; gap: 5px;
+  border: 1px solid transparent;
+  transition: color .14s, background .14s, border-color .14s;
 }
-.act-btn:hover { background: var(--card); color: var(--text-2); }
-.act-btn svg { width: 13px; height: 13px; }
+.act-btn:hover { background: rgba(20, 20, 28, .8); color: var(--text-2); border-color: var(--line); }
+.act-btn svg { width: 12px; height: 12px; }
 .act-btn.speaking { color: var(--accent); }
 
 /* 时间分隔 */
-.day-sep { text-align: center; font-size: 11px; color: var(--faint); margin: 8px 0 24px; letter-spacing: .12em; }
+.day-sep { text-align: center; font-size: 10.5px; color: var(--faint); margin: 10px 0 14px; letter-spacing: .2em; }
 
 /* ---------------- 等待指示 ---------------- */
 .typing {
-  display: flex; align-items: center; gap: 7px;
-  padding: 0 clamp(20px, 5vw, 72px) 10px;
-  font-size: 12.5px; color: var(--muted);
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  padding: 2px 0 0;
+  font-size: 11.5px; color: var(--muted); letter-spacing: .06em;
 }
 .typing .tdot {
-  width: 5px; height: 5px; border-radius: 50%; background: var(--accent);
+  width: 4px; height: 4px; border-radius: 50%; background: var(--accent);
   animation: bob 1.2s infinite;
 }
 .typing .tdot:nth-child(2) { animation-delay: .15s; }
@@ -416,45 +633,53 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 @keyframes bob { 0%, 60%, 100% { transform: translateY(0); opacity: .45; } 30% { transform: translateY(-4px); opacity: 1; } }
 
 /* ---------------- Markdown ---------------- */
-.md p { margin: 0 0 .6em; }
+.md p { margin: 0 0 .55em; }
 .md p:last-child { margin-bottom: 0; }
 .md strong { color: #fff; font-weight: 600; }
 .md em { font-style: italic; }
 .md code {
-  font-family: var(--mono); font-size: .88em;
-  background: rgba(255, 255, 255, .06); padding: 1.5px 5px; border-radius: 5px;
+  font-family: var(--mono); font-size: .84em;
+  background: rgba(255, 255, 255, .1); padding: 1.5px 5px; border-radius: 5px;
   border: 1px solid var(--line);
 }
 .md pre {
-  background: var(--bg-2); border: 1px solid var(--line);
+  background: rgba(10, 10, 16, .82); border: 1px solid var(--line-strong);
   padding: 12px 14px; border-radius: var(--r-md); overflow: auto; margin: .6em 0;
+  text-align: left; font-size: 12.5px; backdrop-filter: blur(8px);
 }
 .md pre code { background: none; border: 0; padding: 0; font-size: 12.5px; line-height: 1.6; }
-.md ul, .md ol { margin: .4em 0 .6em; padding-left: 1.3em; }
+.md ul, .md ol { margin: .4em 0 .6em; padding-left: 1.3em; text-align: left; display: inline-block; }
 .md li { margin: .18em 0; }
 .md a { color: var(--accent); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
-.md blockquote { margin: .6em 0; padding: 2px 0 2px 12px; border-left: 2px solid var(--line-strong); color: var(--text-2); }
+.md blockquote { margin: .6em 0; padding: 2px 0 2px 12px; border-left: 2px solid var(--line-strong); color: var(--text-2); text-align: left; }
 .md h1, .md h2, .md h3 { font-size: 1em; margin: .8em 0 .4em; }
 
 /* ==== css/05-composer.css ============================================= */
 
+/* 输入区：浮在舞台底部的一条玻璃。宽度和字幕轨对齐，
+   两边留白，舞台上仍然看得见她的下半身和画面。 */
 #composer {
   flex: 0 0 auto;
-  padding: 10px clamp(16px, 5vw, 64px) 18px;
-  background: linear-gradient(180deg, transparent, rgba(10, 10, 14, .65) 45%);
+  width: 100%; max-width: var(--lane);
+  margin: 0 auto;
+  padding: 10px 0 14px;
+  pointer-events: none;
 }
+#composer > * { pointer-events: auto; }
 .composer-box {
   display: flex; align-items: flex-end; gap: 8px;
   padding: 7px 7px 7px 8px;
-  background: linear-gradient(180deg, var(--card), #17171f);
+  background: rgba(14, 14, 20, .72);
   border: 1px solid var(--line-strong);
-  border-radius: 20px;
-  box-shadow: 0 10px 34px rgba(0, 0, 0, .38), inset 0 1px 0 rgba(255, 255, 255, .045);
-  transition: border-color .2s, box-shadow .2s;
+  border-radius: 22px;
+  backdrop-filter: blur(20px) saturate(1.25);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(255, 255, 255, .05);
+  transition: border-color .2s, box-shadow .2s, background .2s;
 }
 .composer-box:focus-within {
+  background: rgba(16, 16, 24, .86);
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  box-shadow: 0 10px 34px rgba(0, 0, 0, .38), 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .55), 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
 }
 #input {
   flex: 1; min-height: 38px; max-height: 168px; resize: none;
@@ -463,14 +688,15 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 }
 #input::placeholder { color: var(--faint); }
 
-.mic-btn, .send-btn {
+.mic-btn, .attach-btn, .send-btn {
   position: relative; flex: 0 0 38px; width: 38px; height: 38px; border-radius: 50%;
   display: grid; place-items: center;
   transition: background .16s, color .16s, transform .12s;
 }
-.mic-btn { color: var(--muted); }
-.mic-btn:hover { background: rgba(255, 255, 255, .05); color: var(--text); }
-.mic-btn svg { width: 17px; height: 17px; position: relative; z-index: 1; }
+.mic-btn, .attach-btn { color: var(--muted); }
+.mic-btn:hover, .attach-btn:hover { background: rgba(255, 255, 255, .05); color: var(--text); }
+.mic-btn svg, .attach-btn svg { width: 17px; height: 17px; position: relative; z-index: 1; }
+.attach-btn:disabled { opacity: .35; cursor: not-allowed; }
 .mic-btn.rec { color: #fff; background: color-mix(in srgb, var(--err) 80%, #000); }
 .mic-btn.rec .mic-ring {
   position: absolute; inset: 0; border-radius: 50%;
@@ -520,6 +746,64 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   transition: color .2s;
 }
 .composer-hint.rec { color: color-mix(in srgb, var(--err) 80%, #fff); }
+
+/* ---------------- 附件托盘（输入框上方） ---------------- */
+#attach-tray {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  margin: 0 0 8px; padding: 0 2px;
+  animation: msg-in .18s var(--ease) both;
+}
+.attach-item {
+  position: relative; display: flex; align-items: center; gap: 8px;
+  max-width: 224px; padding: 5px 8px 5px 5px;
+  background: linear-gradient(180deg, var(--card-2), var(--card));
+  border: 1px solid var(--line-strong); border-radius: 12px;
+  box-shadow: var(--shadow-1);
+}
+.attach-item .thumb {
+  flex: 0 0 38px; width: 38px; height: 38px; border-radius: 8px;
+  overflow: hidden; display: grid; place-items: center;
+  background: var(--bg-2); color: var(--muted);
+}
+.attach-item .thumb img { width: 100%; height: 100%; object-fit: cover; cursor: zoom-in; }
+.attach-item .thumb svg { width: 17px; height: 17px; }
+.attach-item .info { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.attach-item .nm {
+  font-size: 12px; max-width: 150px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.attach-item .sz { font-size: 10.5px; color: var(--faint); }
+/* 删除按钮压在右上角，hover 才露出来 */
+.attach-item .rm {
+  position: absolute; top: -6px; right: -6px;
+  width: 18px; height: 18px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--card); border: 1px solid var(--line-strong);
+  color: var(--muted); opacity: 0;
+  transition: opacity .15s, color .15s, border-color .15s;
+}
+.attach-item:hover .rm { opacity: 1; }
+.attach-item .rm:hover { color: var(--err); border-color: color-mix(in srgb, var(--err) 45%, transparent); }
+.attach-item .rm svg { width: 10px; height: 10px; }
+
+/* ---------------- 拖拽文件进对话区 ---------------- */
+#drop-overlay {
+  position: absolute; inset: 0; z-index: 6;
+  display: grid; place-items: center;
+  pointer-events: none; opacity: 0;
+  background: color-mix(in srgb, var(--accent) 7%, rgba(8, 8, 12, .7));
+  backdrop-filter: blur(2px);
+  transition: opacity .15s;
+}
+#chat.drag-over #drop-overlay { opacity: 1; }
+.drop-card {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 20px; border-radius: 999px;
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 55%, transparent);
+  background: rgba(20, 20, 28, .86); color: var(--text);
+  font-size: 13.5px; box-shadow: var(--shadow-2);
+}
+.drop-card svg { width: 20px; height: 20px; color: var(--accent); }
 
 /* ==== css/06-drawer.css =============================================== */
 
@@ -653,6 +937,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   border: 1px solid var(--line-strong);
 }
 .avatar-edit .preview img { width: 100%; height: 100%; object-fit: cover; }
+.avatar-edit .avatar-tip { font-size: 11px; color: var(--faint); line-height: 1.5; max-width: 190px; }
 
 /* 色板 */
 .swatches { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -663,37 +948,105 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .swatch:hover { transform: scale(1.08); }
 .swatch.on { border-color: #fff; box-shadow: 0 0 0 2px rgba(0, 0, 0, .5); }
 
+/* ---------------- 设置：模块列表 / 子页返回 / 二维码 ---------------- */
+.back-row {
+  display: inline-flex; align-items: center; gap: 4px;
+  margin: 0 0 16px; padding: 0; border: 0; background: none;
+  font-size: 12.5px; color: var(--muted); cursor: pointer;
+}
+.back-row:hover { color: var(--text); }
+
+.mod-list { display: flex; flex-direction: column; gap: 8px; }
+.mod-row {
+  display: flex; align-items: center; justify-content: space-between;
+  width: 100%; padding: 13px 14px; text-align: left;
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+  color: var(--text); cursor: pointer; transition: background .16s, border-color .16s, transform .1s;
+}
+.mod-row:hover { background: var(--card-2); border-color: var(--line-strong); }
+.mod-row:active { transform: scale(.995); }
+.mod-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.mod-name { font-size: 13.5px; font-weight: 600; }
+.mod-sub { font-size: 11.5px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mod-go { font-size: 18px; color: var(--faint); line-height: 1; }
+
+.qr-panel { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-bottom: 18px; }
+.qr-img {
+  width: 208px; height: 208px; padding: 8px; border-radius: 14px;
+  background: #fff; image-rendering: pixelated;
+}
+.qr-state { font-size: 12.5px; color: var(--text-2); }
+.qr-panel .tip { text-align: center; }
+
+/* IM 子页的媒体能力说明 */
+.im-media-tip {
+  margin: 2px 0 12px; padding: 8px 11px;
+  border: 1px solid var(--line); border-radius: 9px;
+  background: rgba(255, 255, 255, .022);
+  font-size: 11.5px; line-height: 1.65; color: var(--muted);
+}
+
+/* ---------------- 表情包管理 ---------------- */
+.sticker-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+  gap: 8px; margin-bottom: 4px;
+}
+.sticker-cell {
+  position: relative; display: flex; flex-direction: column; align-items: center; gap: 5px;
+  padding: 8px 6px 6px; border: 1px solid var(--line); border-radius: 12px;
+  background: rgba(255, 255, 255, .014);
+}
+.sticker-cell img {
+  width: 64px; height: 64px; object-fit: contain; cursor: zoom-in;
+  border-radius: 6px; background: var(--bg-2);
+}
+.sticker-cell .sticker-name {
+  max-width: 100%; font-size: 10.5px; color: var(--faint);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sticker-cell .sticker-del {
+  position: absolute; top: 4px; right: 4px;
+  width: 18px; height: 18px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: rgba(16, 16, 22, .8); border: 1px solid var(--line-strong);
+  color: var(--muted); opacity: 0;
+  transition: opacity .15s, color .15s;
+}
+.sticker-cell:hover .sticker-del { opacity: 1; }
+.sticker-cell .sticker-del:hover { color: var(--err); }
+.sticker-cell .sticker-del svg { width: 10px; height: 10px; }
+
 /* ==== css/07-live2d.css =============================================== */
 
-/* Live2D 舞台：一块画布、一条台词气泡、几个演出用的临时效果。
-   画布尺寸跟着舞台列走（--stage），比例按 3:4 留出头顶与脚底。 */
+/* Live2D 画布：铺满整个窗口，是页面的背景。
+   尺寸跟着视口走；比例与位置由 l2dFit()（07-live2d.js）算，
+   这里只负责“填满容器、别出滚动条”。 */
 
 .l2d-wrap {
-  position: relative; width: 100%;
-  height: clamp(260px, 44vh, 400px);
+  position: absolute; inset: 0; z-index: 1;
   display: grid; place-items: center;
-  border-radius: var(--r-lg);
   overflow: hidden;
   /* 模型后面那层柔光：不抢戏，但让角色不是浮在空气里 */
   background:
-    radial-gradient(70% 55% at 50% 74%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 72%),
-    radial-gradient(60% 40% at 50% 12%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 70%);
+    radial-gradient(70% 55% at 50% 74%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 72%),
+    radial-gradient(60% 40% at 50% 12%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 70%);
   transition: background 1s var(--ease);
 }
 .l2d-wrap canvas {
   display: block; width: 100%; height: 100%;
   touch-action: manipulation; cursor: pointer;
-  filter: drop-shadow(0 18px 26px rgba(0, 0, 0, .42));
+  /* 不要给画布加 filter: drop-shadow —— 满屏画布每帧都在重绘，
+     整屏滤镜会把 GPU 吃光；需要“浮起来”的感觉交给 .stage-glow。 */
 }
 .l2d-wrap.loading canvas { opacity: 0; }
-.l2d-wrap.ready canvas { animation: l2d-in .55s var(--ease) both; }
-@keyframes l2d-in { from { opacity: 0; transform: translateY(8px) scale(.985); } }
+.l2d-wrap.ready canvas { animation: l2d-in .8s var(--ease) both; }
+@keyframes l2d-in { from { opacity: 0; transform: scale(1.015); } }
 
 /* 加载中 / 没模型 / 出错时压在画布上的状态行（可点，直接打开舞台面板） */
 .l2d-status {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
   display: none; align-items: center; gap: 7px;
-  padding: 8px 14px; border-radius: 999px;
+  padding: 9px 16px; border-radius: 999px;
   font-size: 11.5px; color: var(--text-2); text-align: center; line-height: 1.5;
   background: rgba(10, 10, 14, .78);
   border: 1px solid var(--line-strong);
@@ -715,49 +1068,30 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 @keyframes spin { to { transform: rotate(360deg); } }
 .l2d-wrap.error .l2d-status { color: var(--err); border-color: color-mix(in srgb, var(--err) 34%, transparent); }
 
-/* ---------------- 台词气泡 ----------------
-   舞台这一列只有 ~300px，气泡放哪都会压到人，所以干脆做成「字幕条」：
-   贴着画布底部、圆角胶囊、没有小尾巴，读起来是她说的一句旁白。 */
-.stage-bubble {
-  position: absolute; left: 50%; bottom: 10px; transform: translate(-50%, 6px);
-  max-width: 92%; padding: 8px 14px;
-  font-size: 12.5px; line-height: 1.55; color: var(--text);
-  background: color-mix(in srgb, var(--card) 92%, transparent);
-  border: 1px solid var(--line-strong); border-radius: 999px;
-  box-shadow: var(--shadow-2);
-  backdrop-filter: blur(10px);
-  opacity: 0; pointer-events: none;
-  transition: opacity .3s var(--ease), transform .3s var(--ease);
-  z-index: 3;
-}
-.stage-bubble.on { opacity: 1; transform: translate(-50%, 0); }
-
 /* ---------------- 演出效果（触发器可以挂） ---------------- */
 .fx-shake { animation: fx-shake .5s var(--ease); }
 @keyframes fx-shake {
   0%, 100% { transform: translateX(0); }
-  22% { transform: translateX(-6px) rotate(-.6deg); }
-  48% { transform: translateX(5px) rotate(.5deg); }
+  22% { transform: translateX(-7px) rotate(-.35deg); }
+  48% { transform: translateX(6px) rotate(.3deg); }
   74% { transform: translateX(-3px); }
 }
-.fx-pulse .l2d-wrap, .fx-pulse .orb { animation: fx-pulse .7s var(--ease); }
+.fx-pulse .l2d-wrap { animation: fx-pulse .7s var(--ease); }
 @keyframes fx-pulse {
-  40% { filter: brightness(1.16) drop-shadow(0 0 26px color-mix(in srgb, var(--accent) 55%, transparent)); }
+  40% { filter: brightness(1.14) drop-shadow(0 0 30px color-mix(in srgb, var(--accent) 50%, transparent)); }
 }
-.fx-dim .l2d-wrap { filter: brightness(.82) saturate(.9); transition: filter .6s var(--ease); }
+.fx-dim .l2d-wrap { filter: brightness(.8) saturate(.88); transition: filter .6s var(--ease); }
 .fx-dim.off .l2d-wrap { filter: none; }
-.stage-frame.fx-flash::before {
-  content: ""; position: absolute; inset: 0; z-index: 4; pointer-events: none;
-  background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 46%, transparent), transparent 76%);
+#stage-frame.fx-flash::after {
+  content: ""; position: absolute; inset: 0; z-index: 3; pointer-events: none;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 42%, transparent), transparent 78%);
   animation: fx-flash .6s ease-out both;
 }
 @keyframes fx-flash { from { opacity: 0; } 30% { opacity: 1; } to { opacity: 0; } }
 
 /* 舞台发起的那条消息（戳一下、摸头）比手打的淡一档 */
-.msg.from-stage .bubble {
-  background: transparent; border: 1px dashed var(--line-strong);
-  color: var(--muted); font-style: italic;
-}
+.msg.from-stage .bubble { color: var(--faint); font-style: italic; }
+.msg.from-stage .bubble-text::before { content: "她"; opacity: .7; }
 
 /* ---------------- 面板 ---------------- */
 .tip code {
@@ -847,10 +1181,174 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .stage-bar.dirty .bar-text { color: var(--text-2); }
 .stage-bar .bar-acts { display: flex; gap: 8px; flex: 0 0 auto; }
 .stage-bar .btn:disabled { opacity: .35; }
+
+/* ==== css/08-crop.css ================================================= */
+
+/* 头像截取弹窗：选图之后先裁再上传。
+   正方形视口 + 圆形遮罩（界面里所有头像都是圆的），拖动平移、滚轮/滑块缩放。 */
+#crop-modal {
+  position: fixed; inset: 0; z-index: 80;
+  display: grid; place-items: center;
+  background: rgba(4, 4, 8, .62); backdrop-filter: blur(3px);
+  animation: fade .2s both;
+}
+.crop-card {
+  width: min(360px, 92vw);
+  padding: 20px 22px 18px;
+  background: linear-gradient(180deg, #15151c, #101016);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2);
+  animation: crop-in .24s var(--ease) both;
+}
+@keyframes crop-in { from { opacity: 0; transform: translateY(10px) scale(.98); } }
+
+.crop-head {
+  font-size: 14px; font-weight: 600; letter-spacing: .04em;
+  margin-bottom: 14px; text-align: center;
+}
+
+.crop-stage {
+  position: relative;
+  width: min(272px, 66vw); height: min(272px, 66vw);
+  margin: 0 auto;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  cursor: grab;
+  touch-action: none;
+}
+.crop-stage:active { cursor: grabbing; }
+#crop-canvas { display: block; width: 100%; height: 100%; }
+
+/* 圆形Mask：圈出最终头像的范围，圈外压暗 */
+.crop-ring {
+  position: absolute; inset: 0; margin: auto;
+  width: 86%; height: 86%;
+  border-radius: 50%;
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 80%, #fff);
+  box-shadow: 0 0 0 9999px rgba(4, 4, 8, .46);
+  pointer-events: none;
+}
+
+.crop-zoom-row {
+  display: flex; align-items: center; gap: 12px;
+  margin: 14px 4px 0;
+}
+.crop-zoom-ico { color: var(--muted); display: inline-flex; }
+.crop-zoom-ico svg { width: 16px; height: 16px; }
+#crop-zoom {
+  flex: 1; height: 18px; background: none; -webkit-appearance: none; appearance: none;
+}
+#crop-zoom::-webkit-slider-runnable-track {
+  height: 4px; border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent) var(--fill, 0%), var(--card-2) var(--fill, 0%));
+}
+#crop-zoom::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 14px; height: 14px; margin-top: -5px; border-radius: 50%;
+  background: #fff; border: 0; box-shadow: var(--shadow-1);
+}
+#crop-zoom::-moz-range-track { height: 4px; border-radius: 999px; background: var(--card-2); }
+#crop-zoom::-moz-range-progress { height: 4px; border-radius: 999px; background: var(--accent); }
+#crop-zoom::-moz-range-thumb {
+  width: 14px; height: 14px; border-radius: 50%;
+  background: #fff; border: 0; box-shadow: var(--shadow-1);
+}
+
+.crop-tip {
+  margin-top: 10px; text-align: center;
+  font-size: 11px; color: var(--faint); line-height: 1.6;
+}
+
+.crop-actions {
+  display: flex; gap: 8px; justify-content: flex-end;
+  margin-top: 16px;
+}
+.crop-actions .btn { min-width: 84px; }
+
+/* ==== css/09-dialog.css =============================================== */
+
+/* 确认弹窗：给「清空上下文」这类收不回来的动作一个说清楚的地方。
+   三个按钮竖排：主选项在最后，取消永远在最上面，闭着眼点也不会点错。 */
+#ask-modal {
+  position: fixed; inset: 0; z-index: 85;
+  display: grid; place-items: center;
+  background: rgba(4, 4, 8, .64); backdrop-filter: blur(3px);
+  animation: fade .18s both;
+}
+.ask-card {
+  width: min(380px, 92vw);
+  padding: 20px 22px 18px;
+  background: linear-gradient(180deg, #15151c, #101016);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2);
+  animation: ask-in .22s var(--ease) both;
+}
+@keyframes ask-in { from { opacity: 0; transform: translateY(10px) scale(.98); } }
+
+.ask-head {
+  font-size: 14.5px; font-weight: 600; letter-spacing: .02em;
+  margin-bottom: 10px;
+}
+.ask-text {
+  font-size: 13px; line-height: 1.75; color: var(--text-2);
+}
+.ask-note {
+  margin-top: 8px; font-size: 12px; line-height: 1.7; color: var(--faint);
+}
+.ask-note.err { color: var(--err); }
+.ask-actions {
+  display: flex; flex-direction: column; gap: 8px;
+  margin-top: 18px;
+}
+.ask-actions .btn { width: 100%; justify-content: center; }
+.ask-actions .btn[disabled] { opacity: .55; cursor: default; }
+
+/* ---------------- 图片全屏预览（lightbox） ----------------
+   点缩略图打开；Esc、关闭按钮、点背景都能关。z-index 压在抽屉和确认弹窗之上。 */
+#lightbox {
+  position: fixed; inset: 0; z-index: 95;
+  display: flex; align-items: center; justify-content: center;
+  padding: 4vh 4vw;
+  background: rgba(4, 4, 8, .84); backdrop-filter: blur(6px);
+  animation: fade .16s both;
+}
+#lightbox img {
+  max-width: 100%; max-height: 92vh;
+  border-radius: 10px; box-shadow: var(--shadow-2);
+  object-fit: contain; background: rgba(255, 255, 255, .02);
+}
+.lightbox-close {
+  position: absolute; top: 18px; right: 18px;
+  width: 38px; height: 38px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: rgba(28, 28, 36, .86); border: 1px solid var(--line-strong);
+  color: var(--text-2);
+  transition: background .16s, color .16s;
+}
+.lightbox-close:hover { background: var(--card-2); color: var(--text); }
+.lightbox-close svg { width: 17px; height: 17px; }
 </style>
 </head>
 <body>
 <div id="app">
+
+  <!-- ================= 全屏舞台 =================
+       Live2D 不再是右栏里的一个小方块，而是铺满整个窗口的背景层：
+       界面浮在上面（字幕、输入、角色栏），模型在下面演。
+       舞台层是 fixed + z-index:0，所以它不参与 #app 的栅格。 -->
+  <div id="stage-frame">
+    <div class="stage-glow" id="stage-glow"></div>
+    <div class="l2d-wrap idle" id="l2d-wrap">
+      <canvas id="l2d-canvas"></canvas>
+      <button class="l2d-status" id="l2d-status">Live2D 还没就绪 · 点这里接入</button>
+    </div>
+    <!-- 压暗层：底部给字幕让位，四周收一圈暗角 -->
+    <div class="stage-veil"></div>
+  </div>
 
   <!-- ================= 左侧角色栏 ================= -->
   <aside id="rail">
@@ -870,35 +1368,66 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
     </button>
   </aside>
 
-  <!-- ================= 中间对话 ================= -->
+  <!-- ================= 中间：字幕轨 ================= -->
   <main id="chat">
     <header id="chat-head">
-      <div class="head-main">
-        <span id="head-name">—</span>
-        <span class="head-status" id="head-status">连接中</span>
+      <div class="head-id">
+        <div class="head-line">
+          <span id="stage-name">—</span>
+          <span class="head-status" id="head-status">连接中</span>
+          <div class="voice-bars" id="voice-bars"><i></i><i></i><i></i><i></i><i></i></div>
+        </div>
+        <div class="head-sub" id="stage-sub"></div>
       </div>
       <div class="head-tools">
+        <div class="stage-mood"><span class="dot" id="mood-dot"></span><span id="mood-text">平静</span></div>
+        <button class="ico-btn" id="btn-stage" title="Live2D 与触发器">
+          <svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 12h4M12 12h8M4 17h12M20 17h0"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="17" r="2"/></svg>
+        </button>
         <button class="ico-btn" id="btn-sessions" title="会话记录">
           <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
         </button>
         <button class="ico-btn" id="btn-voice" title="朗读回复">
           <svg viewBox="0 0 24 24"><path d="M11 5 6.5 9H3v6h3.5L11 19V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18 6a8.5 8.5 0 0 1 0 12"/></svg>
         </button>
-        <button class="ico-btn" id="btn-new-session" title="新会话">
-          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+        <button class="ico-btn" id="btn-clear-context" title="清空上下文">
+          <svg viewBox="0 0 24 24"><path d="m13.5 10.5 8-8"/><path d="M15 12.2c.8.8.9 2 .2 2.9L10.5 21l-7.5-7.5 5.7-4.9c.9-.7 2.1-.6 2.9.2Z"/><path d="m7.4 10.3 6.3 6.3"/><path d="m4.6 17.6 1.6-1.6"/></svg>
         </button>
       </div>
     </header>
 
-    <div id="stream" aria-live="polite"></div>
+    <!-- 字幕轨：从下往上堆，越旧的越淡；拖动滚轮可以回看历史 -->
+    <section id="subs">
+      <div class="stage-bubble" id="stage-bubble"></div>
+      <div class="stage-act" id="stage-act"></div>
+      <div id="stream" aria-live="polite"></div>
 
-    <div id="typing" class="typing hidden">
-      <span class="tdot"></span><span class="tdot"></span><span class="tdot"></span>
-      <span id="typing-label">正在想</span>
-    </div>
+      <div id="typing" class="typing hidden">
+        <span class="tdot"></span><span class="tdot"></span><span class="tdot"></span>
+        <span id="typing-label">正在想</span>
+      </div>
+
+      <!-- 舞台状态条：主动关怀 / 角色设定 / 记忆 -->
+      <div class="stage-stats">
+        <button class="stat" id="btn-proactive">
+          <span class="stat-k">主动关怀</span>
+          <span class="stat-v" id="proactive-v">关</span>
+        </button>
+        <button class="stat" id="btn-edit-persona">
+          <span class="stat-k">角色设定</span>
+          <span class="stat-v">编辑</span>
+        </button>
+        <span class="stage-mem" id="stage-mem">记忆 0 条</span>
+      </div>
+    </section>
 
     <footer id="composer">
+      <!-- 附件托盘：图片显示缩略图，其它显示文件 chip，每个都能删 -->
+      <div id="attach-tray" class="hidden"></div>
       <div class="composer-box">
+        <button class="attach-btn" id="btn-attach" title="添加图片或文件（也可以拖进来 / 粘贴）">
+          <svg viewBox="0 0 24 24"><path d="m21.4 11.6-8.9 8.9a6 6 0 0 1-8.5-8.5l8.9-8.9a4 4 0 0 1 5.7 5.7l-8.9 8.9a2 2 0 0 1-2.8-2.8l8.2-8.2"/></svg>
+        </button>
         <button class="mic-btn" id="btn-mic" title="点击开始 / 结束录音">
           <span class="mic-lvl"></span>
           <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"/></svg>
@@ -912,47 +1441,15 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
       </div>
       <div class="composer-hint" id="composer-hint"></div>
     </footer>
-  </main>
 
-  <!-- ================= 右侧角色舞台 ================= -->
-  <aside id="stage">
-    <div class="stage-glow" id="stage-glow"></div>
-
-    <div class="stage-frame" id="stage-frame">
-      <!-- 舞台就是 Live2D：模型画在这块画布上。
-           模型或运行时不在的时候这里给一句能点的提示，不再有备用的光球。 -->
-      <div class="l2d-wrap idle" id="l2d-wrap">
-        <canvas id="l2d-canvas"></canvas>
-        <button class="l2d-status" id="l2d-status">Live2D 还没就绪 · 点这里接入</button>
+    <!-- 拖拽文件进对话区时的提示（拖动中才显示） -->
+    <div id="drop-overlay">
+      <div class="drop-card">
+        <svg viewBox="0 0 24 24"><path d="m21.4 11.6-8.9 8.9a6 6 0 0 1-8.5-8.5l8.9-8.9a4 4 0 0 1 5.7 5.7l-8.9 8.9a2 2 0 0 1-2.8-2.8l8.2-8.2"/></svg>
+        <span>松开，作为附件发给她</span>
       </div>
-      <div class="voice-bars" id="voice-bars"><i></i><i></i><i></i><i></i><i></i></div>
-      <div class="stage-bubble" id="stage-bubble"></div>
     </div>
-
-    <div class="stage-name" id="stage-name">—</div>
-    <div class="stage-sub" id="stage-sub"></div>
-    <div class="stage-mood-row">
-      <div class="stage-mood"><span class="dot" id="mood-dot"></span><span id="mood-text">平静</span></div>
-      <button class="stage-tune" id="btn-stage" title="Live2D 与触发器">
-        <svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 12h4M12 12h8M4 17h12M20 17h0"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="17" r="2"/></svg>
-      </button>
-    </div>
-
-    <div class="stage-act" id="stage-act"></div>
-
-    <div class="stage-stats">
-      <button class="stat" id="btn-proactive">
-        <span class="stat-k">主动关怀</span>
-        <span class="stat-v" id="proactive-v">关</span>
-      </button>
-      <button class="stat" id="btn-edit-persona">
-        <span class="stat-k">角色设定</span>
-        <span class="stat-v">编辑</span>
-      </button>
-    </div>
-
-    <div class="stage-mem" id="stage-mem">记忆 0 条</div>
-  </aside>
+  </main>
 </div>
 
 <!-- ================= 抽屉：设置 / 记忆 / 角色编辑 / 会话 ================= -->
@@ -965,9 +1462,52 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   <div class="drawer-body" id="drawer-body"></div>
 </section>
 
+<!-- 图片全屏预览：Esc 或点背景关闭（逻辑在 12-attach.js） -->
+<div id="lightbox" class="hidden" role="dialog" aria-modal="true" aria-label="图片预览">
+  <button class="lightbox-close" id="lightbox-close" title="关闭">
+    <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+  </button>
+  <img id="lightbox-img" alt="">
+</div>
+
 <div id="toasts"></div>
 <input type="file" id="avatar-file" accept="image/png,image/jpeg,image/webp,image/gif" class="hidden">
 <input type="file" id="audio-file" accept="audio/*" class="hidden">
+<!-- 输入框附件 / 表情包上传：真正的读取在 12-attach.js 与 05-settings.js -->
+<input type="file" id="attach-file" multiple class="hidden">
+<input type="file" id="sticker-file" accept="image/png,image/jpeg,image/gif,image/webp" multiple class="hidden">
+
+<!-- ================= 头像截取 ================= -->
+<div id="crop-modal" class="hidden">
+  <div class="crop-card">
+    <div class="crop-head">截取头像</div>
+    <div class="crop-stage" id="crop-stage">
+      <canvas id="crop-canvas"></canvas>
+      <div class="crop-ring"></div>
+    </div>
+    <div class="crop-zoom-row">
+      <span class="crop-zoom-ico">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.6-4.6M11 8.5v5M8.5 11h5"/></svg>
+      </span>
+      <input type="range" id="crop-zoom" min="0" max="100" step="1" value="0" aria-label="缩放">
+    </div>
+    <div class="crop-tip">拖动调整位置 · 滚轮或滑块缩放 · 圆形区域为最终头像</div>
+    <div class="crop-actions">
+      <button class="btn ghost" id="crop-cancel">取消</button>
+      <button class="btn primary" id="crop-ok">使用这张</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 确认弹窗（清空上下文这类不可撤销的动作） ================= -->
+<div id="ask-modal" class="hidden">
+  <div class="ask-card" role="dialog" aria-modal="true" aria-labelledby="ask-title">
+    <div class="ask-head" id="ask-title">确认</div>
+    <div class="ask-text" id="ask-text"></div>
+    <div class="ask-note hidden" id="ask-note"></div>
+    <div class="ask-actions" id="ask-actions"></div>
+  </div>
+</div>
 
 <script>/* ==== js/00-core.js ================================================== */
 
@@ -992,6 +1532,7 @@ const S = {
   busy: false,
   emotion: 'neutral',
   memory: [],
+  im: [],
   tts: { enabled: false, kind: 'off' },
   asr: { enabled: false, kind: 'off' },
   voice_reply: true,
@@ -1002,6 +1543,19 @@ const S = {
   recording: false,
   sessions: [],
   lastAct: '',
+  // 表情包 / 附件 / 工具偏好（服务端 state 的新字段，见 team-contract 2.5）
+  stickers: [],
+  autoallow: true,
+  compact_auto: true,
+  tools: true,
+};
+
+/* 附件托盘的状态。放在核心层：paintComposer 只读它，真正的读取 / 上传在 12-attach。 */
+const ATTACH = {
+  items: [],     // { id, name, mime, size, kind, url, dataUrl, file }
+  seq: 0,
+  max: 8,        // 服务端 attach.max_files，state 回来会覆盖
+  maxBytes: 48 * 1024 * 1024,
 };
 
 const EMO_ZH = {
@@ -1039,6 +1593,12 @@ function icon(name) {
     x: '<path d="M18 6 6 18M6 6l12 12"/>',
     refresh: '<path d="M21 12a8 8 0 1 1-2.3-5.7M21 4v4h-4"/>',
     check: '<path d="m20 6-11 11-5-5"/>',
+    paperclip: '<path d="m21.4 11.6-8.9 8.9a6 6 0 0 1-8.5-8.5l8.9-8.9a4 4 0 0 1 5.7 5.7l-8.9 8.9a2 2 0 0 1-2.8-2.8l8.2-8.2"/>',
+    image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="m21 15-5-5L5 20"/>',
+    video: '<rect x="3" y="5" width="13" height="14" rx="2"/><path d="m16 10 5-3v10l-5-3"/>',
+    audio: '<path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/>',
+    file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/>',
+    download: '<path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19h14"/>',
   }[name] || '';
   return `<svg viewBox="0 0 24 24">${p}</svg>`;
 }
@@ -1115,6 +1675,7 @@ function applyState(st, rebuild) {
   if (Array.isArray(st.history)) S.history = st.history;
   if (Array.isArray(st.providers)) S.providers = st.providers;
   if (st.busy !== undefined) S.busy = !!st.busy;
+  if (Array.isArray(st.im)) S.im = st.im;
   if (st.tts) S.tts = Object.assign({}, S.tts, st.tts, { enabled: !!(st.voice && st.voice.tts) });
   if (st.asr) S.asr = Object.assign({}, S.asr, st.asr, { enabled: !!(st.voice && st.voice.asr) });
   if (st.voice && st.voice.recording !== undefined) S.recording = !!st.voice.recording;
@@ -1122,6 +1683,14 @@ function applyState(st, rebuild) {
   if (st.asr_auto_send !== undefined) S.asr_auto_send = !!st.asr_auto_send;
   if (st.model !== undefined) S.model = st.model;
   if (st.thinking !== undefined) S.thinking = st.thinking;
+  if (Array.isArray(st.stickers)) S.stickers = st.stickers;
+  if (st.attach) {
+    if (st.attach.max_files > 0) ATTACH.max = st.attach.max_files;
+    if (st.attach.max_bytes > 0) ATTACH.maxBytes = st.attach.max_bytes;
+  }
+  if (st.autoallow !== undefined) S.autoallow = !!st.autoallow;
+  if (st.compact_auto !== undefined) S.compact_auto = !!st.compact_auto;
+  if (st.tools !== undefined) S.tools = !!st.tools;
   applyAccent(S.persona && S.persona.accent);
   if (rebuild) paintAll();
 }
@@ -1139,8 +1708,7 @@ function handleEvent(m) {
 
 /* ---------------- 通用 UI ---------------- */
 function paintHead() {
-  const name = (S.persona && S.persona.name) || '—';
-  $('#head-name').textContent = name;
+  // 名字在 #stage-name（paintStage 负责），这里只管连接状态和朗读开关
   const st = $('#head-status');
   st.className = 'head-status' + (S.busy ? ' busy' : (S.connected ? '' : ' off'));
   st.textContent = !S.connected ? '未连接' : (S.busy ? '正在回应' : '在线');
@@ -1257,64 +1825,115 @@ function mdToHtml(src) {
    ===================================================================== */
 
 const LIVE = {
-  node: null, body: null, raw: '', reasoning: '', rnode: null,
-  started: false, streaming: false, pendingAct: '',
+  node: null, body: null, raw: '', reasoning: '', rnode: null, rbody: null, rsum: null,
+  started: false, streaming: false, pendingAct: '', reasonTouched: false,
 };
-let pinned = true; // 视口是否贴着底部
+let pinned = true;  // 视口是否贴着底部
+let autoScroll = 0; // >0：这一次滚动是我们自己做的，别当成「用户翻走了」
 
 function nearBottom() {
   const s = $('#stream');
   return s.scrollHeight - s.scrollTop - s.clientHeight < 80;
 }
+/* 贴底必须是瞬时滚动：CSS 的 scroll-behavior:smooth 会让每次赋值都重启动画，
+   token 一个接一个来的时候永远追不上，滚不到底就把 pinned 弄丢，之后就再也不跟了。 */
 function stick(force) {
   if (!force && !pinned) return;
   const s = $('#stream');
+  autoScroll += 1;
   s.scrollTop = s.scrollHeight;
+  requestAnimationFrame(() => { autoScroll = Math.max(0, autoScroll - 1); });
 }
 
 $('#stream').addEventListener('scroll', () => {
+  if (autoScroll > 0) { pinned = true; return; } // 自己滚的不算用户操作
   pinned = nearBottom();
 });
 
 /* ---------------- 历史 ---------------- */
-function avatarNode() {
-  const a = el('div', 'ava');
-  const p = S.persona || {};
-  if (p.avatar_url) a.innerHTML = `<img src="${esc(p.avatar_url)}" alt="">`;
-  else a.textContent = (p.name || '·').slice(0, 1);
-  return a;
+/* 字幕轨里没有头像和时钟：说话的人用名字标出来，时间交给会话记录 */
+function subWho() {
+  return el('div', 'who', (S.persona && S.persona.name) || '');
+}
+
+/* 只有思考、没有正文的回合：别只留一个空壳，把「没说出来」讲清楚，并给一次重说 */
+function reasonOnlyNote(body, reasoning) {
+  body.appendChild(el('div', 'noanswer', '这次她想了很久，最后没有说出口。'));
+  // pin：这条消息没有正文，唯一能做的两件事别藏在 hover 后面
+  const actions = el('div', 'actions pin');
+  const retry = el('button', 'act-btn');
+  retry.innerHTML = '<span>重说</span>';
+  retry.onclick = () => stageSend('（再说一次）');
+  const copy = el('button', 'act-btn');
+  copy.innerHTML = '<span>复制思考</span>';
+  copy.onclick = () => {
+    const text = reasoning || '';
+    if (!text) return;
+    navigator.clipboard?.writeText(text).then(() => toast('已复制', 'ok'), () => toast('复制失败', 'err'));
+  };
+  actions.append(retry, copy);
+  body.appendChild(actions);
+}
+
+/* 思考块的标题：默认收起来，但把字数摆出来——收着也能看出它在长 */
+function reasonLabel(chars, streaming) {
+  if (!chars) return streaming ? '思考中' : '思考';
+  return `${streaming ? '思考中' : '思考'} · ${chars} 字`;
 }
 
 function msgAi(text, opts = {}) {
   const wrap = el('div', 'msg ai');
-  wrap.appendChild(avatarNode());
+  wrap.appendChild(subWho());
   const body = el('div', 'body');
-  const meta = el('div', 'meta');
-  meta.appendChild(el('span', 'who', (S.persona && S.persona.name) || ''));
-  meta.appendChild(el('span', 'time', opts.time || fmtClock()));
-  body.appendChild(meta);
-  const md = el('div', 'text md');
-  md.innerHTML = mdToHtml(text || '');
-  body.appendChild(md);
-  const actions = el('div', 'actions');
-  const replay = el('button', 'act-btn');
-  replay.innerHTML = icon('play') + '<span>重播</span>';
-  replay.onclick = () => speakText(text);
-  const copy = el('button', 'act-btn');
-  copy.innerHTML = '<span>复制</span>';
-  copy.onclick = () => {
-    navigator.clipboard?.writeText(text).then(() => toast('已复制', 'ok'), () => toast('复制失败', 'err'));
-  };
-  actions.append(replay, copy);
-  body.appendChild(actions);
+  const said = String(text || '').trim();
+  const atts = Array.isArray(opts.attachments) ? opts.attachments : [];
+  // 历史里的思考：默认收纳，想看再点开（之前是直接丢掉）
+  if (opts.reasoning) {
+    const det = el('details', 'reason');
+    const sum = el('summary', null, reasonLabel(opts.reasoning.length, false));
+    const rb = el('div', 'rbody', opts.reasoning);
+    det.append(sum, rb);
+    body.appendChild(det);
+  }
+  if (said) {
+    const md = el('div', 'text md');
+    md.innerHTML = mdToHtml(text || '');
+    body.appendChild(md);
+  }
+  // 贴纸 / 图片 / 视频 / 文件：附件渲染器在 12-attach.js
+  const gallery = typeof attachGallery === 'function' ? attachGallery(atts) : null;
+  if (gallery) body.appendChild(gallery);
+  if (!said && opts.reasoning && !gallery) {
+    reasonOnlyNote(body, opts.reasoning);
+    wrap.appendChild(body);
+    return wrap;
+  }
+  if (said) {
+    const actions = el('div', 'actions');
+    const replay = el('button', 'act-btn');
+    replay.innerHTML = icon('play') + '<span>重播</span>';
+    replay.onclick = () => speakText(text);
+    const copy = el('button', 'act-btn');
+    copy.innerHTML = '<span>复制</span>';
+    copy.onclick = () => {
+      navigator.clipboard?.writeText(text).then(() => toast('已复制', 'ok'), () => toast('复制失败', 'err'));
+    };
+    actions.append(replay, copy);
+    body.appendChild(actions);
+  }
   wrap.appendChild(body);
   return wrap;
 }
 
-function msgUser(text) {
+function msgUser(text, attachments) {
   const wrap = el('div', 'msg user');
   const body = el('div', 'body');
-  const bubble = el('div', 'bubble', text);
+  const bubble = el('div', 'bubble');
+  const gallery = typeof attachGallery === 'function' ? attachGallery(attachments) : null;
+  if (gallery) bubble.appendChild(gallery);
+  const said = String(text == null ? '' : text);
+  if (said.trim()) bubble.appendChild(el('div', 'bubble-text', said));
+  if (!bubble.childNodes.length) bubble.textContent = said;
   body.appendChild(bubble);
   wrap.appendChild(body);
   return wrap;
@@ -1345,11 +1964,17 @@ function paintHistory() {
     return;
   }
   let lastDay = '';
+  let lastReason = '';
+  const flushReason = () => {
+    // 只有思考、没有正文的回合（模型没说出话）：也渲染成一条消息，别把 CoT 弄丢
+    if (lastReason) { stream.appendChild(msgAi('', { reasoning: lastReason })); lastReason = ''; }
+  };
   for (const m of S.history) {
-    if (m.kind === 'reasoning') continue; // 历史里的思考默认折叠在后面
-    if (m.role === 'user') stream.appendChild(msgUser(m.text));
-    else stream.appendChild(msgAi(m.text));
+    if (m.kind === 'reasoning') { flushReason(); lastReason = m.text || ''; continue; }
+    if (m.role === 'user') { flushReason(); stream.appendChild(msgUser(m.text, m.attachments)); }
+    else { stream.appendChild(msgAi(m.text, { reasoning: lastReason, attachments: m.attachments })); lastReason = ''; }
   }
+  flushReason();
   pinned = true;
   stick(true);
 }
@@ -1360,12 +1985,8 @@ function ensureLiveNode() {
   const stream = $('#stream');
   if ($('.welcome', stream)) stream.innerHTML = '';
   LIVE.node = el('div', 'msg ai');
-  LIVE.node.appendChild(avatarNode());
+  LIVE.node.appendChild(subWho());
   const body = el('div', 'body');
-  const meta = el('div', 'meta');
-  meta.appendChild(el('span', 'who', (S.persona && S.persona.name) || ''));
-  meta.appendChild(el('span', 'time', fmtClock()));
-  body.appendChild(meta);
   LIVE.rnode = null;
   LIVE.body = el('div', 'text md');
   body.appendChild(LIVE.body);
@@ -1375,6 +1996,10 @@ function ensureLiveNode() {
   LIVE.streaming = true;
   LIVE.raw = '';
   LIVE.reasoning = '';
+  LIVE.rnode = null;
+  LIVE.rbody = null;
+  LIVE.rsum = null;
+  LIVE.reasonTouched = false;
   LIVE.started = false;
   pinned = true;
   stick(true);
@@ -1391,14 +2016,29 @@ function appendReason(delta) {
   LIVE.reasoning += delta;
   if (!LIVE.rnode) {
     const det = el('details', 'reason');
-    det.open = false;
-    const sum = el('summary', null, '思考');
-    const body = el('div', 'rbody');
-    det.append(sum, body);
+    const sum = el('summary', null, reasonLabel(0, true));
+    const rb = el('div', 'rbody');
+    det.append(sum, rb);
+    // 只有真的点了 summary 才算「用户手动折过」：程序自己设 open 也会派发 toggle，
+    // 用 toggle 监听会把自动展开误判成用户操作，收尾时就再也折不回去了
+    sum.addEventListener('click', () => { LIVE.reasonTouched = true; });
     LIVE.node.querySelector('.body').insertBefore(det, LIVE.body);
-    LIVE.rnode = body;
+    LIVE.rnode = det;
+    LIVE.rsum = sum;
+    LIVE.rbody = rb;
+    LIVE.reasonTouched = false;
+    det.open = false; // 默认收纳：思考不占版面，想看自己点开
   }
-  LIVE.rnode.textContent = LIVE.reasoning;
+  const rb = LIVE.rbody;
+  if (rb) {
+    const follow = !LIVE.reasonTouched && LIVE.rnode.open &&
+      (rb.scrollHeight - rb.scrollTop - rb.clientHeight < 24);
+    rb.textContent = LIVE.reasoning;
+    // 展开着看的时候跟上最新一行；收起来就不用管内层滚动
+    if (follow) rb.scrollTop = rb.scrollHeight;
+  }
+  if (LIVE.rsum) LIVE.rsum.textContent = reasonLabel(LIVE.reasoning.length, true);
+  stick(); // 消息在长，自动滚动跟上（用户翻上去看历史时不打扰）
 }
 
 function finishLive() {
@@ -1407,9 +2047,15 @@ function finishLive() {
     LIVE.body.classList.remove('streaming');
     LIVE.body.innerHTML = mdToHtml(LIVE.raw);
   }
-  if (LIVE.raw.trim()) {
+  const hasText = !!LIVE.raw.trim();
+  const reason = LIVE.reasoning.trim();
+  // 默认收纳：想看的自己点开；用户已经点开过就别替他收回去
+  if (LIVE.rnode && !LIVE.reasonTouched) LIVE.rnode.open = false;
+  if (LIVE.rsum) LIVE.rsum.textContent = reasonLabel(reason.length, false);
+  if (LIVE.rbody) LIVE.rbody.scrollTop = 0; // 收尾了，展开时从头看
+  const body = LIVE.node.querySelector('.body');
+  if (hasText) {
     // 补上重播/复制
-    const body = LIVE.node.querySelector('.body');
     const actions = el('div', 'actions');
     const replay = el('button', 'act-btn');
     replay.innerHTML = icon('play') + '<span>重播</span>';
@@ -1419,10 +2065,14 @@ function finishLive() {
     copy.onclick = () => navigator.clipboard?.writeText(LIVE.raw).then(() => toast('已复制', 'ok'));
     actions.append(replay, copy);
     body.appendChild(actions);
+  } else if (reason) {
+    // 只思考没正文：留着 CoT 并把「没说出来」讲明白，别让人对着一个空壳等结果
+    reasonOnlyNote(body, reason);
   } else {
+    // 什么都没产生（没有正文也没有思考）：不留空消息，跟以前一样收掉
     LIVE.node.remove();
   }
-  LIVE.node = null; LIVE.body = null; LIVE.rnode = null;
+  LIVE.node = null; LIVE.body = null; LIVE.rnode = null; LIVE.rbody = null; LIVE.rsum = null;
   LIVE.streaming = false;
   stick();
 }
@@ -1445,6 +2095,30 @@ function hideTyping() {
   if (waitTimer) { clearInterval(waitTimer); waitTimer = null; }
 }
 
+/* ---------------- 列表里的一条贴纸 ----------------
+   app-core 在桌面回合里发 {"t":"sticker","persona":pid,"name":"happy","url":...}，
+   这里在消息流里画一条只有贴纸的消息；刷新后同一张贴纸会以附件形式回到历史里。 */
+function appendSticker(ev) {
+  if (!ev || !ev.url) return;
+  if (ev.persona && S.active && ev.persona !== S.active) return;
+  const stream = $('#stream');
+  if ($('.welcome', stream)) stream.innerHTML = '';
+  const wrap = el('div', 'msg ai');
+  wrap.appendChild(subWho());
+  const body = el('div', 'body');
+  const img = document.createElement('img');
+  img.className = 'sticker-msg';
+  img.src = ev.url;
+  img.alt = ev.name || '表情包';
+  img.loading = 'lazy';
+  img.onclick = () => { if (typeof openLightbox === 'function') openLightbox(ev.url, ev.name); };
+  body.appendChild(img);
+  wrap.appendChild(body);
+  // 贴纸事件在回合收尾时到：接在正文后面，和刷新后历史里的顺序一致
+  stream.appendChild(wrap);
+  stick();
+}
+
 /* ---------------- 事件 ---------------- */
 onEvent((m) => {
   switch (m.t) {
@@ -1454,6 +2128,8 @@ onEvent((m) => {
       paintComposer(); // 发送键变成「停止」，不然回合里没地方按
       if (m.idle) toast('她主动开口了');
       showTyping('正在想');
+      // 思考阶段就把消息骨架建好：CoT 有地方渲染，也顺便自动滚动跟上
+      ensureLiveNode();
       break;
     case 'answer_begin':
       hideTyping();
@@ -1518,6 +2194,20 @@ onEvent((m) => {
     case 'expr':
       l2dSetExpression(m.name || '');
       break;
+    // ---- act 工具推过来的三条（标记法没有对应物） ----
+    case 'stage_say':
+      // 她说的一句“舞台台词”：只飘在画面上，不进正文、不朗读
+      trigBubble(m.text || '', m.ms);
+      break;
+    case 'param':
+      l2dSetParam(m.id || '', m.to, m.ms);
+      break;
+    case 'fx':
+      trigFx(m.name || '', m.ms);
+      break;
+    case 'sticker':
+      appendSticker(m);
+      break;
     case 'quit':
       window.close();
       break;
@@ -1528,15 +2218,33 @@ onEvent((m) => {
 async function sendCurrent() {
   const input = $('#input');
   const text = input.value.trim();
-  if (!text) return;
+  const hasAttach = ATTACH.items.length > 0;
+  if (!text && !hasAttach) return; // 文字和附件都空：什么都不发
   if (!S.active) { toast('先创建一个角色', 'err'); openPersonaEditor(true); return; }
   if (S.busy) { toast('她还在说，先等一下'); return; }
+  // 先把附件读成 base64：读失败就原地报错，别把输入框和托盘清空
+  let attachments = [];
+  let previews = [];
+  if (hasAttach) {
+    try {
+      attachments = await attachPayload();
+    } catch (e) {
+      toast('读取附件失败：' + (e.message || e), 'err');
+      return;
+    }
+    if (!attachments.length) attachments = [];
+    previews = attachPreviews();
+  }
   input.value = '';
   autoGrow();
+  if (hasAttach) clearAttach();
   stopAudio();
   if ($('.welcome', $('#stream'))) $('#stream').innerHTML = '';
-  $('#stream').appendChild(msgUser(text));
-  S.history.push({ role: 'user', kind: 'user', text });
+  // 立刻画出这条用户消息 + 本地预览，不等服务端回 history
+  $('#stream').appendChild(msgUser(text, previews));
+  const entry = { role: 'user', kind: 'user', text };
+  if (previews.length) entry.attachments = previews;
+  S.history.push(entry);
   LIVE.node = null;
   LIVE.body = null;
   LIVE.raw = '';
@@ -1544,7 +2252,7 @@ async function sendCurrent() {
   stick(true);
   TRIG.fire('user', { text });
   try {
-    await cmd('send', { text });
+    await cmd('send', attachments.length ? { text, attachments } : { text });
   } catch (e) {
     toast(e.message, 'err');
   }
@@ -1560,6 +2268,7 @@ function autoGrow() {
   const t = $('#input');
   t.style.height = 'auto';
   t.style.height = Math.min(t.scrollHeight, 168) + 'px';
+  paintComposer(); // 文字和附件都空的时候把发送键置灰
 }
 
 function paintComposer() {
@@ -1575,10 +2284,16 @@ function paintComposer() {
   $('#btn-mic').disabled = !S.asr.enabled || none;
   $('#btn-mic').title = S.asr.enabled ? '点击开始 / 结束录音' : '还没有配置语音识别服务';
   $('#btn-mic').classList.toggle('rec', S.recording);
+  // 发送键：回合中它永远是「停止」；平时文字与附件都空才置灰
+  const hasText = !!input.value.trim();
+  btn.disabled = !S.busy && (none || (!hasText && !ATTACH.items.length));
   const hint = $('#composer-hint');
   if (S.recording) {
     hint.textContent = '正在听…再点一次结束，随后自动转写';
     hint.classList.add('rec');
+  } else if (ATTACH.items.length) {
+    hint.textContent = '已选 ' + ATTACH.items.length + ' / ' + ATTACH.max + ' 个附件 · Enter 发送';
+    hint.classList.remove('rec');
   } else if (!S.asr.enabled && !S.tts.enabled) {
     hint.textContent = '语音服务未配置：设置 → 服务，可以接入任何 OpenAI 兼容的 TTS / ASR';
     hint.classList.remove('rec');
@@ -1878,10 +2593,24 @@ function showAct(name) {
 }
 
 let moodTimer = null;
+
+/* 情绪 → 舞台打光的颜色。角色卡的主色管界面，这一层只管「光」：
+   开心偏暖、难过偏冷、生气偏红，换情绪时整块背景的柔光跟着换。 */
+const MOOD_LIGHT = {
+  neutral: '#8b7cff', happy: '#ffc46b', sad: '#6b9cff', angry: '#ff6b6b',
+  shy: '#ff8fb8', surprised: '#ffd166', thinking: '#7fd3ff', affection: '#ff7fb0',
+};
+
+function setMoodLight(name) {
+  const c = MOOD_LIGHT[name] || MOOD_LIGHT.neutral;
+  document.documentElement.style.setProperty('--mood', c);
+}
+
 function setEmotion(name, fromVoice) {
   const emo = (name || 'neutral').toLowerCase();
   S.emotion = emo;
   $('#mood-text').textContent = EMO_ZH[emo] || emo;
+  setMoodLight(emo);
   // 表情交给模型：映射写在角色卡 live2d.emo 里
   l2dSetEmotion(emo);
   if (!fromVoice) {
@@ -1890,6 +2619,7 @@ function setEmotion(name, fromVoice) {
     moodTimer = setTimeout(() => {
       if (!AUDIO.playing) {
         $('#mood-text').textContent = EMO_ZH.neutral;
+        setMoodLight('neutral');
         l2dSetEmotion('neutral');
       }
     }, 14000);
@@ -1901,6 +2631,7 @@ function paintStage() {
   $('#stage-name').textContent = p.name || '—';
   $('#stage-sub').textContent = p.subtitle || '';
   $('#mood-text').textContent = EMO_ZH[S.emotion] || '平静';
+  setMoodLight(S.emotion);
   $('#stage-mem').textContent = `记忆 ${S.memory.length} 条`;
   const pro = $('#btn-proactive');
   pro.classList.toggle('on', !!p.proactive);
@@ -1930,14 +2661,37 @@ onEvent((m) => {
 
 const DRAWER = { current: null, title: '' };
 
+/* 抽屉是一叠页面：openDrawer 开新的一叠，pushDrawer 往里压一层，popDrawer 退回。
+   设置 → 某个模块 → 某个渠道，就是靠这个栈走的。 */
+const DRAWER_STACK = [];
 function openDrawer(title, name, build) {
-  DRAWER.current = name;
-  DRAWER.title = title;
-  $('#drawer-title').textContent = title;
+  DRAWER_STACK.length = 0;
+  pushDrawer(title, name, build);
+}
+function pushDrawer(title, name, build) {
+  DRAWER_STACK.push({ title, name, build });
+  showDrawerTop();
+}
+function popDrawer() {
+  if (DRAWER_STACK.length <= 1) return;
+  DRAWER_STACK.pop();
+  showDrawerTop();
+}
+function showDrawerTop() {
+  const page = DRAWER_STACK[DRAWER_STACK.length - 1];
+  DRAWER.current = page.name;
+  DRAWER.title = page.title;
+  DRAWER.build = page.build;
+  $('#drawer-title').textContent = page.title;
   $('#drawer').classList.remove('hidden');
   $('#scrim').classList.remove('hidden');
-  DRAWER.build = build;
   buildDrawer();
+}
+// 子页左上角的返回（根页面不显示）
+function drawerBack(label) {
+  const b = el('button', 'back-row', '‹ ' + (label || '返回'));
+  b.onclick = popDrawer;
+  return b;
 }
 function buildDrawer() {
   if (!DRAWER.build) return;
@@ -1954,6 +2708,7 @@ function paintDrawer() {
 function closeDrawer() {
   $('#drawer').classList.add('hidden');
   $('#scrim').classList.add('hidden');
+  DRAWER_STACK.length = 0;
   DRAWER.current = null;
   DRAWER.build = null;
 }
@@ -1961,10 +2716,108 @@ $('#btn-drawer-close').onclick = closeDrawer;
 $('#scrim').onclick = closeDrawer;
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
+  // 确认弹窗在最上层：先当「取消」收掉
+  if (!$('#ask-modal').classList.contains('hidden')) { closeAsk(); return; }
+  // 截取弹窗压着抽屉：先收弹窗，别把抽屉一起关了
+  if (!$('#crop-modal').classList.contains('hidden')) { closeAvatarCrop(); return; }
   // 抽屉开着先关抽屉；没有抽屉又在回应，Esc 就是「停止生成」
   if (!$('#drawer').classList.contains('hidden')) { closeDrawer(); return; }
   if (S.busy) stopTurn();
 });
+
+/* ---------------- 确认弹窗 ----------------
+   choices: [{ label, value, cls, busyLabel }]
+   onChoose(value) 是异步的：返回 false 就留在弹窗里（请求失败还能换个选项再试）。
+   取消 / 点背景 / Esc 都只是把它收起来，不执行任何动作。 */
+let ASK = { busy: false };
+
+function closeAsk() {
+  if (ASK.busy) return; // 正在做的事不能靠 Esc 撤掉
+  $('#ask-modal').classList.add('hidden');
+  $('#ask-actions').innerHTML = '';
+}
+
+function askDialog(opts, choices, onChoose) {
+  const modal = $('#ask-modal');
+  const box = $('#ask-actions');
+  const note = $('#ask-note');
+  $('#ask-title').textContent = opts.title || '确认';
+  $('#ask-text').textContent = opts.text || '';
+  note.textContent = opts.note || '';
+  note.classList.toggle('hidden', !opts.note);
+  note.classList.remove('err');
+  box.innerHTML = '';
+  ASK.busy = false;
+
+  const say = (text, isErr) => {
+    note.textContent = text;
+    note.classList.toggle('err', !!isErr);
+    note.classList.remove('hidden');
+  };
+
+  for (const c of choices) {
+    const b = el('button', 'btn ' + (c.cls || ''), c.label);
+    b.onclick = async () => {
+      if (ASK.busy) return;
+      if (c.value == null) { closeAsk(); return; }
+      ASK.busy = true;
+      const label = b.textContent;
+      $$('.btn', box).forEach(x => { x.disabled = true; });
+      if (c.busyLabel) b.textContent = c.busyLabel;
+      let keep = false;
+      try {
+        const r = await onChoose(c.value, { say });
+        keep = r === false;
+      } catch (e) {
+        say(e.message || '失败了', true);
+        keep = true;
+      }
+      ASK.busy = false;
+      if (keep) {
+        b.textContent = label;
+        $$('.btn', box).forEach(x => { x.disabled = false; });
+      } else {
+        closeAsk();
+      }
+    };
+    box.appendChild(b);
+  }
+  modal.classList.remove('hidden');
+}
+
+// 点背景 = 取消（正在整理记忆时不响应，别把进行中的请求丢下）
+$('#ask-modal').addEventListener('pointerdown', (e) => {
+  if (e.target === $('#ask-modal')) closeAsk();
+});
+
+/* 清空上下文：先问清楚，再决定要不要把这段对话留成记忆 */
+function openClearContext() {
+  if (!S.active) { toast('先创建一个角色', 'err'); return; }
+  if (S.busy) { toast('她还在回应，等这句说完再清空'); return; }
+  const said = (S.history || []).filter(m => m.role === 'user').length;
+  askDialog({
+    title: '清空上下文',
+    text: said
+      ? `这次对话里你说了 ${said} 句话。清空之后，她就不再记得这次聊过什么。`
+      : '这次对话还是空的；清空只是让上下文从头开始。',
+    note: said ? '「保存记忆并确认」会先让她把值得记住的事写进长期记忆，再清空上下文。' : '',
+  }, [
+    { label: '取消', value: null, cls: 'ghost' },
+    { label: '确认', value: 'plain', cls: 'danger' },
+    { label: '保存记忆并确认', value: 'remember', cls: 'primary', busyLabel: '正在整理记忆…' },
+  ], async (value) => {
+    stopAudio();
+    const r = await cmd('context.clear', { remember: value === 'remember' });
+    await refreshState();
+    if (value === 'remember') {
+      const n = r.remembered || 0;
+      toast(n ? `记住了 ${n} 件事，上下文已清空` : '没整理出值得记的事，上下文已清空', 'ok', 3200);
+    } else {
+      toast('上下文已清空', 'ok');
+    }
+    return true;
+  });
+}
 
 /* ---------------- 表单小件 ---------------- */
 function field(label, input, tip) {
@@ -2067,11 +2920,18 @@ function openPersonaEditor(creating) {
   const open = () => openDrawer(creating ? '新建角色' : '角色设定', 'persona', (body) => {
     const av = el('div', 'avatar-edit');
     const prev = el('div', 'preview');
-    if (p.avatar_url) prev.innerHTML = `<img src="${esc(p.avatar_url)}">`;
-    else prev.textContent = (p.name || '?').slice(0, 1);
+    // 抽屉会被状态广播重建（上传完头像就是一次刷新），所以头像预览要现读
+    // S.persona，不能用开门时快照的 p —— 否则换了头像预览还是旧的。
+    const cur = creating ? p : (S.persona || {});
+    if (cur.avatar_url) prev.innerHTML = `<img src="${esc(cur.avatar_url)}" alt="">`;
+    else prev.textContent = (cur.name || '?').slice(0, 1);
     av.appendChild(prev);
-    const pick = actionBtn('换头像', () => { $('#avatar-file').click(); }, 'btn sm');
-    av.appendChild(pick);
+    if (creating) {
+      // 新建中的角色还没有 id，这时候上传只会落到当前活跃角色头上
+      av.appendChild(el('div', 'avatar-tip', '创建之后可以再换头像'));
+    } else {
+      av.appendChild(actionBtn('换头像', () => { $('#avatar-file').click(); }, 'btn sm'));
+    }
     body.appendChild(av);
 
     const form = el('div', 'sect');
@@ -2166,24 +3026,12 @@ function openPersonaEditor(creating) {
   }
 }
 
-/* 头像上传 */
-$('#avatar-file').addEventListener('change', async (e) => {
+/* 头像上传：选图之后先截取（10-avatar-crop.js），裁好了才真正上传 */
+$('#avatar-file').addEventListener('change', (e) => {
   const f = e.target.files && e.target.files[0];
   e.target.value = '';
   if (!f) return;
-  if (f.size > 8 * 1024 * 1024) { toast('图片太大（上限 8MB）', 'err'); return; }
-  const buf = await f.arrayBuffer();
-  let bin = '';
-  const bytes = new Uint8Array(buf);
-  for (let i = 0; i < bytes.length; i += 0x8000)
-    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-  const b64 = btoa(bin);
-  const ext = (f.name.split('.').pop() || 'png').toLowerCase();
-  try {
-    await cmd('persona.avatar', { id: (S.persona || {}).id, data_b64: b64, ext });
-    await refreshState();
-    toast('头像已更新', 'ok');
-  } catch (err) { toast(err.message, 'err'); }
+  openAvatarCrop(f);
 });
 
 /* ---------------- 会话 ---------------- */
@@ -2244,13 +3092,7 @@ function wireGlobal() {
       paintHead();
     } catch (e) { toast(e.message, 'err'); }
   };
-  $('#btn-new-session').onclick = async () => {
-    stopAudio();
-    try {
-      await cmd('session.new');
-      await refreshState();
-    } catch (e) { toast(e.message, 'err'); }
-  };
+  $('#btn-clear-context').onclick = openClearContext;
   $('#btn-sessions').onclick = openSessions;
   $('#btn-memory').onclick = openMemory;
   $('#btn-settings').onclick = openSettings;
@@ -2278,16 +3120,52 @@ function wireGlobal() {
 
 'use strict';
 /* =====================================================================
-   05-settings —— 设置：模型服务、模型、语音服务、偏好
+   05-settings —— 设置：模型服务、模型、语音服务、IM 接入、偏好
    ===================================================================== */
+
+/* 设置是一列模块：点哪一个进哪一个的子页（pushDrawer / drawerBack 在 04-panels）。
+   加一个模块 = 在 SETTINGS_MODULES 里加一行，别的地方不用动。 */
+const SETTINGS_MODULES = [
+  { key: 'providers', name: '模型服务', sub: () => S.providers.length ? `${S.providers.length} 个 · ${S.provider || '未选'}` : '还没有配置', build: () => providerSection() },
+  { key: 'model', name: '模型', sub: () => (S.model && S.model !== '(none)') ? S.model : '未选择', build: () => modelSection() },
+  { key: 'tts', name: '语音合成', sub: () => voiceStateText(S.tts), build: () => serviceSection('tts', S.tts) },
+  { key: 'asr', name: '语音识别', sub: () => voiceStateText(S.asr), build: () => serviceSection('asr', S.asr) },
+  { key: 'im', name: 'IM 接入', sub: () => imStatusText(), build: () => imSection() },
+  { key: 'stickers', name: '表情包', sub: () => stickerStatusText(), build: () => stickerSection() },
+  { key: 'pref', name: '偏好', sub: () => `${S.voice_reply ? '自动朗读' : '手动朗读'} · ${S.autoallow ? '工具自动执行' : '工具逐次确认'}`, build: () => prefSection() },
+];
+
+/* 表情包列表由服务端随 state 一起下发；打开设置时再拉一次，防止别处加过没刷新 */
+let STICKERS_LOADED = false;
+const STICKER_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp'];
+const STICKER_MAX_BYTES = 8 * 1024 * 1024; // 和 app-core 的 kMaxSticker 一致
+
+function stickerStatusText() {
+  const n = (S.stickers || []).length;
+  return n ? `${n} 个` : '还没有';
+}
+
+function voiceStateText(svc) {
+  const kind = (svc && svc.kind) || 'off';
+  return kind === 'off' ? '未开启' : kind;
+}
 
 function openSettings() {
   openDrawer('设置', 'settings', (body) => {
-    body.appendChild(providerSection());
-    body.appendChild(modelSection());
-    body.appendChild(serviceSection('tts', S.tts));
-    body.appendChild(serviceSection('asr', S.asr));
-    body.appendChild(prefSection());
+    const list = el('div', 'mod-list');
+    for (const m of SETTINGS_MODULES) {
+      const row = el('button', 'mod-row');
+      const left = el('div', 'mod-main');
+      left.appendChild(el('div', 'mod-name', m.name));
+      left.appendChild(el('div', 'mod-sub', m.sub()));
+      row.append(left, el('span', 'mod-go', '›'));
+      row.onclick = () => pushDrawer(m.name, 'settings/' + m.key, (b) => {
+        b.appendChild(drawerBack('设置'));
+        b.appendChild(m.build());
+      });
+      list.appendChild(row);
+    }
+    body.appendChild(list);
   });
 }
 
@@ -2554,6 +3432,29 @@ function prefSection() {
     const r = await cmd('ui.pref', { asr_auto_send: on });
     S.asr_auto_send = r.asr_auto_send;
   }));
+  // 这两个是 app-core 新加的能力：全工具常开，但要不要逐次审批由这里决定
+  sect.appendChild(switchRow('允许工具自动执行（autoallow）',
+    '开启后，她调用工具（读写文件、跑命令、查资料）不需要你逐次点确认；'
+    + '关掉则每次都要批准，更安全但更打断。',
+    S.autoallow, async (on) => {
+      const r = await cmd('ui.pref', { autoallow: on });
+      S.autoallow = r.autoallow !== undefined ? !!r.autoallow : on;
+    }));
+  sect.appendChild(switchRow('长对话自动压缩（compact）',
+    '开启后上下文变长时自动把旧对话压成摘要，长聊也不容易超出模型窗口；'
+    + '关掉则不再自动压缩。',
+    S.compact_auto, async (on) => {
+      const r = await cmd('ui.pref', { compact_auto: on });
+      S.compact_auto = r.compact_auto !== undefined ? !!r.compact_auto : on;
+    }));
+
+  if (S.tools) {
+    const toolTip = el('div', 'tip',
+      '基础工具已全部开启：ls / read / write / edit / rg / exec / find / tw / notice / msg。'
+      + '图片与音频可以用 read 直接打开成多模态内容。');
+    toolTip.style.cssText = 'margin-top:12px;font-size:11px;color:var(--faint);line-height:1.7';
+    sect.appendChild(toolTip);
+  }
 
   const row = el('div', 'btn-row');
   row.appendChild(actionBtn('打开数据目录', async () => { await cmd('open.data_dir'); }, 'btn sm'));
@@ -2568,6 +3469,116 @@ function prefSection() {
   sect.appendChild(tip);
   return sect;
 }
+
+/* ---------------- 表情包管理 ----------------
+   文件在 .agent/personas/<pid>/stickers/（优先）与 .agent/stickers/（全局）；
+   名字 = 文件名去扩展名。这里只管上传 / 删除 / 打开目录，发不发由模型决定。 */
+function stickerSection() {
+  const sect = el('div', 'sect');
+  const head = el('div', 'sect-h', '表情包');
+  if (S.active) head.appendChild(el('span', 'badge', (S.stickers || []).length + ' 个'));
+  sect.appendChild(head);
+
+  if (!S.active) {
+    const empty = el('div', 'empty', '先创建一个角色，再给她准备表情包。');
+    empty.style.lineHeight = '1.7';
+    sect.appendChild(empty);
+    return sect;
+  }
+
+  // 第一次打开时拉一次（state 里的列表可能还没包含别处刚加的）
+  if (!STICKERS_LOADED) {
+    STICKERS_LOADED = true;
+    cmd('sticker.list').then((r) => {
+      const arr = Array.isArray(r.stickers) ? r.stickers : (Array.isArray(r.list) ? r.list : null);
+      if (arr) S.stickers = arr;
+      if (!$('#drawer').classList.contains('hidden')) paintDrawer();
+    }).catch(() => { STICKERS_LOADED = false; });
+  }
+
+  const list = S.stickers || [];
+  if (!list.length) {
+    const empty = el('div', 'empty', '还没有表情包。上传几张 png / gif / webp，聊天时她会在合适的时候发给你。');
+    empty.style.lineHeight = '1.7';
+    sect.appendChild(empty);
+  } else {
+    const grid = el('div', 'sticker-grid');
+    for (const s of list) {
+      const cell = el('div', 'sticker-cell');
+      const img = document.createElement('img');
+      img.src = s.url || '';
+      img.alt = s.name || '表情包';
+      img.loading = 'lazy';
+      img.title = (s.name || '') + '（点开看大图）';
+      img.onclick = () => openLightbox(s.url, s.name);
+      const name = el('div', 'sticker-name', s.name || '');
+      const del = el('button', 'sticker-del');
+      del.type = 'button';
+      del.title = '删除「' + (s.name || '') + '」';
+      del.innerHTML = icon('trash');
+      del.onclick = async () => {
+        if (!confirm('删除表情包「' + (s.name || '') + '」？')) return;
+        try {
+          await cmd('sticker.del', { name: s.name });
+          await refreshState();
+          toast('已删除', 'ok');
+        } catch (e) { toast(e.message, 'err'); }
+      };
+      cell.append(img, name, del);
+      grid.appendChild(cell);
+    }
+    sect.appendChild(grid);
+  }
+
+  const row = el('div', 'btn-row');
+  row.appendChild(actionBtn('上传表情包', pickSticker, 'btn primary sm'));
+  row.appendChild(actionBtn('打开表情包目录', async () => { await cmd('open.stickers_dir'); }, 'btn sm ghost'));
+  row.appendChild(actionBtn('刷新', async () => { await refreshState(); }, 'btn sm ghost'));
+  sect.appendChild(row);
+
+  const tip = el('div', 'tip');
+  tip.style.cssText = 'margin-top:12px;font-size:11px;color:var(--faint);line-height:1.7';
+  tip.innerHTML = '支持 png / jpg / gif / webp，单个不超过 ' + fmtSize(STICKER_MAX_BYTES) + '；名字就是文件名。'
+    + '<br>当前角色的在 <code>.agent/personas/&lt;角色&gt;/stickers/</code>，'
+    + '全局的 <code>.agent/stickers/</code> 对所有角色可见。';
+  sect.appendChild(tip);
+  return sect;
+}
+
+function pickSticker() {
+  if (!S.active) { toast('先创建一个角色', 'err'); return; }
+  $('#sticker-file').click();
+}
+
+$('#sticker-file').addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';
+  if (!files.length) return;
+  let ok = 0;
+  for (const f of files) {
+    const ext = extOf(f.name);
+    if (STICKER_EXTS.indexOf(ext) < 0) {
+      toast('「' + (f.name || '文件') + '」不是支持的图片格式', 'err');
+      continue;
+    }
+    if (f.size > STICKER_MAX_BYTES) {
+      toast('「' + (f.name || '文件') + '」太大：单张上限 ' + fmtSize(STICKER_MAX_BYTES), 'err');
+      continue;
+    }
+    try {
+      const dataUrl = await fileToDataUrl(f);
+      const name = String(f.name || 'sticker').replace(/\.[^.]+$/, '');
+      await cmd('sticker.add', { name, ext, data_b64: b64OfDataUrl(dataUrl) });
+      ok++;
+    } catch (err) {
+      toast(err.message || '上传失败', 'err');
+    }
+  }
+  if (ok) {
+    await refreshState();
+    toast('已添加 ' + ok + ' 个表情包', 'ok');
+  }
+});
 
 /* ==== js/06-boot.js ================================================== */
 
@@ -2588,12 +3599,24 @@ const DEMO = {
   },
   memory: [{ t: Date.now() / 1000 - 86400, text: '她记得你喜欢在深夜聊天' }],
   history: [],
+  // 演示用的一张贴纸（内联 SVG，不依赖外部文件）
+  stickers: [{
+    name: '微笑',
+    url: 'data:image/svg+xml;utf8,' + encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160">'
+      + '<rect width="160" height="160" rx="26" fill="#20202a"/>'
+      + '<circle cx="58" cy="66" r="9" fill="#8b7cff"/><circle cx="102" cy="66" r="9" fill="#8b7cff"/>'
+      + '<path d="M50 102q30 26 60 0" stroke="#8b7cff" stroke-width="7" fill="none" stroke-linecap="round"/>'
+      + '</svg>'),
+  }],
 };
 
 function mockState() {
   return Object.assign({ ok: true, t: 'hello', active: 'xier', busy: false, emotion: 'neutral',
     model: 'demo:companion', providers: [], thinking: 0, voice_reply: false, asr_auto_send: true,
-    tts: { kind: 'off' }, asr: { kind: 'off' }, voice: { tts: false, asr: false, recording: false } }, DEMO);
+    tts: { kind: 'off' }, asr: { kind: 'off' }, voice: { tts: false, asr: false, recording: false },
+    attach: { max_files: 8, max_bytes: 48 * 1024 * 1024 },
+    autoallow: true, compact_auto: true, tools: true }, DEMO);
 }
 
 async function mockCmd(name, args) {
@@ -2610,10 +3633,25 @@ async function mockCmd(name, args) {
       await wait(18);
     }
     handleEvent({ t: 'emo', name: 'happy' });
+    // 演示 AI 发表情包：走和真实回合一样的 sticker 事件
+    if (DEMO.stickers && DEMO.stickers.length) {
+      handleEvent({ t: 'sticker', persona: 'xier', name: DEMO.stickers[0].name, url: DEMO.stickers[0].url });
+    }
     handleEvent({ t: 'turn_end', natural: true });
     return { ok: true };
   }
   if (name === 'stop') { handleEvent({ t: 'turn_end' }); return { ok: true }; }
+  if (name === 'sticker.list') return { ok: true, stickers: DEMO.stickers || [] };
+  if (name === 'sticker.add') {
+    const nm = args.name || 'sticker';
+    DEMO.stickers = (DEMO.stickers || []).filter(s => s.name !== nm);
+    DEMO.stickers.push({ name: nm, url: 'data:' + (mimeByExt('x.' + (args.ext || 'png'))) + ';base64,' + (args.data_b64 || '') });
+    return { ok: true, name: nm };
+  }
+  if (name === 'sticker.del') {
+    DEMO.stickers = (DEMO.stickers || []).filter(s => s.name !== args.name);
+    return { ok: true };
+  }
   if (name === 'voice.record.start') { S.recording = true; return { ok: true }; }
   if (name === 'voice.record.stop') { S.recording = false; return { ok: true, path: '', seconds: 2 }; }
   if (name === 'voice.transcribe') { handleEvent({ t: 'asr', text: '演示模式听写结果', auto_send: false }); return { ok: true, text: '演示模式听写结果' }; }
@@ -2770,20 +3808,29 @@ function l2dCollectInfo() {
   L2D.expressions = (settings.expressions || []).map(e => e.Name).filter(Boolean);
 }
 
+/* 取景：画布铺满整个窗口，所以不是「塞进一个框」，而是「让画面填满视口」。
+   - 立绘（高明显大于宽）：按高度撑满，人站在画面中央，左右留白交给光晕；
+   - 场景图（方形 / 横向）：铺满窗口，多出来的部分裁掉 —— 上下各裁一点，
+     并且往下压 10% 的溢出量，让头顶留白多一点（下面那截反正被字幕压着）。
+   cfg.scale / x / y 依然有效：在取景结果上再乘一档、再偏一点。 */
 function l2dFit() {
   const app = L2D.app, model = L2D.model;
   if (!app || !model) return;
   const res = app.renderer.resolution || 1;
   const W = app.renderer.width / res;
   const H = app.renderer.height / res;
+  if (W < 2 || H < 2) return;
   const cfg = L2D.cfg;
   const iw = model.internalModel.width || 1;
   const ih = model.internalModel.height || 1;
-  const scale = Math.min(W / iw, H / ih) * (Number(cfg.scale) || 1) * 1.02;
+  const fitW = W / iw, fitH = H / ih;
+  const base = ih > iw * 1.15 ? fitH : Math.max(fitW, fitH);
+  const scale = base * (Number(cfg.scale) || 1);
   model.scale.set(scale);
   model.anchor.set(0.5, 0.5);
   model.x = W * (0.5 + (Number(cfg.x) || 0));
-  model.y = H * (0.5 + (Number(cfg.y) || 0));
+  const overflow = Math.max(0, ih * scale - H);
+  model.y = H * (0.5 + (Number(cfg.y) || 0)) + overflow * 0.1;
 }
 
 function l2dDestroy() {
@@ -2867,11 +3914,12 @@ async function l2dMountInner(path, token) {
     l2dSetStatus('loading', '加载模型…');
     l2dDestroy();
     L2D.canvas = $('#l2d-canvas');
-    const rect = L2D.canvas.getBoundingClientRect();
+    // 用 offsetWidth/Height（布局尺寸）而不是 getBoundingClientRect：
+    // 舞台上有呼吸缩放，rect 会带上 transform，量出来的尺寸会越滚越大
     L2D.app = new PIXI.Application({
       view: L2D.canvas,
-      width: Math.max(2, Math.round(rect.width)),
-      height: Math.max(2, Math.round(rect.height)),
+      width: Math.max(2, L2D.canvas.offsetWidth || 2),
+      height: Math.max(2, L2D.canvas.offsetHeight || 2),
       backgroundAlpha: 0,
       antialias: true,
       autoDensity: true,
@@ -3025,10 +4073,28 @@ function l2dStartTicker() {
   });
 }
 
-/* ---------------- 点哪里算哪里 ---------------- */
-function l2dZoneFromPoint(cx, cy) {
+/* ---------------- 点哪里算哪里 ----------------
+   画布铺满整屏，不能按视口切三段（那样点空白也算摸头）。
+   先算出模型在屏幕上的实际方框，落在框外就不算。 */
+function l2dModelBox() {
+  const m = L2D.model, app = L2D.app;
+  if (!m || !app) return null;
+  const res = app.renderer.resolution || 1;
+  const W = app.renderer.width / res, H = app.renderer.height / res;
+  const b = m.getBounds();                 // 世界坐标就是 CSS 像素
   const rect = L2D.canvas.getBoundingClientRect();
-  const y = (cy - rect.top) / Math.max(1, rect.height);
+  const kx = rect.width / Math.max(1, W), ky = rect.height / Math.max(1, H);
+  return {
+    x: rect.left + b.x * kx, y: rect.top + b.y * ky,
+    w: b.width * kx, h: b.height * ky,
+  };
+}
+
+function l2dZoneFromPoint(cx, cy) {
+  const box = l2dModelBox();
+  if (!box || box.w < 8 || box.h < 8) return 'body';
+  if (cx < box.x || cx > box.x + box.w || cy < box.y || cy > box.y + box.h) return '';
+  const y = (cy - box.y) / box.h;
   if (y < 0.34) return 'head';
   if (y < 0.78) return 'body';
   return 'hand';
@@ -3038,7 +4104,7 @@ function l2dBindPointer() {
   const c = L2D.canvas;
   if (!c || c.__l2dBound) return;
   c.__l2dBound = true;
-  // 模型自己声明了 HitAreas 就听它的；否则按画布高度切三段
+  // 模型自己声明了 HitAreas 就听它的；否则按模型方框的高度切三段
   if (L2D.model) {
     try {
       L2D.model.on('hit', (names) => {
@@ -3054,7 +4120,9 @@ function l2dBindPointer() {
     // 库的 hit 走的是 pointertap（pointerup 上发），等它先出手再兜底
     setTimeout(() => {
       if (L2D.hitFired) return;
-      if (typeof TRIG !== 'undefined') TRIG.fire('click', { zone: l2dZoneFromPoint(x, y) });
+      const zone = l2dZoneFromPoint(x, y);
+      if (!zone) return;   // 点在画布上但没有模型：不算戳她
+      if (typeof TRIG !== 'undefined') TRIG.fire('click', { zone });
     }, 40);
   });
 }
@@ -3065,9 +4133,10 @@ function l2dScheduleResize() {
   if (l2dRoTimer) clearTimeout(l2dRoTimer);
   l2dRoTimer = setTimeout(() => {
     if (!L2D.app || !L2D.model || !L2D.canvas) return;
-    const rect = L2D.canvas.getBoundingClientRect();
-    if (rect.width < 2 || rect.height < 2) return;
-    L2D.app.renderer.resize(Math.round(rect.width), Math.round(rect.height));
+    // 同上：布局尺寸，不带呼吸缩放的 transform
+    const w = L2D.canvas.offsetWidth, h = L2D.canvas.offsetHeight;
+    if (w < 2 || h < 2) return;
+    L2D.app.renderer.resize(w, h);
     l2dFit();
   }, 140);
 }
@@ -3641,7 +4710,7 @@ function stageModelSection() {
   const row = el('div', 'row');
   row.append(field('缩放', scale), field('水平偏移', ox));
   s.appendChild(row);
-  s.appendChild(field('垂直偏移', oy, '缩放 1 = 尽量填满画布；偏移是画布宽/高的比例（0.1 = 10%）。拖动即时预览。'));
+  s.appendChild(field('垂直偏移', oy, '舞台铺满整个窗口：缩放 1 时立绘按高度撑满、场景图铺满后裁边。偏移是画布宽/高的比例（0.1 = 10%）。拖动即时预览。'));
 
   sel.onchange = () => {
     if (!sel.value) return;
@@ -4101,6 +5170,1005 @@ function buildTriggerJson(body) {
   ));
   return body;
 }
+
+/* ==== js/10-avatar-crop.js =========================================== */
+
+'use strict';
+/* =====================================================================
+   10-avatar-crop —— 头像截取：选图之后先裁再上传
+   =====================================================================
+   原来的流程是选完图直接上传整张：横竖比不一的全尺寸图被 object-fit: cover
+   硬切成圆头像，想露脸还是露腰都由不得用户。这里加一步截取：
+
+   - 正方形视口（头像在界面上全是圆的，裁正方形就够）；圆形Mask圈出最终范围
+   - 拖动平移、滚轮 / 滑块缩放；边界钳制保证图片始终覆盖视口（裁不出黑边）
+   - 确认后按当前变换把视口区域画进 512×512 画布，出 PNG 再走 persona.avatar
+   ===================================================================== */
+
+const CROP = {
+  url: '',            // object URL（用完要 revoke）
+  img: null,          // 解码后的原图
+  nw: 0, nh: 0,       // 原图自然尺寸
+  scale: 1,           // 当前缩放（图片像素 → 视口像素）
+  minScale: 1,        // 下限：cover，图片至少铺满视口
+  maxScale: 4,        // 上限：cover 的若干倍
+  x: 0, y: 0,         // 图片中心相对视口中心的偏移（视口 px）
+  stage: 272,           // 视口边长（CSS px，随窗口变；量不到时保留旧值）
+  out: 512,           // 输出分辨率
+  drag: null,         // 拖动状态
+};
+
+function cropStageEl() { return $('#crop-stage'); }
+function cropCanvas() { return $('#crop-canvas'); }
+
+/* 视口当前边长：CSS 里是 min(272px, 66vw)，以实测为准。
+   量不到（display:none 之类）就保留上一次的值，别把边长打成 0。 */
+function cropMeasure() {
+  const r = cropStageEl().getBoundingClientRect();
+  if (r.width > 0) CROP.stage = Math.round(r.width);
+  const cv = cropCanvas();
+  const dpr = Math.min(3, window.devicePixelRatio || 1);
+  const bw = Math.round(CROP.stage * dpr), bh = Math.round(CROP.stage * dpr);
+  if (cv.width !== bw || cv.height !== bh) { cv.width = bw; cv.height = bh; }
+}
+
+/* 图片必须始终盖住视口：偏移超过这条边就会出现空边 */
+function cropClamp() {
+  const mx = Math.max(0, (CROP.nw * CROP.scale - CROP.stage) / 2);
+  const my = Math.max(0, (CROP.nh * CROP.scale - CROP.stage) / 2);
+  CROP.x = Math.min(mx, Math.max(-mx, CROP.x));
+  CROP.y = Math.min(my, Math.max(-my, CROP.y));
+}
+
+function cropRender() {
+  const cv = cropCanvas();
+  const ctx = cv.getContext('2d');
+  const dpr = cv.width / CROP.stage;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, CROP.stage, CROP.stage);
+  const w = CROP.nw * CROP.scale, h = CROP.nh * CROP.scale;
+  const dx = (CROP.stage - w) / 2 + CROP.x;
+  const dy = (CROP.stage - h) / 2 + CROP.y;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(CROP.img, dx, dy, w, h);
+}
+
+/* 滑块 0..100 → minScale..maxScale，对数映射（低倍率段更好捻） */
+function cropSliderScale(v) {
+  const t = Math.min(100, Math.max(0, v)) / 100;
+  return CROP.minScale * Math.pow(CROP.maxScale / CROP.minScale, t);
+}
+function cropSliderValue() {
+  const t = Math.log(CROP.scale / CROP.minScale) / Math.log(CROP.maxScale / CROP.minScale);
+  return Math.round(Math.min(1, Math.max(0, t)) * 100);
+}
+function cropSyncSlider() {
+  const z = $('#crop-zoom');
+  z.value = String(cropSliderValue());
+  z.style.setProperty('--fill', z.value + '%');
+}
+
+/* 以某个视口坐标为锚缩放：图片上该点在缩放前后停在原地 */
+function cropZoomAt(next, ax, ay) {
+  const w = CROP.nw * CROP.scale, h = CROP.nh * CROP.scale;
+  const dx = (CROP.stage - w) / 2 + CROP.x;
+  const dy = (CROP.stage - h) / 2 + CROP.y;
+  // 锚点在图片自然坐标系里的位置
+  const u = (ax - dx) / CROP.scale, v = (ay - dy) / CROP.scale;
+  CROP.scale = Math.min(CROP.maxScale, Math.max(CROP.minScale, next));
+  const w2 = CROP.nw * CROP.scale, h2 = CROP.nh * CROP.scale;
+  CROP.x = ax - u * CROP.scale - (CROP.stage - w2) / 2;
+  CROP.y = ay - v * CROP.scale - (CROP.stage - h2) / 2;
+  cropClamp();
+}
+
+/* 加载代号：连选两张图时，后一张会把代号+1，先加载的那张 onload 直接作废，
+   不然慢半拍的那张会把新图的截取状态覆盖掉 */
+let cropGen = 0;
+
+function openAvatarCrop(file) {
+  if (!file) return;
+  if (!/^image\//.test(file.type)) { toast('只能选图片文件', 'err'); return; }
+  if (file.size > 8 * 1024 * 1024) { toast('图片太大（上限 8MB）', 'err'); return; }
+  if (!(S.persona || {}).id) { toast('还没有打开角色', 'err'); return; }
+
+  closeAvatarCrop(); // 上一张没裁完的先收掉
+  const gen = ++cropGen;
+  CROP.url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    if (gen !== cropGen) return;
+    CROP.img = img;
+    CROP.nw = img.naturalWidth; CROP.nh = img.naturalHeight;
+    // 必须先显示再测量：display:none 的元素量出来是 0，视口边长会掉到下限
+    $('#crop-modal').classList.remove('hidden');
+    cropMeasure();
+    // cover 起步：小图不被无谓放大，大图先看到全景再捻
+    CROP.minScale = Math.max(CROP.stage / CROP.nw, CROP.stage / CROP.nh);
+    CROP.maxScale = CROP.minScale * 6;
+    CROP.scale = CROP.minScale;
+    CROP.x = 0; CROP.y = 0;
+    cropClamp();
+    cropRender();
+    cropSyncSlider();
+  };
+  img.onerror = () => {
+    if (gen !== cropGen) return;
+    toast('图片解码失败', 'err');
+    closeAvatarCrop();
+  };
+  img.src = CROP.url;
+}
+
+function closeAvatarCrop() {
+  $('#crop-modal').classList.add('hidden');
+  CROP.img = null; CROP.drag = null;
+  if (CROP.url) { URL.revokeObjectURL(CROP.url); CROP.url = ''; }
+}
+
+/* ---------------- 交互 ---------------- */
+$('#crop-stage').addEventListener('pointerdown', (e) => {
+  if (!CROP.img) return;
+  e.preventDefault();
+  CROP.drag = { px: e.clientX, py: e.clientY, x: CROP.x, y: CROP.y };
+  cropStageEl().setPointerCapture(e.pointerId);
+});
+$('#crop-stage').addEventListener('pointermove', (e) => {
+  if (!CROP.drag || !CROP.img) return;
+  CROP.x = CROP.drag.x + (e.clientX - CROP.drag.px);
+  CROP.y = CROP.drag.y + (e.clientY - CROP.drag.py);
+  cropClamp();
+  cropRender();
+});
+const cropEndDrag = (e) => {
+  if (!CROP.drag) return;
+  CROP.drag = null;
+  try { cropStageEl().releasePointerCapture(e.pointerId); } catch { }
+};
+$('#crop-stage').addEventListener('pointerup', cropEndDrag);
+$('#crop-stage').addEventListener('pointercancel', cropEndDrag);
+
+$('#crop-stage').addEventListener('wheel', (e) => {
+  if (!CROP.img) return;
+  e.preventDefault();
+  const r = cropStageEl().getBoundingClientRect();
+  const ax = e.clientX - r.left, ay = e.clientY - r.top;
+  cropZoomAt(CROP.scale * (e.deltaY < 0 ? 1.12 : 1 / 1.12), ax, ay);
+  cropRender();
+  cropSyncSlider();
+}, { passive: false });
+
+$('#crop-zoom').addEventListener('input', (e) => {
+  if (!CROP.img) return;
+  cropZoomAt(cropSliderScale(Number(e.target.value)), CROP.stage / 2, CROP.stage / 2);
+  cropRender();
+  cropSyncSlider();
+});
+
+$('#crop-cancel').onclick = () => closeAvatarCrop();
+// 点遮罩（卡片外面）也算取消
+$('#crop-modal').addEventListener('pointerdown', (e) => {
+  if (e.target === $('#crop-modal')) closeAvatarCrop();
+});
+
+window.addEventListener('resize', () => {
+  if (!CROP.img || $('#crop-modal').classList.contains('hidden')) return;
+  // 视口边长变了：按比例带着缩放和偏移走，画面不跳
+  const old = CROP.stage;
+  cropMeasure();
+  const k = CROP.stage / old;
+  CROP.minScale *= k; CROP.maxScale *= k; CROP.scale *= k;
+  CROP.x *= k; CROP.y *= k;
+  cropClamp();
+  cropRender();
+  cropSyncSlider();
+});
+
+/* ---------------- 确认：按当前变换裁出正方形 ---------------- */
+$('#crop-ok').onclick = async () => {
+  if (!CROP.img) return;
+  const btn = $('#crop-ok');
+  btn.disabled = true;
+  try {
+    // 视口 (0,0)-(stage,stage) 对应图片上的源矩形：
+    // 图片自然点 (u,v) 落在视口 (u*scale + dx, v*scale + dy)
+    const w = CROP.nw * CROP.scale, h = CROP.nh * CROP.scale;
+    const dx = (CROP.stage - w) / 2 + CROP.x;
+    const dy = (CROP.stage - h) / 2 + CROP.y;
+    const sx = -dx / CROP.scale, sy = -dy / CROP.scale;
+    const sw = CROP.stage / CROP.scale, sh = CROP.stage / CROP.scale;
+    const out = document.createElement('canvas');
+    out.width = CROP.out; out.height = CROP.out;
+    const octx = out.getContext('2d');
+    octx.imageSmoothingQuality = 'high';
+    octx.drawImage(CROP.img, sx, sy, sw, sh, 0, 0, CROP.out, CROP.out);
+
+    const blob = await new Promise(res => out.toBlob(res, 'image/png'));
+    if (!blob) throw new Error('图片编码失败');
+    const buf = await blob.arrayBuffer();
+    let bin = '';
+    const bytes = new Uint8Array(buf);
+    for (let i = 0; i < bytes.length; i += 0x8000)
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+
+    closeAvatarCrop();
+    await cmd('persona.avatar', { id: (S.persona || {}).id, data_b64: btoa(bin), ext: 'png' });
+    await refreshState();
+    toast('头像已更新', 'ok');
+  } catch (err) {
+    toast(err.message, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+/* ==== js/11-im.js ==================================================== */
+
+'use strict';
+/* =====================================================================
+   11-im —— IM 接入
+
+   设置 → IM 接入 是一列渠道；点一个进它自己的子页，里面是：
+   状态、扫码登录（二维码怎么来的见各 kind 的说明）、凭据、白名单。
+   新增一个渠道也是一层子页（添加表单）。
+   ===================================================================== */
+
+const IM_KINDS = [
+  ['off', '关闭'],
+  ['wechat', '微信（iLink / ClawBot）'],
+  ['telegram', 'Telegram'],
+  ['onebot', 'QQ（OneBot）'],
+  ['wecom', '企业微信'],
+  ['bridge', 'HTTP 桥'],
+];
+
+/* 渠道媒体能力的统一说明；真正的解析/下载/发送在服务端（agent-im）做 */
+const IM_MEDIA_NOTE = '支持图片 / 语音 / 视频 / 文件 / 表情包收发（由服务端处理）。';
+
+const IM_HELP = {
+  wechat: '腾讯官方个人号 Bot API（iLink / ClawBot，2026-03 开放）。保存后点上面的二维码，'
+    + '用手机微信扫码并在手机上确认；凭证只进本地加密库，之后走 35 秒长轮询收消息。',
+  telegram: 'Telegram Bot API。BotFather 给的 token 填在下面；国内直连 api.telegram.org 不通时'
+    + '必须挂代理（或填自建反代地址）。消息走长轮询，图片、语音、视频、文件、贴纸都由服务端接送。',
+  onebot: 'NapCat / go-cqhttp / Lagrange 的 HTTP API 地址。事件用「反向 HTTP」推到这里：'
+    + 'http://127.0.0.1:<服务端口>/api/im/<渠道 id>。登录在 NapCat 自己的界面里完成，'
+    + '这里只查一次 get_login_info 报告「已登录」，不轮询二维码。',
+  wecom: '企业微信自建应用：回调要公网地址（frp / ngrok），后台填 Token 与 EncodingAESKey；'
+    + '发送走 cgi-bin/message/send，长回合不会被 5 秒限制卡住。',
+  bridge: '任何本地桥（个人微信 hook / wechaty / 自己的脚本）POST 到 /api/im/<渠道 id>，'
+    + '回复 POST 回这里填的地址；桥可以把登录二维码 POST 上来（{"qr": "<base64>"}）。',
+};
+
+const QR_TEXT = {
+  wait: '等手机扫码',
+  scaned: '扫到了，请在手机上确认',
+  online: '已登录',
+  expired: '二维码过期了',
+  error: '取二维码失败',
+  unsupported: '这个渠道不需要扫码',
+};
+
+/* 私聊 / 群聊分开的白名单策略（字段含义见 src/agent-im.hpp 的 channel） */
+const PRIVATE_MODES = [
+  ['open', '谁都能私聊'],
+  ['allow', '仅白名单用户'],
+];
+const GROUP_MODES = [
+  ['off', '关闭（群里不响应）'],
+  ['mention', '任何人 @ 她就回（不用白名单）'],
+  ['allow_mention', '白名单用户 @ 她才回'],
+  ['allow', '白名单用户任意消息都回（不用 @）'],
+];
+function imModeText(table, v) {
+  const hit = table.find(([k]) => k === v);
+  return hit ? hit[1] : v;
+}
+function imPolicyText(c) {
+  const pm = c.private_mode === 'allow'
+    ? '私聊白名单 ' + ((c.private_allow || []).length || 0)
+    : '私聊开放';
+  let gm = c.group_mode === 'mention' ? '群聊 @ 即回'
+    : c.group_mode === 'allow_mention' ? '群聊白名单 @'
+    : c.group_mode === 'allow' ? '群聊白名单'
+    : '群聊关闭';
+  const gids = (c.group_ids || []).length ? ' · ' + c.group_ids.length + ' 个群' : '';
+  return pm + ' · ' + gm + gids;
+}
+
+function imKindName(kind) {
+  const hit = IM_KINDS.find(([v]) => v === kind);
+  return hit ? hit[1] : (kind || '未配置');
+}
+
+function imStatusText() {
+  const live = (S.im || []).filter(c => c.enabled && c.kind && c.kind !== 'off');
+  return live.length ? `${live.length} 个已开启` : '未接入';
+}
+
+/* ---------------- IM 接入：渠道列表 ---------------- */
+function imSection() {
+  const sect = el('div', 'sect');
+  const list = S.im || [];
+  if (!list.length) {
+    const empty = el('div', 'empty',
+      '还没有接入。她只会待在桌面窗口里；接一个渠道，就能在手机上跟她说话 —— '
+      + '同一个人、同一段会话、同一份记忆。');
+    empty.style.lineHeight = '1.7';
+    sect.appendChild(empty);
+  }
+  for (const c of list) sect.appendChild(imChannelRow(c));
+  sect.appendChild(el('div', 'btn-row', actionBtn('＋ 添加渠道', openImNew, 'btn')));
+  return sect;
+}
+
+function imChannelRow(c) {
+  const live = c.enabled && c.kind && c.kind !== 'off';
+  const row = el('button', 'mod-row');
+  const left = el('div', 'mod-main');
+  left.appendChild(el('div', 'mod-name', `${c.id} · ${imKindName(c.kind)}`));
+  const bits = [];
+  if (!live) bits.push('未启用');
+  else if (c.state === 'error') bits.push('出错');
+  else if (c.state === 'running') bits.push('运行中');
+  else bits.push('已停止');
+  if ((c.kind === 'wechat' || c.kind === 'onebot' || c.kind === 'bridge') && c.has_bot) {
+    bits.push('已登录' + (c.bot_id ? ' ' + c.bot_id : ''));
+  }
+  if (c.persona) {
+    const p = (S.personas || []).find(x => x.id === c.persona);
+    bits.push('角色 ' + (p ? (p.name || p.id) : c.persona));
+  }
+  bits.push(`收 ${c['in'] || 0} · 发 ${c.out || 0}`);
+  bits.push(imPolicyText(c));
+  left.appendChild(el('div', 'mod-sub', bits.join(' · ')));
+  row.append(left, el('span', 'mod-go', '›'));
+  row.onclick = () => pushDrawer(c.id, 'settings/im/' + c.id, (body) => {
+    body.appendChild(drawerBack('IM 接入'));
+    body.appendChild(imDetail((S.im || []).find(x => x.id === c.id) || c));
+  });
+  return row;
+}
+
+function openImNew() {
+  pushDrawer('添加渠道', 'settings/im/new', (body) => {
+    body.appendChild(drawerBack('IM 接入'));
+    body.appendChild(imForm({ id: '', kind: 'wechat', enabled: true, allow: [], limit: 0 }, '添加', async (state) => {
+      const id = (state.id || '').trim();
+      if (!/^[A-Za-z0-9_-]{1,32}$/.test(id)) throw new Error('渠道 id 只能用字母、数字、- 和 _');
+      await cmd('im.set', { id, patch: state });
+      await refreshState();
+      toast(state.kind === 'wechat' ? '已添加，接下来扫码登录' : '已添加', 'ok');
+      popDrawer();
+    }));
+  });
+}
+
+/* ---------------- 渠道详情 ---------------- */
+function imDetail(c) {
+  const box = el('div');
+
+  const live = c.enabled && c.kind && c.kind !== 'off';
+  const head = el('div', 'card' + (live ? ' on' : ''));
+  const top = el('div', 'card-top');
+  const left = el('div');
+  left.appendChild(el('div', 'card-name', imKindName(c.kind)));
+  left.appendChild(el('div', 'card-sub', c.webhook ? `回调 ${c.webhook}` : (c.api_base || c.bot_base || '默认地址')));
+  top.appendChild(left);
+  const stateText = !live ? '未启用' : (c.state === 'error' ? '出错' : (c.state === 'running' ? '运行中' : '已停止'));
+  top.appendChild(el('span', 'badge' + (live && c.state !== 'error' ? ' ok' : (live ? ' warn' : '')), stateText));
+  head.appendChild(top);
+  head.appendChild(el('div', 'card-sub', `收 ${c['in'] || 0} · 发 ${c.out || 0}`));
+  if (c.last_error) head.appendChild(el('div', 'tip', c.last_error));
+  box.appendChild(head);
+
+  if (c.kind === 'wechat' || c.kind === 'onebot' || c.kind === 'bridge') box.appendChild(qrPanel(c));
+
+  box.appendChild(imForm(Object.assign({}, c), '保存', async (state) => {
+    state.id = c.id;
+    await cmd('im.set', { id: c.id, patch: state });
+    await refreshState();
+    toast('已保存', 'ok');
+  }));
+
+  const row = el('div', 'btn-row');
+  if (live) {
+    row.appendChild(actionBtn('测试连接', async () => {
+      const r = await cmd('im.test', { id: c.id });
+      toast('通了：' + JSON.stringify(r.info || {}), 'ok', 5000);
+      await refreshState();
+    }, 'btn sm'));
+  }
+  row.appendChild(actionBtn(c.enabled ? '停用' : '启用', async () => {
+    await cmd('im.set', { id: c.id, patch: { enabled: !c.enabled } });
+    await refreshState();
+  }, 'btn sm ghost'));
+  row.appendChild(actionBtn('删除', async () => {
+    if (!confirm(`删除渠道「${c.id}」？配对的凭据会一起删掉。`)) return;
+    await cmd('im.del', { id: c.id });
+    await refreshState();
+    popDrawer();
+  }, 'btn sm danger'));
+  box.appendChild(row);
+  return box;
+}
+
+/* ---------------- 扫码登录面板 ----------------
+   二维码不归我们造：微信走 iLink 的 get_bot_qrcode（服务端把返回的 URL 编成二维码），
+   桥由桥自己 POST 上来。OneBot（NapCat）没有取码接口 —— 登录在 NapCat 里做，
+   这里只查一次 get_login_info，不轮询、不显示二维码。 */
+/* 扫码成功的在线状态只主动刷新一次状态：refreshState → paintDrawer 会重建
+   这个面板，新面板再看到 online 又调 refreshState —— 不设闸就是无限重建，
+   表现就是二维码面板一直闪「正在取二维码…」。 */
+const QR_ONLINE_REFRESHED = new Set();
+
+function qrPanel(c) {
+  const wrap = el('div', 'qr-panel');
+  // QQ 走 NapCat，扫码发生在 NapCat 自己的界面里：这里只是【检查一次】登录状态，
+  // 不轮询、更不问二维码。否则面板会一直「取二维码」并且和 online 互相覆盖。
+  const onebot = c.kind === 'onebot';
+  const img = document.createElement('img');
+  img.className = 'qr-img';
+  img.alt = '登录二维码';
+  img.style.display = 'none'; // 拿到图再显示，否则会露一个碎图标
+  const state = el('div', 'qr-state', onebot ? '正在检查 NapCat 登录状态…' : '正在取二维码…');
+  const hint = el('div', 'tip', '');
+  wrap.append(img, state, hint);
+
+  let stopped = false;
+  let timer = null;
+  const stop = () => { stopped = true; if (timer) clearTimeout(timer); };
+
+  const tick = async (refresh) => {
+    // 抽屉被重绘时这个节点会被换掉：检测到就自己收摊，别留定时器
+    if (stopped || !img.isConnected) { stop(); return; }
+    try {
+      const r = await cmd('im.qr', { id: c.id, refresh: !!refresh });
+      if (r.qr) {
+        img.src = r.qr;
+        img.style.display = '';
+      } else {
+        img.removeAttribute('src');
+        img.style.display = 'none';
+      }
+      let text = QR_TEXT[r.state] || r.state;
+      if (onebot && (r.state === 'wait' || r.state === 'scaned'))
+        text = 'NapCat 已连接，等待账号登录';
+      if (r.state === 'online' && r.account) text += '：' + r.account;
+      state.textContent = text;
+      hint.textContent = r.hint || '';
+      if (r.state === 'online' || r.state === 'unsupported' || r.state === 'error') {
+        stop();
+        // 只有真需要扫码登录的渠道才回刷状态（让渠道行的「已登录」更新）；
+        // QQ 的状态来自 NapCat，渠道卡本身没有变，不需要重建页面。
+        if (r.state === 'online' && !onebot && !QR_ONLINE_REFRESHED.has(c.id)) {
+          QR_ONLINE_REFRESHED.add(c.id);
+          refreshState().catch(() => {});
+        }
+        return;
+      }
+    } catch (e) {
+      state.textContent = e.message;
+    }
+    // QQ 只查一次：连接/登录状态在 NapCat 那边变，点「重新检查」才再查
+    if (!stopped && !onebot) timer = setTimeout(() => tick(false), 2500);
+  };
+
+  const bar = el('div', 'btn-row');
+  bar.appendChild(actionBtn(onebot ? '重新检查' : '刷新二维码', async () => {
+    stop();
+    stopped = false;
+    QR_ONLINE_REFRESHED.delete(c.id);
+    state.textContent = onebot ? '正在检查 NapCat 登录状态…' : '正在取二维码…';
+    tick(true);
+  }, 'btn sm ghost'));
+  wrap.appendChild(bar);
+  // 第一帧要等节点真的插进抽屉：isConnected 为假会直接收摊
+  setTimeout(() => tick(false), 0);
+  return wrap;
+}
+
+/* ---------------- 表单（新建 / 编辑共用） ---------------- */
+function imForm(initial, submitLabel, onSave) {
+  // 新字段：私聊 / 群聊分开的白名单策略。旧渠道只有 allow 时按旧语义铺开：
+  // 空 = 私聊开放 + 群聊关闭；非空 = 私聊白名单 + 群里白名单用户 @ 才回。
+  const state = Object.assign({
+    allow: [], limit: 0, enabled: true, proxy: '', persona: '',
+    private_mode: 'open', private_allow: [], group_mode: 'off', group_allow: [], group_ids: [],
+  }, initial);
+  if (state.persona == null) state.persona = '';
+  if (!Array.isArray(state.private_allow)) state.private_allow = [];
+  if (!Array.isArray(state.group_allow)) state.group_allow = [];
+  if (!Array.isArray(state.group_ids)) state.group_ids = [];
+  const hasNewPolicy = Array.isArray(initial.private_allow) || Array.isArray(initial.group_allow) ||
+    initial.private_mode != null || initial.group_mode != null;
+  if (!hasNewPolicy && Array.isArray(initial.allow) && initial.allow.length) {
+    state.private_mode = 'allow';
+    state.private_allow = initial.allow.slice();
+    state.group_mode = 'allow_mention';
+    state.group_allow = initial.allow.slice();
+  }
+  const box = el('div');
+  const fields = el('div');
+
+  const mk = (key, ph, type) => {
+    const v = type === 'password' ? '' : (state[key] == null ? '' : state[key]);
+    const input = textInput(v, ph, type === 'number' ? 'number' : (type === 'password' ? 'password' : 'text'));
+    input.addEventListener('input', () => {
+      state[key] = type === 'number' ? parseInt(input.value || '0', 10) : input.value;
+    });
+    return input;
+  };
+  const mkList = (key, ph) => {
+    const input = textInput((state[key] || []).join(','), ph, 'text');
+    input.addEventListener('input', () => {
+      state[key] = input.value.split(/[,，\s]+/).map(s => s.trim()).filter(Boolean);
+    });
+    return input;
+  };
+  const mkMode = (key, table) => {
+    const sel = document.createElement('select');
+    for (const [v, t] of table) {
+      const o = document.createElement('option');
+      o.value = v; o.textContent = t;
+      if (state[key] === v) o.selected = true;
+      sel.appendChild(o);
+    }
+    if (!table.some(([v]) => v === state[key]) && table.length) {
+      state[key] = table[0][0];
+      sel.value = table[0][0];
+    }
+    sel.onchange = () => { state[key] = sel.value; };
+    return sel;
+  };
+
+  const render = () => {
+    fields.innerHTML = '';
+    const k = state.kind;
+    const keep = '已保存；留空则保持不变';
+    if (k === 'wechat') {
+      fields.append(
+        field('登录状态',
+          el('div', 'tip', state.has_bot ? `已登录${state.bot_id ? '：' + state.bot_id : ''}` : '还没登录：点上面的二维码扫一下'),
+          state.has_bot ? '会话过期（ret -14）时重新扫一次就行。' : '扫码成功后凭证写进本地加密库，不会出现在配置文件里。'),
+        field('API 根', mk('bot_base', 'https://ilinkai.weixin.qq.com'), '扫码后服务端会返回 baseurl，一般不用手填。'),
+      );
+    } else if (k === 'telegram') {
+      fields.append(
+        field('Bot Token', mk('token', state.has_token ? keep : '123456:ABC-DEF…', 'password')),
+        field('代理', mk('proxy', 'http://127.0.0.1:7890'), '国内直连 api.telegram.org 不通，必须挂代理。'),
+        field('API 根', mk('api_base', 'https://api.telegram.org'), '只有走自建反代时才填。'),
+      );
+    } else if (k === 'onebot') {
+      fields.append(
+        field('HTTP API 地址', mk('api_base', 'http://127.0.0.1:3000')),
+        field('Access Token', mk('token', state.has_token ? keep : '没设就留空', 'password'),
+          '对端配置里的 access token，发消息时放在 Authorization 头。'),
+      );
+    } else if (k === 'wecom') {
+      fields.append(
+        field('回调 Token', mk('token', state.has_token ? keep : '后台「接收消息」里的 Token', 'password')),
+        field('EncodingAESKey', mk('aes_key', state.has_aes_key ? keep : '43 位', 'password')),
+        field('企业 ID', mk('corp_id', 'ww0123456789abcdef')),
+        field('应用 AgentId', mk('agent_id', '1000002', 'number')),
+        field('应用 Secret', mk('corp_secret', state.has_corp ? keep : '应用详情里的 Secret', 'password')),
+        field('API 根', mk('api_base', 'https://qyapi.weixin.qq.com')),
+      );
+    } else if (k === 'bridge') {
+      fields.append(
+        field('桥的接收地址', mk('api_base', 'http://127.0.0.1:8788/send')),
+        field('Secret', mk('token', state.has_token ? keep : '建议必填', 'password'),
+          '桥 POST 进来时带 X-Im-Secret；不填的话只接受本机直连。'),
+      );
+    }
+    if (k && k !== 'off') {
+      const mediaTip = el('div', 'im-media-tip', IM_MEDIA_NOTE);
+      fields.appendChild(mediaTip);
+      const policy = el('div', 'im-policy');
+      policy.appendChild(el('div', 'sect-h', '谁能说话'));
+      policy.appendChild(field('私聊', mkMode('private_mode', PRIVATE_MODES),
+        '默认谁都能私聊；选「仅白名单」后只回「私聊白名单」里的人。'));
+      policy.appendChild(field('私聊白名单', mkList('private_allow', '平台 user id，逗号分隔'),
+        'Telegram 数字 id / QQ 号 / 企业微信 userid / 桥的 user_id。'));
+      // 企业微信自建应用只做 1:1，群聊策略对它没有意义
+      if (k !== 'wecom') {
+        policy.appendChild(field('群聊', mkMode('group_mode', GROUP_MODES),
+          '群里默认不响应；「任何人 @」适合公开群，「白名单」适合只想理熟人。'));
+        policy.appendChild(field('群聊用户白名单', mkList('group_allow', '平台 user id，逗号分隔'),
+          '群聊模式用到「白名单」时才生效。'));
+        policy.appendChild(field('只在这些群', mkList('group_ids', '群号 / 群 chat id，逗号分隔；空 = 所有群'),
+          '最外层的门：填了就只在这些群里响应，不管上面的群聊模式。'));
+      }
+      policy.appendChild(field('每条上限', mk('limit', '0 = 平台默认', 'number'),
+        '超长回复按句末自动分条，最多四条。'));
+      fields.appendChild(policy);
+    }
+    const tip = el('div', 'tip', IM_HELP[k] || '选一种接法。凭据加密保存在 .agent/.crypt 里，不进 agent.json。');
+    tip.style.lineHeight = '1.7';
+    fields.appendChild(tip);
+    const row = el('div', 'btn-row');
+    row.appendChild(actionBtn(submitLabel, async () => { await onSave(state); }, 'btn primary'));
+    fields.appendChild(row);
+  };
+
+  const idInput = textInput(state.id || '', 'wx / qq / tg', 'text');
+  idInput.addEventListener('input', () => { state.id = idInput.value.trim(); });
+  if (state.id) {
+    idInput.disabled = true;
+    box.appendChild(field('渠道 id', idInput, '回调地址 /api/im/<id> 里的那一段，建好之后不改。'));
+  } else {
+    box.appendChild(field('渠道 id', idInput, '回调地址 /api/im/<id> 里的那一段。'));
+  }
+  const kindSel = document.createElement('select');
+  for (const [v, t] of IM_KINDS) {
+    const o = document.createElement('option');
+    o.value = v;
+    o.textContent = t;
+    if (state.kind === v) o.selected = true;
+    kindSel.appendChild(o);
+  }
+  kindSel.onchange = () => { state.kind = kindSel.value; render(); };
+  box.appendChild(field('类型', kindSel));
+
+  // 绑定角色：空 = 跟随桌面当前角色；选了之后这个渠道的消息交给它处理（各角色独立并行）
+  const personaSel = document.createElement('select');
+  const personaChoices = [['', '跟随当前角色']].concat(
+    (S.personas || []).map(p => [p.id, (p.name || p.id) + (p.id === S.active ? '（当前）' : '')]));
+  for (const [v, t] of personaChoices) {
+    const o = document.createElement('option');
+    o.value = v;
+    o.textContent = t;
+    if (state.persona === v) o.selected = true;
+    personaSel.appendChild(o);
+  }
+  personaSel.onchange = () => { state.persona = personaSel.value; };
+  box.appendChild(field('绑定角色', personaSel,
+    '这个渠道的消息交给哪个角色处理；留空 = 跟随桌面当前选中的角色。'));
+  box.appendChild(fields);
+  render();
+  return box;
+}
+
+/* ==== js/12-attach.js ================================================ */
+
+'use strict';
+/* =====================================================================
+   12-attach —— 输入框附件：回形针 / 拖拽 / 粘贴 / 托盘 / 消息里的附件渲染
+
+   文件只在本地存在：选进来时图片立刻读成 data URL（托盘和消息里都要预览），
+   其它类型先拿一个 object URL 做预览，真正发送时才读成 base64。
+   发送用 cmd('send', {text, attachments:[{name,mime,data_b64}]})。
+
+   附件要不要落盘、怎么进上下文，全是服务端的事；页面只负责选、看、发。
+   ===================================================================== */
+
+/* ---------------- 小工具 ---------------- */
+const EXT_MIME = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+  webp: 'image/webp', bmp: 'image/bmp', svg: 'image/svg+xml', avif: 'image/avif',
+  mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', mkv: 'video/x-matroska',
+  m4v: 'video/mp4', avi: 'video/x-msvideo',
+  mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', opus: 'audio/opus',
+  m4a: 'audio/mp4', aac: 'audio/aac', flac: 'audio/flac', amr: 'audio/amr',
+  pdf: 'application/pdf', txt: 'text/plain', md: 'text/markdown',
+  json: 'application/json', zip: 'application/zip',
+};
+
+function extOf(name) {
+  const m = /\.([A-Za-z0-9]+)$/.exec(String(name || ''));
+  return m ? m[1].toLowerCase() : '';
+}
+
+function fmtSize(n) {
+  n = Number(n) || 0;
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(n < 10 * 1024 ? 1 : 0) + ' KB';
+  return (n / 1024 / 1024).toFixed(n < 10 * 1024 * 1024 ? 1 : 0) + ' MB';
+}
+
+function mimeByExt(name) {
+  return EXT_MIME[extOf(name)] || 'application/octet-stream';
+}
+
+/* 页面自己判 kind（服务端也会再判一次）；sticker 只可能从历史/事件里来 */
+function kindOf(name, mime) {
+  const m = String(mime || '').toLowerCase();
+  if (m.indexOf('image/') === 0) return 'image';
+  if (m.indexOf('video/') === 0) return 'video';
+  if (m.indexOf('audio/') === 0) return 'audio';
+  const ext = extOf(name);
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'avif'].indexOf(ext) >= 0) return 'image';
+  if (['mp4', 'webm', 'mov', 'mkv', 'm4v', 'avi'].indexOf(ext) >= 0) return 'video';
+  if (['mp3', 'wav', 'ogg', 'opus', 'm4a', 'aac', 'flac', 'amr', 'silk'].indexOf(ext) >= 0) return 'audio';
+  return 'file';
+}
+
+function defaultName(kind) {
+  return ({ image: 'photo.png', video: 'video.mp4', audio: 'voice.ogg' }[kind] || 'file.bin');
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const rd = new FileReader();
+    rd.onload = () => resolve(String(rd.result || ''));
+    rd.onerror = () => reject(rd.error || new Error('读取文件失败'));
+    rd.readAsDataURL(file);
+  });
+}
+
+function b64OfDataUrl(url) {
+  const s = String(url || '');
+  const i = s.indexOf(',');
+  return i >= 0 ? s.slice(i + 1) : '';
+}
+
+/* ---------------- 托盘：添加 / 移除 / 重画 ---------------- */
+async function addFiles(fileList) {
+  const files = Array.from(fileList || []).filter(f => f && (f.size || f.name));
+  if (!files.length) return;
+  if (!S.active) {
+    toast('先创建一个角色，才能发图片和文件', 'err');
+    if (typeof openPersonaEditor === 'function') openPersonaEditor(true);
+    return;
+  }
+  let rejected = 0;
+  for (const f of files) {
+    if (ATTACH.items.length >= ATTACH.max) {
+      toast('一次最多 ' + ATTACH.max + ' 个附件', 'err');
+      break;
+    }
+    if (f.size > ATTACH.maxBytes) {
+      toast('「' + (f.name || '文件') + '」太大：单个上限 ' + fmtSize(ATTACH.maxBytes), 'err');
+      rejected++;
+      continue;
+    }
+    if (!f.size) {
+      toast('「' + (f.name || '文件') + '」是空文件', 'err');
+      rejected++;
+      continue;
+    }
+    const mime = f.type || mimeByExt(f.name);
+    const kind = kindOf(f.name, mime);
+    const item = {
+      id: 'a' + (++ATTACH.seq), name: f.name || defaultName(kind),
+      mime, size: f.size, kind, url: '', dataUrl: '', file: f,
+    };
+    try {
+      // 图片：现在就读成 data URL，托盘缩略图 / 消息预览 / 发送都用它
+      if (kind === 'image') item.dataUrl = await fileToDataUrl(f);
+      item.url = item.dataUrl || URL.createObjectURL(f);
+    } catch (e) {
+      toast('读取「' + item.name + '」失败：' + (e.message || e), 'err');
+      continue;
+    }
+    ATTACH.items.push(item);
+  }
+  paintAttachTray();
+  paintComposer();
+}
+
+function removeAttach(id) {
+  const i = ATTACH.items.findIndex(x => x.id === id);
+  if (i < 0) return;
+  const it = ATTACH.items.splice(i, 1)[0];
+  // 还没发出去：这张图不可能再被消息引用，把 object URL 还回去
+  if (it && it.url && it.url.indexOf('blob:') === 0) URL.revokeObjectURL(it.url);
+  paintAttachTray();
+  paintComposer();
+}
+
+/* 发送成功后清空托盘。这里故意不 revoke object URL：刚渲染的那条消息还在用它预览。 */
+function clearAttach() {
+  ATTACH.items = [];
+  paintAttachTray();
+  paintComposer();
+}
+
+function paintAttachTray() {
+  const tray = $('#attach-tray');
+  if (!tray) return;
+  tray.innerHTML = '';
+  tray.classList.toggle('hidden', !ATTACH.items.length);
+  for (const it of ATTACH.items) {
+    const row = el('div', 'attach-item');
+    const thumb = el('div', 'thumb');
+    if (it.kind === 'image' && it.url) {
+      const img = document.createElement('img');
+      img.src = it.url; img.alt = it.name; img.loading = 'lazy';
+      img.onclick = () => openLightbox(it.url, it.name);
+      thumb.appendChild(img);
+    } else {
+      thumb.innerHTML = icon(it.kind === 'video' ? 'video' : (it.kind === 'audio' ? 'audio' : 'file'));
+    }
+    const info = el('div', 'info');
+    info.appendChild(el('div', 'nm', it.name));
+    info.appendChild(el('div', 'sz', fmtSize(it.size)));
+    const rm = el('button', 'rm');
+    rm.type = 'button';
+    rm.title = '移除附件';
+    rm.innerHTML = icon('x');
+    rm.onclick = () => removeAttach(it.id);
+    row.append(thumb, info, rm);
+    tray.appendChild(row);
+  }
+}
+
+/* 消息流里要用的本地预览（data URL / object URL），服务器回来之前先这么显示 */
+function attachPreviews() {
+  return ATTACH.items.map(it => ({
+    kind: it.kind, name: it.name, size: it.size, url: it.url,
+  }));
+}
+
+/* 发送用的 base64 载荷 */
+async function attachPayload() {
+  const out = [];
+  for (const it of ATTACH.items) {
+    let dataUrl = it.dataUrl;
+    if (!dataUrl && it.file) dataUrl = await fileToDataUrl(it.file);
+    if (!dataUrl) continue;
+    out.push({
+      name: it.name,
+      mime: it.mime || mimeByExt(it.name),
+      data_b64: b64OfDataUrl(dataUrl),
+    });
+  }
+  return out;
+}
+
+/* ---------------- 消息里的附件 ----------------
+   一条消息的 attachments 可能是历史里的 {kind,name,size,url,path}，也可能是
+   本地刚发出去的预览 {kind,name,size,url}；两种都按 kind 渲染。 */
+function attachFileChip(a) {
+  const hasUrl = !!a.url;
+  const n = el(hasUrl ? 'a' : 'div', 'att-file');
+  if (hasUrl) {
+    n.href = a.url;
+    n.download = a.name || '';
+    n.rel = 'noreferrer';
+  }
+  const ico = el('span', 'i');
+  ico.innerHTML = icon('file');
+  n.append(ico, el('span', 'n', a.name || '文件'), el('span', 's', fmtSize(a.size)));
+  return n;
+}
+
+function attachGallery(atts) {
+  const list = (atts || []).filter(a => a && a.kind);
+  if (!list.length) return null;
+  const wrap = el('div', 'atts');
+  for (const a of list) {
+    const kind = a.kind || 'file';
+    if (kind === 'image' && a.url) {
+      const btn = el('button', 'att-img');
+      btn.type = 'button';
+      btn.title = a.name ? a.name + '（点开看大图）' : '查看大图';
+      const img = document.createElement('img');
+      img.src = a.url; img.alt = a.name || '图片'; img.loading = 'lazy';
+      btn.appendChild(img);
+      btn.onclick = () => openLightbox(a.url, a.name);
+      wrap.appendChild(btn);
+    } else if (kind === 'sticker' && a.url) {
+      const img = document.createElement('img');
+      img.className = 'att-sticker';
+      img.src = a.url; img.alt = a.name || '表情包'; img.loading = 'lazy';
+      img.onclick = () => openLightbox(a.url, a.name);
+      wrap.appendChild(img);
+    } else if (kind === 'video' && a.url) {
+      const v = document.createElement('video');
+      v.className = 'att-video';
+      v.controls = true; v.preload = 'metadata'; v.src = a.url;
+      wrap.appendChild(v);
+    } else if (kind === 'audio' && a.url) {
+      const au = document.createElement('audio');
+      au.className = 'att-audio';
+      au.controls = true; au.preload = 'metadata'; au.src = a.url;
+      wrap.appendChild(au);
+    } else {
+      wrap.appendChild(attachFileChip(a));
+    }
+  }
+  return wrap;
+}
+
+/* ---------------- 图片全屏预览 ---------------- */
+function openLightbox(url, name) {
+  if (!url) return;
+  const box = $('#lightbox');
+  const img = $('#lightbox-img');
+  img.src = url;
+  img.alt = name || '图片';
+  box.classList.remove('hidden');
+}
+function closeLightbox() {
+  const box = $('#lightbox');
+  if (!box || box.classList.contains('hidden')) return;
+  box.classList.add('hidden');
+  $('#lightbox-img').removeAttribute('src');
+}
+$('#lightbox-close').onclick = closeLightbox;
+$('#lightbox').addEventListener('pointerdown', (e) => {
+  if (e.target === $('#lightbox')) closeLightbox();
+});
+// 用捕获阶段：lightbox 开着时 Esc 只关它，别同时把抽屉关了 / 把回合停了
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const box = $('#lightbox');
+  if (!box || box.classList.contains('hidden')) return;
+  e.preventDefault();
+  e.stopPropagation();
+  closeLightbox();
+}, true);
+
+/* ---------------- 入口：回形针 / 粘贴 / 拖拽 ---------------- */
+$('#btn-attach').onclick = () => {
+  if (!S.active) {
+    toast('先创建一个角色，才能发图片和文件', 'err');
+    openPersonaEditor(true);
+    return;
+  }
+  $('#attach-file').click();
+};
+
+$('#attach-file').addEventListener('change', (e) => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = ''; // 复制出来再清空：清空后 FileList 会跟着空
+  addFiles(files);
+});
+
+// 粘贴：只拦带文件的剪贴板，纯文字照常贴进输入框
+document.addEventListener('paste', (e) => {
+  const cd = e.clipboardData;
+  if (!cd) return;
+  const files = Array.from(cd.files || []);
+  if (!files.length && cd.items) {
+    for (const it of Array.from(cd.items)) {
+      if (it.kind === 'file') {
+        const f = it.getAsFile();
+        if (f) files.push(f);
+      }
+    }
+  }
+  if (!files.length) return;
+  e.preventDefault();
+  addFiles(files);
+});
+
+// 拖拽：整个对话区都是落点（含输入框）
+const CHAT = $('#chat');
+let dragDepth = 0;
+function hasFileDrag(e) {
+  const dt = e.dataTransfer;
+  if (!dt) return false;
+  for (const t of Array.from(dt.types || [])) if (t === 'Files') return true;
+  return false;
+}
+CHAT.addEventListener('dragenter', (e) => {
+  if (!hasFileDrag(e)) return;
+  e.preventDefault();
+  dragDepth++;
+  CHAT.classList.add('drag-over');
+});
+CHAT.addEventListener('dragover', (e) => {
+  if (!hasFileDrag(e)) return;
+  e.preventDefault();
+  try { e.dataTransfer.dropEffect = 'copy'; } catch { }
+});
+CHAT.addEventListener('dragleave', () => {
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (!dragDepth) CHAT.classList.remove('drag-over');
+});
+CHAT.addEventListener('drop', (e) => {
+  if (!hasFileDrag(e)) return;
+  e.preventDefault();
+  dragDepth = 0;
+  CHAT.classList.remove('drag-over');
+  addFiles(Array.from((e.dataTransfer && e.dataTransfer.files) || []));
+});
+// 落在对话区外面：别让浏览器直接把文件打开（会顶掉整个页面）
+document.addEventListener('dragover', (e) => { if (hasFileDrag(e)) e.preventDefault(); });
+document.addEventListener('drop', (e) => {
+  if (hasFileDrag(e) && !CHAT.contains(e.target)) e.preventDefault();
+});
 </script>
 </body>
 </html>

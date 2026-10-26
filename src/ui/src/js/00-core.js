@@ -19,6 +19,7 @@ const S = {
   busy: false,
   emotion: 'neutral',
   memory: [],
+  im: [],
   tts: { enabled: false, kind: 'off' },
   asr: { enabled: false, kind: 'off' },
   voice_reply: true,
@@ -29,6 +30,19 @@ const S = {
   recording: false,
   sessions: [],
   lastAct: '',
+  // 表情包 / 附件 / 工具偏好（服务端 state 的新字段，见 team-contract 2.5）
+  stickers: [],
+  autoallow: true,
+  compact_auto: true,
+  tools: true,
+};
+
+/* 附件托盘的状态。放在核心层：paintComposer 只读它，真正的读取 / 上传在 12-attach。 */
+const ATTACH = {
+  items: [],     // { id, name, mime, size, kind, url, dataUrl, file }
+  seq: 0,
+  max: 8,        // 服务端 attach.max_files，state 回来会覆盖
+  maxBytes: 48 * 1024 * 1024,
 };
 
 const EMO_ZH = {
@@ -66,6 +80,12 @@ function icon(name) {
     x: '<path d="M18 6 6 18M6 6l12 12"/>',
     refresh: '<path d="M21 12a8 8 0 1 1-2.3-5.7M21 4v4h-4"/>',
     check: '<path d="m20 6-11 11-5-5"/>',
+    paperclip: '<path d="m21.4 11.6-8.9 8.9a6 6 0 0 1-8.5-8.5l8.9-8.9a4 4 0 0 1 5.7 5.7l-8.9 8.9a2 2 0 0 1-2.8-2.8l8.2-8.2"/>',
+    image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="m21 15-5-5L5 20"/>',
+    video: '<rect x="3" y="5" width="13" height="14" rx="2"/><path d="m16 10 5-3v10l-5-3"/>',
+    audio: '<path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/>',
+    file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/>',
+    download: '<path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19h14"/>',
   }[name] || '';
   return `<svg viewBox="0 0 24 24">${p}</svg>`;
 }
@@ -142,6 +162,7 @@ function applyState(st, rebuild) {
   if (Array.isArray(st.history)) S.history = st.history;
   if (Array.isArray(st.providers)) S.providers = st.providers;
   if (st.busy !== undefined) S.busy = !!st.busy;
+  if (Array.isArray(st.im)) S.im = st.im;
   if (st.tts) S.tts = Object.assign({}, S.tts, st.tts, { enabled: !!(st.voice && st.voice.tts) });
   if (st.asr) S.asr = Object.assign({}, S.asr, st.asr, { enabled: !!(st.voice && st.voice.asr) });
   if (st.voice && st.voice.recording !== undefined) S.recording = !!st.voice.recording;
@@ -149,6 +170,14 @@ function applyState(st, rebuild) {
   if (st.asr_auto_send !== undefined) S.asr_auto_send = !!st.asr_auto_send;
   if (st.model !== undefined) S.model = st.model;
   if (st.thinking !== undefined) S.thinking = st.thinking;
+  if (Array.isArray(st.stickers)) S.stickers = st.stickers;
+  if (st.attach) {
+    if (st.attach.max_files > 0) ATTACH.max = st.attach.max_files;
+    if (st.attach.max_bytes > 0) ATTACH.maxBytes = st.attach.max_bytes;
+  }
+  if (st.autoallow !== undefined) S.autoallow = !!st.autoallow;
+  if (st.compact_auto !== undefined) S.compact_auto = !!st.compact_auto;
+  if (st.tools !== undefined) S.tools = !!st.tools;
   applyAccent(S.persona && S.persona.accent);
   if (rebuild) paintAll();
 }
@@ -166,8 +195,7 @@ function handleEvent(m) {
 
 /* ---------------- 通用 UI ---------------- */
 function paintHead() {
-  const name = (S.persona && S.persona.name) || '—';
-  $('#head-name').textContent = name;
+  // 名字在 #stage-name（paintStage 负责），这里只管连接状态和朗读开关
   const st = $('#head-status');
   st.className = 'head-status' + (S.busy ? ' busy' : (S.connected ? '' : ' off'));
   st.textContent = !S.connected ? '未连接' : (S.busy ? '正在回应' : '在线');

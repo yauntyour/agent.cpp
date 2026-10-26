@@ -5,14 +5,37 @@
 
 const DRAWER = { current: null, title: '' };
 
+/* 抽屉是一叠页面：openDrawer 开新的一叠，pushDrawer 往里压一层，popDrawer 退回。
+   设置 → 某个模块 → 某个渠道，就是靠这个栈走的。 */
+const DRAWER_STACK = [];
 function openDrawer(title, name, build) {
-  DRAWER.current = name;
-  DRAWER.title = title;
-  $('#drawer-title').textContent = title;
+  DRAWER_STACK.length = 0;
+  pushDrawer(title, name, build);
+}
+function pushDrawer(title, name, build) {
+  DRAWER_STACK.push({ title, name, build });
+  showDrawerTop();
+}
+function popDrawer() {
+  if (DRAWER_STACK.length <= 1) return;
+  DRAWER_STACK.pop();
+  showDrawerTop();
+}
+function showDrawerTop() {
+  const page = DRAWER_STACK[DRAWER_STACK.length - 1];
+  DRAWER.current = page.name;
+  DRAWER.title = page.title;
+  DRAWER.build = page.build;
+  $('#drawer-title').textContent = page.title;
   $('#drawer').classList.remove('hidden');
   $('#scrim').classList.remove('hidden');
-  DRAWER.build = build;
   buildDrawer();
+}
+// 子页左上角的返回（根页面不显示）
+function drawerBack(label) {
+  const b = el('button', 'back-row', '‹ ' + (label || '返回'));
+  b.onclick = popDrawer;
+  return b;
 }
 function buildDrawer() {
   if (!DRAWER.build) return;
@@ -29,6 +52,7 @@ function paintDrawer() {
 function closeDrawer() {
   $('#drawer').classList.add('hidden');
   $('#scrim').classList.add('hidden');
+  DRAWER_STACK.length = 0;
   DRAWER.current = null;
   DRAWER.build = null;
 }
@@ -36,10 +60,108 @@ $('#btn-drawer-close').onclick = closeDrawer;
 $('#scrim').onclick = closeDrawer;
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
+  // 确认弹窗在最上层：先当「取消」收掉
+  if (!$('#ask-modal').classList.contains('hidden')) { closeAsk(); return; }
+  // 截取弹窗压着抽屉：先收弹窗，别把抽屉一起关了
+  if (!$('#crop-modal').classList.contains('hidden')) { closeAvatarCrop(); return; }
   // 抽屉开着先关抽屉；没有抽屉又在回应，Esc 就是「停止生成」
   if (!$('#drawer').classList.contains('hidden')) { closeDrawer(); return; }
   if (S.busy) stopTurn();
 });
+
+/* ---------------- 确认弹窗 ----------------
+   choices: [{ label, value, cls, busyLabel }]
+   onChoose(value) 是异步的：返回 false 就留在弹窗里（请求失败还能换个选项再试）。
+   取消 / 点背景 / Esc 都只是把它收起来，不执行任何动作。 */
+let ASK = { busy: false };
+
+function closeAsk() {
+  if (ASK.busy) return; // 正在做的事不能靠 Esc 撤掉
+  $('#ask-modal').classList.add('hidden');
+  $('#ask-actions').innerHTML = '';
+}
+
+function askDialog(opts, choices, onChoose) {
+  const modal = $('#ask-modal');
+  const box = $('#ask-actions');
+  const note = $('#ask-note');
+  $('#ask-title').textContent = opts.title || '确认';
+  $('#ask-text').textContent = opts.text || '';
+  note.textContent = opts.note || '';
+  note.classList.toggle('hidden', !opts.note);
+  note.classList.remove('err');
+  box.innerHTML = '';
+  ASK.busy = false;
+
+  const say = (text, isErr) => {
+    note.textContent = text;
+    note.classList.toggle('err', !!isErr);
+    note.classList.remove('hidden');
+  };
+
+  for (const c of choices) {
+    const b = el('button', 'btn ' + (c.cls || ''), c.label);
+    b.onclick = async () => {
+      if (ASK.busy) return;
+      if (c.value == null) { closeAsk(); return; }
+      ASK.busy = true;
+      const label = b.textContent;
+      $$('.btn', box).forEach(x => { x.disabled = true; });
+      if (c.busyLabel) b.textContent = c.busyLabel;
+      let keep = false;
+      try {
+        const r = await onChoose(c.value, { say });
+        keep = r === false;
+      } catch (e) {
+        say(e.message || '失败了', true);
+        keep = true;
+      }
+      ASK.busy = false;
+      if (keep) {
+        b.textContent = label;
+        $$('.btn', box).forEach(x => { x.disabled = false; });
+      } else {
+        closeAsk();
+      }
+    };
+    box.appendChild(b);
+  }
+  modal.classList.remove('hidden');
+}
+
+// 点背景 = 取消（正在整理记忆时不响应，别把进行中的请求丢下）
+$('#ask-modal').addEventListener('pointerdown', (e) => {
+  if (e.target === $('#ask-modal')) closeAsk();
+});
+
+/* 清空上下文：先问清楚，再决定要不要把这段对话留成记忆 */
+function openClearContext() {
+  if (!S.active) { toast('先创建一个角色', 'err'); return; }
+  if (S.busy) { toast('她还在回应，等这句说完再清空'); return; }
+  const said = (S.history || []).filter(m => m.role === 'user').length;
+  askDialog({
+    title: '清空上下文',
+    text: said
+      ? `这次对话里你说了 ${said} 句话。清空之后，她就不再记得这次聊过什么。`
+      : '这次对话还是空的；清空只是让上下文从头开始。',
+    note: said ? '「保存记忆并确认」会先让她把值得记住的事写进长期记忆，再清空上下文。' : '',
+  }, [
+    { label: '取消', value: null, cls: 'ghost' },
+    { label: '确认', value: 'plain', cls: 'danger' },
+    { label: '保存记忆并确认', value: 'remember', cls: 'primary', busyLabel: '正在整理记忆…' },
+  ], async (value) => {
+    stopAudio();
+    const r = await cmd('context.clear', { remember: value === 'remember' });
+    await refreshState();
+    if (value === 'remember') {
+      const n = r.remembered || 0;
+      toast(n ? `记住了 ${n} 件事，上下文已清空` : '没整理出值得记的事，上下文已清空', 'ok', 3200);
+    } else {
+      toast('上下文已清空', 'ok');
+    }
+    return true;
+  });
+}
 
 /* ---------------- 表单小件 ---------------- */
 function field(label, input, tip) {
@@ -142,11 +264,18 @@ function openPersonaEditor(creating) {
   const open = () => openDrawer(creating ? '新建角色' : '角色设定', 'persona', (body) => {
     const av = el('div', 'avatar-edit');
     const prev = el('div', 'preview');
-    if (p.avatar_url) prev.innerHTML = `<img src="${esc(p.avatar_url)}">`;
-    else prev.textContent = (p.name || '?').slice(0, 1);
+    // 抽屉会被状态广播重建（上传完头像就是一次刷新），所以头像预览要现读
+    // S.persona，不能用开门时快照的 p —— 否则换了头像预览还是旧的。
+    const cur = creating ? p : (S.persona || {});
+    if (cur.avatar_url) prev.innerHTML = `<img src="${esc(cur.avatar_url)}" alt="">`;
+    else prev.textContent = (cur.name || '?').slice(0, 1);
     av.appendChild(prev);
-    const pick = actionBtn('换头像', () => { $('#avatar-file').click(); }, 'btn sm');
-    av.appendChild(pick);
+    if (creating) {
+      // 新建中的角色还没有 id，这时候上传只会落到当前活跃角色头上
+      av.appendChild(el('div', 'avatar-tip', '创建之后可以再换头像'));
+    } else {
+      av.appendChild(actionBtn('换头像', () => { $('#avatar-file').click(); }, 'btn sm'));
+    }
     body.appendChild(av);
 
     const form = el('div', 'sect');
@@ -241,24 +370,12 @@ function openPersonaEditor(creating) {
   }
 }
 
-/* 头像上传 */
-$('#avatar-file').addEventListener('change', async (e) => {
+/* 头像上传：选图之后先截取（10-avatar-crop.js），裁好了才真正上传 */
+$('#avatar-file').addEventListener('change', (e) => {
   const f = e.target.files && e.target.files[0];
   e.target.value = '';
   if (!f) return;
-  if (f.size > 8 * 1024 * 1024) { toast('图片太大（上限 8MB）', 'err'); return; }
-  const buf = await f.arrayBuffer();
-  let bin = '';
-  const bytes = new Uint8Array(buf);
-  for (let i = 0; i < bytes.length; i += 0x8000)
-    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-  const b64 = btoa(bin);
-  const ext = (f.name.split('.').pop() || 'png').toLowerCase();
-  try {
-    await cmd('persona.avatar', { id: (S.persona || {}).id, data_b64: b64, ext });
-    await refreshState();
-    toast('头像已更新', 'ok');
-  } catch (err) { toast(err.message, 'err'); }
+  openAvatarCrop(f);
 });
 
 /* ---------------- 会话 ---------------- */
@@ -319,13 +436,7 @@ function wireGlobal() {
       paintHead();
     } catch (e) { toast(e.message, 'err'); }
   };
-  $('#btn-new-session').onclick = async () => {
-    stopAudio();
-    try {
-      await cmd('session.new');
-      await refreshState();
-    } catch (e) { toast(e.message, 'err'); }
-  };
+  $('#btn-clear-context').onclick = openClearContext;
   $('#btn-sessions').onclick = openSessions;
   $('#btn-memory').onclick = openMemory;
   $('#btn-settings').onclick = openSettings;

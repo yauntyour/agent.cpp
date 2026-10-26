@@ -9,6 +9,8 @@
 //   GET  /api/events        SSE：一条 data: {...} 一行
 //   GET  /api/audio/<name>  TTS 产出的音频
 //   GET  /api/avatar/<id>   角色头像
+//   GET  /api/uploads/<pid>/<file>   聊天附件（图片 / 语音 / 视频 / 文件）
+//   GET  /api/stickers/<pid>/<name>  表情包
 //   GET  /api/live2d/<…>    舞台资源：运行时库与模型文件（.agent/live2d/ 下）
 //
 // 安全模型：服务是一个「能记事、能说话」的本机控制面，绝不能被网页或局域网
@@ -17,6 +19,7 @@
 #pragma once
 
 #include "servic.hpp"
+#include "agent-media.hpp" // 附件 / 贴纸的落盘路径与 MIME（路由要用）
 
 #include <boost/asio.hpp>
 #include <algorithm>
@@ -107,6 +110,19 @@ namespace app
                 return text_response("403 Forbidden", "cross-site request refused");
             return "";
         }
+        // 查询串（WeCom 回调的 msg_signature / timestamp / nonce / echostr 都在这）
+        static std::string request_query(const std::string &raw)
+        {
+            size_t line_end = raw.find_first_of("\r\n");
+            if (line_end == std::string::npos)
+                return {};
+            std::istringstream iss(raw.substr(0, line_end));
+            std::string method, target, version;
+            if (!(iss >> method >> target >> version))
+                return {};
+            size_t q = target.find('?');
+            return q == std::string::npos ? std::string() : target.substr(q + 1);
+        }
         static void parse_request(const std::string &raw, std::string &method, std::string &path, std::string &body)
         {
             method.clear();
@@ -135,6 +151,28 @@ namespace app
                 if (!(std::isalnum(c) || c == '.' || c == '-' || c == '_'))
                     return false;
             return n.find("..") == std::string::npos;
+        }
+        // 附件的落盘名允许 UTF-8（中文原名照抄），但仍必须是一层、不含路径/控制字符
+        static bool upload_name_ok(const std::string &n)
+        {
+            if (n.empty() || n.size() > 192 || n.front() == '.')
+                return false;
+            if (n.find("..") != std::string::npos)
+                return false;
+            for (unsigned char c : n)
+                if (c == '/' || c == '\\' || c == ':' || c < 0x20 || c == 0x7f)
+                    return false;
+            return true;
+        }
+        // 附件目录的 owner：角色 id 或 IM 渠道 id（"im-<chan>"）
+        static bool upload_pid_ok(const std::string &s)
+        {
+            if (s.empty() || s.size() > 40)
+                return false;
+            for (unsigned char c : s)
+                if (!(std::isalnum(c) || c == '-' || c == '_'))
+                    return false;
+            return true;
         }
         static std::string read_file(const std::filesystem::path &p)
         {
@@ -309,6 +347,58 @@ namespace app
                 out = text_response("404 Not Found", "avatar not found");
                 return rt::FLAG_DONE; });
 
+            // GET /api/uploads/<pid>/<file> —— 聊天附件（桌面粘贴/拖入、IM 进来的媒体）
+            ros.on("api/uploads/:pid/:file", [this](std::string &req, std::string &out, const std::map<std::string, std::string> &params) -> int
+                   {
+                if (std::string bad = check_request(req, "GET"); !bad.empty())
+                {
+                    out = std::move(bad);
+                    return rt::FLAG_DONE;
+                }
+                std::string pid = params.count("pid") ? params.at("pid") : "";
+                std::string name = percent_decode(params.count("file") ? params.at("file") : "");
+                if (!upload_pid_ok(pid) || !upload_name_ok(name))
+                {
+                    out = text_response("400 Bad Request", "bad upload path");
+                    return rt::FLAG_DONE;
+                }
+                std::error_code ec;
+                auto base = std::filesystem::weakly_canonical(media::uploads_dir(pid), ec);
+                auto file = std::filesystem::weakly_canonical(media::uploads_dir(pid) / name, ec);
+                if (!ec && file.parent_path() == base && std::filesystem::is_regular_file(file, ec))
+                {
+                    out = http_response("200 OK", media::mime_of(file.string()), read_file(file),
+                                        "Cache-Control: private, max-age=3600\r\n");
+                    return rt::FLAG_DONE;
+                }
+                out = text_response("404 Not Found", "upload not found");
+                return rt::FLAG_DONE; });
+
+            // GET /api/stickers/<pid>/<name> —— 表情包（只发图片；名字来自 sticker 目录）
+            ros.on("api/stickers/:pid/:name", [this](std::string &req, std::string &out, const std::map<std::string, std::string> &params) -> int
+                   {
+                if (std::string bad = check_request(req, "GET"); !bad.empty())
+                {
+                    out = std::move(bad);
+                    return rt::FLAG_DONE;
+                }
+                std::string pid = params.count("pid") ? params.at("pid") : "";
+                std::string name = percent_decode(params.count("name") ? params.at("name") : "");
+                if (!upload_pid_ok(pid) || name.empty() || name.size() > 64)
+                {
+                    out = text_response("400 Bad Request", "bad sticker name");
+                    return rt::FLAG_DONE;
+                }
+                std::string path = media::sticker_path(pid, name);
+                if (path.empty())
+                {
+                    out = text_response("404 Not Found", "sticker not found");
+                    return rt::FLAG_DONE;
+                }
+                out = http_response("200 OK", media::mime_of(path), read_file(path),
+                                    "Cache-Control: no-store\r\n");
+                return rt::FLAG_DONE; });
+
             // GET /api/live2d/<path…> —— 舞台资源：运行时库 + 模型文件
             // 路由只按层数精确匹配，所以 1..5 层各注册一次，交给同一个处理函数。
             auto serve_live2d = [this](std::string &req, std::string &out,
@@ -393,6 +483,38 @@ namespace app
                         args = std::move(j);
                 }
                 out = http_json(core.exec_command(cmd, args));
+                return rt::FLAG_DONE; });
+
+            // GET|POST /api/im/<id> —— IM 平台回调
+            // 这是唯一一个**不做 loopback Host 校验**的路由：企业微信 / 公众号的
+            // 回调必须经过反向代理（frp、ngrok、cpolar），Host 到了这里是公网域名。
+            // 鉴权因此下沉到渠道自己：wecom 验签名（token + AES），onebot / bridge
+            // 验 token；没配 token 的渠道 core 只接受本机直连。浏览器发起的跨站
+            // 请求一律挡掉（Sec-Fetch-Site: cross-site）。
+            ros.on("api/im/:id", [this](std::string &req, std::string &out, const std::map<std::string, std::string> &params) -> int
+                   {
+                if (lower_ascii(servic::header_value(req, "Sec-Fetch-Site")) == "cross-site")
+                {
+                    out = text_response("403 Forbidden", "cross-site request refused");
+                    return rt::FLAG_DONE;
+                }
+                std::string method, path, body;
+                parse_request(req, method, path, body);
+                im::request rq;
+                rq.method = method;
+                rq.query = request_query(req);
+                rq.auth = servic::header_value(req, "Authorization");
+                rq.secret = servic::header_value(req, "X-Im-Secret");
+                rq.body = std::move(body);
+                rq.loopback = host_allowed(servic::header_value(req, "Host"));
+                auto [code, payload] = core.im_webhook(params.count("id") ? params.at("id") : "", rq);
+                std::string status = code == 200 ? "200 OK"
+                                    : code == 400 ? "400 Bad Request"
+                                    : code == 403 ? "403 Forbidden"
+                                    : code == 404 ? "404 Not Found"
+                                    : code == 405 ? "405 Method Not Allowed"
+                                                  : "500 Internal Server Error";
+                out = text_response(status, payload);
                 return rt::FLAG_DONE; });
 
             // GET /api/events — SSE
@@ -486,8 +608,9 @@ namespace app
 
             try
             {
-                // 上限放宽到 72 MiB：头像与浏览器侧录音都走 base64
-                server = std::make_unique<servic::Server>(io, "127.0.0.1", (unsigned short)port, 72 * 1024 * 1024);
+                // 上限放宽到 128 MiB：头像、浏览器录音、聊天附件（48 MiB 原始文件
+                // 走 base64 后约 64 MiB）都走 JSON body
+                server = std::make_unique<servic::Server>(io, "127.0.0.1", (unsigned short)port, 128 * 1024 * 1024);
             }
             catch (const std::exception &e)
             {

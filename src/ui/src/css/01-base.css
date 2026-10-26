@@ -23,9 +23,9 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 :focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent); outline-offset: 2px; }
 ::selection { background: color-mix(in srgb, var(--accent) 38%, transparent); }
 
-/* 细长的提示条 */
+/* 细长的提示条：浮在输入框上方，别压住输入框 */
 #toasts {
-  position: fixed; left: 50%; bottom: 122px; transform: translateX(-50%);
+  position: fixed; left: 50%; bottom: 196px; transform: translateX(-50%);
   display: flex; flex-direction: column; gap: 8px; align-items: center;
   z-index: 90; pointer-events: none;
 }
