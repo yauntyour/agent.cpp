@@ -167,10 +167,11 @@ CMake 选项：
 | --- | --- | --- |
 | windows | MSYS2 UCRT64（gcc / ninja / 静态 curl + libsodium） | `agent-windows-x64.zip`（单文件 exe） |
 | linux | ubuntu-24.04 + g++-14 + GTK3 / WebKitGTK | `agent-linux-x64.tar.gz` |
-| macos | macos-14（arm64）+ brew libsodium / boost | `agent-macos-arm64.tar.gz` |
+| macos | macos-latest（arm64，切最新 Xcode）| `agent-macos-arm64.tar.gz` |
 
-每个 job 先探测编译器认不认 `-std=c++26`，不认就退回 23。退回后没有 `#embed`，exe 里不自带默认
-Live2D 模型（`kAssetCount = 0`），其余功能不变；要连模型一起打进去需要 GCC ≥ 15。
+工具链下限由 `cell.cpp` 决定：它无条件 `#include <generator>` / `<expected>`，所以要有 libstdc++ ≥ 14（GCC 14）或 libc++ ≥ 19（Xcode ≥ 16.3）—— 这不是「退回 `-std=c++23` 就能过」的事，老 libc++ 根本没有这个头文件。每个 job 先用 `#include <generator>` 探一次，探不到立刻报错（别等编三分钟）；macOS 上会先切到镜像里最新的 Xcode，还不够新就退到 brew 的 llvm。
+
+`#embed` 是另一回事：要 GCC ≥ 15 / Clang ≥ 19。拿不到时 `build_live2d.py` 把 `kAssetCount` 置 0，exe 里不自带默认 Live2D 模型，其余功能不变。
 
 ---
 

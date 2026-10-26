@@ -8,10 +8,12 @@ name: build
 #      不含就整条流水线跳过，只留一个 gate job 记一笔。
 #   2. 手动 workflow_dispatch；勾 publish 时构建完顺便发 Release（tag 由输入框给）。
 #
-# 关于 C++ 标准：CMakeLists 默认 AGENT_CXX_STANDARD=26，但 -std=c++26 需要
-# GCC >= 14 / Clang >= 17。每个 job 先探测一次，不支持就退回 23 —— 退回后
-# build_live2d.py 产出的 kAssetCount = 0（编译器没有 #embed），程序照常跑，
-# 只是 exe 里不自带默认 Live2D 模型。想看这一项生效，用 GCC >= 15。
+# 关于 C++ 标准：cell.cpp 无条件 include <generator> / <expected> / <format>，
+# 所以工具链的下限是 libstdc++ >= 14（GCC 14）或 libc++ >= 19（Xcode >= 16.3）。
+# 这不是「-std=c++23 就能退」的事 —— 老 libc++ 根本没有这个头文件。每个 job 都
+# 先用 `#include <generator>` 探一次，探不到直接报错，别等到编了三分钟才炸。
+# 另外 CMakeLists 默认 AGENT_CXX_STANDARD=26，而 #embed 要 GCC >= 15 / Clang >= 19，
+# 拿不到 #embed 时 build_live2d.py 会把 kAssetCount 置 0（exe 不带默认 Live2D 模型）。
 
 on:
   push:
@@ -103,11 +105,16 @@ jobs:
 
       - name: Configure
         run: |
-          std=$(printf 'int main(){}' | g++ -std=c++26 -x c++ -fsyntax-only - >/dev/null 2>&1 && echo 26 || echo 23)
-          echo "C++ standard: $std"
+          # <generator> 是硬依赖：MSYS2 现在的 gcc 15/16 都有，探一下留个凭据
+          if ! printf '#include <generator>\n#include <expected>\nint main(){}\n' \
+               | g++ -std=c++26 -x c++ -fsyntax-only - >/dev/null 2>&1; then
+            echo "::error::$(g++ --version | head -1) 编不了 <generator>（要 GCC >= 14）"
+            exit 1
+          fi
+          echo "compiler: $(g++ --version | head -1)"
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DAGENT_CXX_STANDARD=$std
+            -DAGENT_CXX_STANDARD=26
 
       - name: Build
         run: cmake --build build --parallel
@@ -149,15 +156,19 @@ jobs:
 
       - name: Configure
         run: |
-          # 24.04 默认 gcc-13 不认识 -std=c++26；装了 g++-14 就直接用它
-          cxx=g++
-          command -v g++-14 >/dev/null && cxx=g++-14
-          std=$(printf 'int main(){}' | $cxx -std=c++26 -x c++ -fsyntax-only - >/dev/null 2>&1 && echo 26 || echo 23)
-          echo "compiler: $($cxx --version | head -1) — C++ standard: $std"
+          # 24.04 自带的 gcc-13 没有 <generator>（libstdc++ 14 才有），所以固定用 g++-14
+          cxx=g++-14
+          command -v $cxx >/dev/null || { echo "::error::g++-14 没装上"; exit 1; }
+          if ! printf '#include <generator>\n#include <expected>\nint main(){}\n' \
+               | $cxx -std=c++26 -x c++ -fsyntax-only - >/dev/null 2>&1; then
+            echo "::error::$($cxx --version | head -1) 编不了 <generator>（要 GCC >= 14）"
+            exit 1
+          fi
+          echo "compiler: $($cxx --version | head -1)"
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CXX_COMPILER=$cxx \
-            -DAGENT_CXX_STANDARD=$std
+            -DAGENT_CXX_STANDARD=26
 
       - name: Build
         run: cmake --build build --parallel
@@ -182,24 +193,53 @@ jobs:
     name: macOS (Apple clang, arm64)
     needs: gate
     if: needs.gate.outputs.build == 'true'
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      # 失败的那次用的是 macos-14 自带的 Xcode（libc++ 18），没有 <generator>。
+      # 先换最新的 Xcode；如果镜像里最新的也不够新，再退到 brew 的 llvm。
+      - name: Use the newest Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
 
       # brew 的 include 目录不在 clang 默认搜索路径里：CMakeLists 是靠
       # find_path(boost/asio.hpp) 找到 /opt/homebrew/include 的，所以 boost 必须装
       - name: Install dependencies
         run: brew install ninja libsodium boost nlohmann-json
 
+      - name: Pick a compiler that has <generator>
+        id: cc
+        run: |
+          probe() {
+            printf '#include <generator>\n#include <expected>\nint main(){}\n' \
+              | "$1" -std=c++26 -x c++ -fsyntax-only - >/dev/null 2>&1
+          }
+          cxx=$(xcrun -f clang++)
+          echo "Xcode: $(xcodebuild -version | tr '\n' ' ')"
+          echo "default: $($cxx --version | head -1)"
+          if probe "$cxx"; then
+            echo "使用 Xcode 的 clang++"
+          else
+            echo "Xcode 的 libc++ 太旧（<generator> 要 Xcode >= 16.3），改用 brew llvm"
+            brew install llvm
+            cxx="$(brew --prefix llvm)/bin/clang++"
+            if ! probe "$cxx"; then
+              echo "::error::brew llvm 也编不了 <generator>：$($cxx --version | head -1)"
+              exit 1
+            fi
+          fi
+          echo "cxx=$cxx" >> "$GITHUB_OUTPUT"
+
       - name: Configure
         run: |
-          std=$(printf 'int main(){}' | c++ -std=c++26 -x c++ -fsyntax-only - >/dev/null 2>&1 && echo 26 || echo 23)
-          echo "compiler: $(c++ --version | head -1) — C++ standard: $std"
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DAGENT_CXX_STANDARD=$std
+            -DCMAKE_CXX_COMPILER="${{ steps.cc.outputs.cxx }}" \
+            -DAGENT_CXX_STANDARD=26
 
       - name: Build
         run: cmake --build build --parallel
