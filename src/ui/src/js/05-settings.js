@@ -13,6 +13,8 @@ const SETTINGS_MODULES = [
   { key: 'im', name: 'IM 接入', sub: () => imStatusText(), build: () => imSection() },
   { key: 'stickers', name: '表情包', sub: () => stickerStatusText(), build: () => stickerSection() },
   { key: 'pref', name: '偏好', sub: () => `${S.voice_reply ? '自动朗读' : '手动朗读'} · ${S.autoallow ? '工具自动执行' : '工具逐次确认'}`, build: () => prefSection() },
+  { key: 'prompt', name: '提示词', sub: () => promptSummary(), build: () => promptSection() },
+  { key: 'status', name: '运行状态', sub: () => statusSummary(), build: () => statusSection() },
 ];
 
 /* 表情包列表由服务端随 state 一起下发；打开设置时再拉一次，防止别处加过没刷新 */
@@ -185,6 +187,18 @@ function modelSection() {
 }
 
 /* ---------------- 语音服务 ---------------- */
+/* ASR 上传格式：服务端认什么就发什么。
+   wav 由页面自己转（WebAudio 解码 + 重采样，不需要宿主装东西），其余格式
+   宿主会用 ffmpeg 转 —— 所以只有服务端非要 mp3/m4a 时才需要它。 */
+const ASR_UPLOAD_FORMATS = [
+  ['auto', '跟随文件（原样上传）'],
+  ['wav', 'WAV 16k 单声道（页面转码）'],
+  ['mp3', 'MP3（需要 ffmpeg）'],
+  ['m4a', 'M4A（需要 ffmpeg）'],
+  ['ogg', 'OGG（需要 ffmpeg）'],
+  ['flac', 'FLAC（需要 ffmpeg）'],
+];
+
 function serviceSection(which, svc) {
   const isTts = which === 'tts';
   const sect = el('div', 'sect');
@@ -224,6 +238,27 @@ function serviceSection(which, svc) {
           field('语言', mk('language', 'zh')),
           field('提示词', mk('prompt', '可选：人名、专有名词，帮助识别')),
         );
+        // 上传形态：以前这三项是写死的（file / 按扩展名 / 无额外字段），
+        // 服务端不认就只能改代码。现在都摆出来。
+        const uf = document.createElement('select');
+        for (const [v, t] of ASR_UPLOAD_FORMATS) {
+          const o = document.createElement('option');
+          o.value = v; o.textContent = t;
+          if ((state.upload_format || 'auto') === v) o.selected = true;
+          uf.appendChild(o);
+        }
+        uf.onchange = () => { state.upload_format = uf.value; };
+        fields.append(
+          field('上传格式', uf,
+            '录音默认是 webm/opus。服务端只认 WAV 时选 wav —— 页面会把字节转成 16k 单声道，'
+            + '不是改个后缀糊过去；选 mp3/m4a/ogg/flac 则由宿主调用 ffmpeg。'),
+          field('文件字段名', mk('upload_field', 'file'),
+            'multipart 里音频那一段的名字。OpenAI 是 file，个别实现是 audio。'),
+          field('附加表单字段', mk('upload_extra', 'format=wav&channel=1'),
+            '服务端要额外的表单字段就填这里，k=v 用 & 或换行分隔。'),
+          field('MIME 覆盖', mk('upload_mime', 'audio/wav'),
+            '留空按格式自动推导；只有服务端认死 Content-Type 时才需要。'),
+        );
       }
       fields.append(field('API Key', mk('key', 'sk-…', 'password'), state.has_key ? '已保存；留空则保持不变。' : ''));
     } else if (state.kind === 'http' && isTts) {
@@ -252,7 +287,8 @@ function serviceSection(which, svc) {
     }
     if (!isTts) fields.appendChild(el('div', 'tip',
       '麦克风由页面直接采集（getUserMedia + MediaRecorder），录音不经过宿主；'
-      + '窗口只对 127.0.0.1 的页面放行麦克风权限。'));
+      + '窗口只对 127.0.0.1 的页面放行麦克风权限。'
+      + '录音只在临时目录里过一遍（有的 ASR 只认文件），转写完立刻删掉 —— 本地不留档。'));
     // 保存键一直在：关掉服务也要能存下来（否则「关闭」这个选择没法生效）
     const row = el('div', 'btn-row');
     row.appendChild(actionBtn('保存', async () => {
@@ -312,7 +348,33 @@ function prefSection() {
     const r = await cmd('ui.pref', { asr_auto_send: on });
     S.asr_auto_send = r.asr_auto_send;
   }));
-  // 这两个是 app-core 新加的能力：全工具常开，但要不要逐次审批由这里决定
+
+  // ---- 麦克风快捷键（按住说话）----
+  // 键存在后端 agent.json：换端口 / 换浏览器 / 换设备都跟着走。
+  const hkRow = el('div', 'hotkey-row');
+  const hkMain = el('div', 'hotkey-main');
+  hkMain.appendChild(el('div', 'k', '麦克风快捷键'));
+  hkMain.appendChild(el('div', 'd', '按住说话、松开结束。点右边的键位重新录。'));
+  const hkKey = el('button', 'hotkey-key', S.mic_hotkey || '未绑定');
+  hkKey.title = '点击重新录制';
+  hkKey.onclick = () => captureHotkey(hkKey);
+  const hkClr = el('button', 'del hotkey-clr', '');
+  hkClr.innerHTML = icon('x');
+  hkClr.title = '清除绑定（麦克风按钮仍然能点）';
+  hkClr.onclick = async () => {
+    try {
+      const r = await cmd('ui.pref', { mic_hotkey: '' });
+      S.mic_hotkey = r.mic_hotkey || '';
+      await refreshState();
+      toast('已清除快捷键', 'ok');
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  hkRow.append(hkMain, hkKey, hkClr);
+  sect.appendChild(hkRow);
+  sect.appendChild(el('div', 'tip hotkey-tip',
+    '默认 Alt。单独按 Alt 在部分浏览器里会被菜单栏吃掉 —— 按住没反应就换成 Alt+M / F2 这类组合。'
+    + '录音时要一直按着，松开即结束并开始转写。'));
+
   sect.appendChild(switchRow('允许工具自动执行（autoallow）',
     '开启后，她调用工具（读写文件、跑命令、查资料）不需要你逐次点确认；'
     + '关掉则每次都要批准，更安全但更打断。',
@@ -326,6 +388,14 @@ function prefSection() {
     S.compact_auto, async (on) => {
       const r = await cmd('ui.pref', { compact_auto: on });
       S.compact_auto = r.compact_auto !== undefined ? !!r.compact_auto : on;
+    }));
+  // 不是「思考强度」：那个是模型的 CoT 档位，这个是给她的自由度
+  sect.appendChild(switchRow('允许胡思乱想',
+    '开启后她可以走神、联想、说些没用的话，不必每句都在回答问题；'
+    + '关掉则每句都冲着你来。写进系统提示词，下一句就生效。',
+    S.free_think, async (on) => {
+      const r = await cmd('ui.pref', { free_think: on });
+      S.free_think = r.free_think !== undefined ? !!r.free_think : on;
     }));
 
   if (S.tools) {
@@ -423,6 +493,280 @@ function stickerSection() {
     + '全局的 <code>.agent/stickers/</code> 对所有角色可见。';
   sect.appendChild(tip);
   return sect;
+}
+
+/* 录一个快捷键。纯修饰键（Alt / Ctrl…）也能单独绑：按下时先显示，
+   松开才确认 —— 否则想绑 Alt 永远会被当成「组合键的前缀」。 */
+function captureHotkey(btn) {
+  if (HOTKEY.capture) return;
+  HOTKEY.capture = true;
+  const prev = btn.textContent;
+  btn.classList.add('capturing');
+  btn.textContent = '按下想要的键…';
+  let pending = '';
+
+  const stop = () => {
+    document.removeEventListener('keydown', onKey, true);
+    document.removeEventListener('keyup', onUp, true);
+    HOTKEY.capture = false;
+    btn.classList.remove('capturing');
+  };
+  const finish = async (label) => {
+    stop();
+    if (!label) { btn.textContent = prev; return; }
+    try {
+      const r = await cmd('ui.pref', { mic_hotkey: label });
+      S.mic_hotkey = r.mic_hotkey !== undefined ? r.mic_hotkey : label;
+      await refreshState(); // 抽屉会重建，键位行跟着换成新值
+      toast('已绑定：' + (S.mic_hotkey || '无'), 'ok');
+    } catch (e) {
+      btn.textContent = prev;
+      toast(e.message, 'err');
+    }
+  };
+  const onKey = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.key === 'Escape') { stop(); btn.textContent = prev; return; }
+    if (MOD_KEYS[e.key]) { // 纯修饰键：先摆出来，等松开确认
+      pending = comboOf(e);
+      btn.textContent = pending || '…';
+      return;
+    }
+    finish(comboOf(e));
+  };
+  const onUp = (e) => {
+    if (!MOD_KEYS[e.key] || !pending) return;
+    e.preventDefault();
+    e.stopPropagation();
+    finish(comboOfRelease(e) || pending);
+  };
+  document.addEventListener('keydown', onKey, true);
+  document.addEventListener('keyup', onUp, true);
+}
+
+/* ---------------- 提示词分层 ----------------
+   system prompt 不是一段硬编码文本，而是若干层拼起来的（core / identity /
+   relation / memory / 演出约定…）。这里读 prompt.get 的快照：每层的定义、
+   当前值、以及合成后的全文；改一层就重新拉一次，字数变化一眼看得见。 */
+let PROMPT_DATA = null;
+
+function promptSummary() {
+  if (!PROMPT_DATA) return '分层注入';
+  const on = PROMPT_DATA.layers.filter(l => l.on).length;
+  return `${on}/${PROMPT_DATA.layers.length} 层 · ${PROMPT_DATA.chars} 字`;
+}
+
+async function promptReload() {
+  const pid = S.active;
+  const r = await cmd('prompt.get');
+  r.pid = pid;
+  PROMPT_DATA = r;
+  if (DRAWER.current === 'settings/prompt') paintDrawer();
+}
+
+function promptSection() {
+  const wrap = el('div');
+  if (PROMPT_DATA && PROMPT_DATA.pid !== S.active) PROMPT_DATA = null; // 换了角色，读数作废
+
+  if (!PROMPT_DATA) {
+    const empty = el('div', 'empty', '正在读取…');
+    wrap.appendChild(empty);
+    cmd('prompt.get').then((r) => {
+      r.pid = S.active;
+      PROMPT_DATA = r;
+      if (DRAWER.current === 'settings/prompt') paintDrawer();
+    }).catch((e) => { empty.textContent = '读不到提示词：' + e.message; });
+    return wrap;
+  }
+
+  // ---- 合成结果 ----
+  const head = el('div', 'sect');
+  head.appendChild(el('div', 'sect-h', '合成结果'));
+  const card = el('div', 'card on');
+  card.appendChild(el('div', 'card-name', `system · ${PROMPT_DATA.chars} 字`));
+  card.appendChild(el('div', 'card-sub',
+    '每次对话只有这一条 system 消息（msg[0]）。改动下一个回合生效。'));
+  head.appendChild(card);
+
+  const det = document.createElement('details');
+  det.className = 'pl-edit';
+  det.appendChild(el('summary', null, '查看全文'));
+  det.appendChild(el('pre', 'prompt-pre', PROMPT_DATA.system || '（空）'));
+  head.appendChild(det);
+
+  const row = el('div', 'btn-row');
+  row.appendChild(actionBtn('改用默认（清空自定义）', async () => {
+    if (!confirm('把所有层和关系记录恢复默认？')) return;
+    try { await cmd('prompt.reset'); await promptReload(); toast('已恢复默认', 'ok'); }
+    catch (e) { toast(e.message, 'err'); }
+  }, 'btn sm ghost'));
+  head.appendChild(row);
+  wrap.appendChild(head);
+
+  // ---- 每一层 ----
+  const list = el('div', 'sect');
+  list.appendChild(el('div', 'sect-h', '分层'));
+  for (const L of PROMPT_DATA.layers) {
+    const item = el('div', 'pl-item' + (L.on ? '' : ' off'));
+    const top = el('div', 'pl-top');
+    const main = el('div', 'pl-main');
+    main.appendChild(el('div', 'pl-name', L.title));
+    main.appendChild(el('div', 'pl-desc', L.desc));
+    if (L.note) {
+      const n = el('div', 'pl-note', L.note);
+      main.appendChild(n);
+    }
+    const sw = el('button', 'switch' + (L.on ? ' on' : ''));
+    sw.title = L.on ? '关掉这一段' : '打开这一段';
+    sw.onclick = async () => {
+      try { await cmd('prompt.set', { id: L.id, on: !L.on }); await promptReload(); }
+      catch (e) { toast(e.message, 'err'); }
+    };
+    top.append(main, sw);
+    item.appendChild(top);
+
+    if (L.kind === 'identity') {
+      item.appendChild(el('div', 'btn-row', actionBtn('去角色设定里改', () => {
+        closeDrawer();
+        openPersonaEditor(false);
+      }, 'btn sm ghost')));
+    } else if (L.kind === 'relation') {
+      const ta = textArea(PROMPT_DATA.relation || '', 8, '她是谁、你们怎么相处、有什么约定…');
+      ta.classList.add('mono');
+      item.appendChild(ta);
+      item.appendChild(el('div', 'btn-row', actionBtn('保存关系记录', async () => {
+        await cmd('prompt.set', { relation: ta.value });
+        await promptReload();
+        toast('关系记录已保存', 'ok');
+      }, 'btn primary sm')));
+      item.appendChild(el('div', 'tip',
+        '这一段每次对话都会完整注入。她也能用 settings 工具自己往这里写 —— 聊几句之后回来看看。'));
+    } else if (L.kind !== 'auto') {
+      const d = document.createElement('details');
+      d.className = 'pl-edit';
+      d.appendChild(el('summary', null, L.text ? '已改写（点开编辑）' : '用默认文案（点开改写）'));
+      const ta = textArea(L.text || '', 10, (L.default || '（这一段默认是空的）').slice(0, 300));
+      ta.classList.add('mono');
+      d.appendChild(ta);
+      const bar = el('div', 'btn-row');
+      bar.appendChild(actionBtn('保存', async () => {
+        await cmd('prompt.set', { id: L.id, text: ta.value.trim() });
+        await promptReload();
+        toast('已保存', 'ok');
+      }, 'btn primary sm'));
+      if (L.text) {
+        bar.appendChild(actionBtn('恢复默认', async () => {
+          try { await cmd('prompt.set', { id: L.id, reset: true }); await promptReload(); }
+          catch (e) { toast(e.message, 'err'); }
+        }, 'btn sm ghost'));
+      }
+      d.appendChild(bar);
+      item.appendChild(d);
+    }
+    list.appendChild(item);
+  }
+  wrap.appendChild(list);
+  return wrap;
+}
+
+/* ---------------- 运行状态 ----------------
+   一屏看清：哪些服务真的在跑、工具是怎么暴露的、运行时落在哪。
+   全部来自 state 广播里已有的字段，不额外请求，也不会因为某个服务没配就报错。 */
+const SANDBOX_ZH = { 'read-only': '只读', 'edit-only': '可编辑', 'full-access': '完全访问' };
+
+function statusSummary() {
+  const svc = [S.tts, S.asr].filter(s => s && s.kind && s.kind !== 'off').length;
+  return `${svc}/2 语音服务 · ${(S.toolset || []).length} 个工具`;
+}
+
+function statusKV(k, v, mono) {
+  const row = el('div', 'kv');
+  row.appendChild(el('span', 'kv-k', k));
+  row.appendChild(el('span', 'kv-v' + (mono ? ' mono' : ''), v == null || v === '' ? '—' : String(v)));
+  return row;
+}
+
+function svcLine(svc) {
+  const kind = (svc && svc.kind) || 'off';
+  if (kind === 'off') return '未开启';
+  const bits = [kind];
+  if (svc.base) bits.push(svc.base);
+  if (svc.model) bits.push(svc.model);
+  return bits.join(' · ');
+}
+
+function statusSection() {
+  const wrap = el('div');
+
+  const s1 = el('div', 'sect');
+  s1.appendChild(el('div', 'sect-h', '服务'));
+  s1.appendChild(statusKV('模型', (S.model && S.model !== '(none)') ? S.model : '未选择'));
+  s1.appendChild(statusKV('供应商', S.provider || '—'));
+  s1.appendChild(statusKV('语音合成', svcLine(S.tts)));
+  s1.appendChild(statusKV('语音识别', svcLine(S.asr)));
+  s1.appendChild(statusKV('IM 渠道', imStatusText()));
+  s1.appendChild(statusKV('思考强度', THINK_ZH[S.thinking] || '关'));
+  // IM 的明细跟在服务清单后面：每个渠道一行，状态 + 收发计数，出错时带原因
+  const ims = (S.im || []).filter(c => c.enabled && c.kind && c.kind !== 'off');
+  if (ims.length) {
+    const box = el('div', 'tool-list');
+    for (const c of ims) {
+      const row = el('div', 'tool-row');
+      row.appendChild(el('span', 'tn', c.id));
+      const bits = [imKindName(c.kind)];
+      bits.push(c.state === 'running' ? '运行中' : (c.state === 'error' ? '出错' : '已停止'));
+      if (c.in || c.out) bits.push(`入 ${c.in || 0} / 出 ${c.out || 0}`);
+      if (c.dropped) bits.push(`丢弃 ${c.dropped}`);
+      if (c.state === 'error' && c.last_error) bits.push(String(c.last_error).slice(0, 70));
+      row.appendChild(el('span', 'td', bits.join(' · ')));
+      box.appendChild(row);
+    }
+    s1.appendChild(box);
+  }
+  wrap.appendChild(s1);
+
+  const s2 = el('div', 'sect');
+  s2.appendChild(el('div', 'sect-h', '工具'));
+  s2.appendChild(statusKV('暴露', S.tools ? '全部开启' : '已关闭'));
+  s2.appendChild(statusKV('沙箱', SANDBOX_ZH[S.sandbox] || S.sandbox || '—'));
+  s2.appendChild(statusKV('执行审批', S.autoallow ? '自动执行（不逐条确认）' : '每条都要确认'));
+  const list = S.toolset || [];
+  if (list.length) {
+    const box = el('div', 'tool-list');
+    for (const t of list) {
+      const row = el('div', 'tool-row');
+      row.appendChild(el('span', 'tn', t.name));
+      row.appendChild(el('span', 'td', t.desc || ''));
+      box.appendChild(row);
+    }
+    s2.appendChild(box);
+  } else {
+    s2.appendChild(el('div', 'tip', '还没拿到工具清单（连上后端后会出现）。'));
+  }
+  wrap.appendChild(s2);
+
+  const s3 = el('div', 'sect');
+  s3.appendChild(el('div', 'sect-h', '运行时'));
+  s3.appendChild(statusKV('数据根', S.root, true));
+  s3.appendChild(statusKV('工作目录', S.cwd, true));
+  s3.appendChild(statusKV('当前会话', S.session, true));
+  s3.appendChild(statusKV('端口', S.port ? 'http://127.0.0.1:' + S.port + '/' : '—', true));
+  s3.appendChild(statusKV('舞台', L2D.status === 'ready'
+    ? `Live2D 运行中 · ${L2D.runtimeFrom === 'cdn' ? 'CDN' : '本地'}运行时`
+    : (L2D.status === 'loading' ? '加载中' : (L2D.status === 'error' ? '出错' : '未接入'))));
+  s3.appendChild(statusKV('记忆', (S.memory || []).length + ' 条'));
+  s3.appendChild(statusKV('表情包', (S.stickers || []).length + ' 个'));
+  s3.appendChild(statusKV('工具调用记录', (S.toolLog || []).length + ' 次（点顶栏的扳手看）'));
+  wrap.appendChild(s3);
+
+  const row = el('div', 'btn-row');
+  row.appendChild(actionBtn('刷新', async () => { await refreshState(); buildDrawer(); }, 'btn sm'));
+  if (S.port) row.appendChild(actionBtn('在浏览器里打开', async () => {
+    window.open('http://127.0.0.1:' + S.port + '/', '_blank');
+  }, 'btn sm ghost'));
+  wrap.appendChild(row);
+  return wrap;
 }
 
 function pickSticker() {

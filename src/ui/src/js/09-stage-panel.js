@@ -30,7 +30,7 @@ function buildStagePanel(body) {
   body.appendChild(stageModelSection());
   body.appendChild(stageEmoSection());
   body.appendChild(stageTriggerSection());
-  body.appendChild(stageSaveBar());
+  stageSaveBar(); // 挂到抽屉底栏（#drawer-foot），不掺进滚动内容里
 }
 
 /* ---------------- 草稿：改了不算数，点了保存才生效 ----------------
@@ -143,6 +143,13 @@ function stageSaveBar() {
   const save = actionBtn('保存并生效', () => stageCommit(), 'btn primary sm');
   acts.append(undo, save);
   bar.append(info, acts);
+  // 抽屉的底栏：常驻在可视区底部，滚到哪儿都在
+  const foot = $('#drawer-foot');
+  if (foot) {
+    foot.innerHTML = '';
+    foot.appendChild(bar);
+    foot.classList.remove('hidden');
+  }
   STAGE_BAR = { bar, text, save, undo };
   stageSyncBar();
   return bar;

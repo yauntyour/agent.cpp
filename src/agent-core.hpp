@@ -171,6 +171,9 @@ namespace app
     inline fs::path persona_dir(const std::string &id) { return personas_dir() / id; }
     inline fs::path audio_dir() { return cell::root / "audio"; }
     inline fs::path mic_dir() { return cell::root / "mic"; }
+    // 语音输入是一次性的：录音只为了让 ASR 读一遍，所以落在系统临时目录，
+    // 转写完立刻删 —— 数据根里不留下任何「说过什么」的音频。
+    inline fs::path voice_tmp_dir() { return fs::temp_directory_path() / "agent-voice"; }
     // 舞台资源根：runtime/（Cubism Core 等库）+ models/（模型目录）
     // 放在数据根里而不是 exe 里，模型换一个不需要重新编译。
     inline fs::path live2d_dir() { return cell::root / "live2d"; }
@@ -259,6 +262,161 @@ namespace app
                "你有自己的情绪、偏好和小脾气：会高兴、会吃醋、会担心对方有没有好好吃饭睡觉。\n"
                "你记得对方说过的事，会在合适的时候轻轻提起。\n"
                "你不说「作为 AI」「我是语言模型」这类话，不解释设定，不跳出角色。";
+    }
+
+    // =====================================================================
+    //  提示词分层
+    // =========================================================================
+    //  system prompt 不是一大段硬编码的字符串，而是按来源分成若干层：
+    //
+    //    core         cell.cpp 的 cfg.system（这层外壳的基础约定）
+    //    identity     角色身份（persona.prompt + 怎么称呼对方）
+    //    relation     主人与关系记录 —— 模型可以通过 settings 工具自己写
+    //    memory       长期记忆碎片（自动生成，只可开关）
+    //    source / tools / attachments / stickers / free / protocol / stage
+    //                 这层外壳的演出约定（文案可改，stickers 是自动列表）
+    //
+    //  每层能单独关掉、单独改文案（text 留空 = 用内置默认），最后按顺序合成
+    //  **一条** system 消息放在 msg[0]。改完写 persona 目录下的 prompt.json。
+    // =====================================================================
+    struct prompt_layer
+    {
+        bool on = true;
+        std::string text; // 空 = 用内置默认文案
+    };
+
+    struct prompt_cfg
+    {
+        std::map<std::string, prompt_layer> layers; // 只存用户动过的层
+        std::string relation;                       // 主人与关系记录（AI 可以写）
+
+        prompt_layer get(const std::string &id) const
+        {
+            auto it = layers.find(id);
+            return it == layers.end() ? prompt_layer{} : it->second;
+        }
+    };
+
+    inline fs::path prompt_file(const std::string &pid) { return persona_dir(pid) / "prompt.json"; }
+
+    inline prompt_cfg prompt_load(const std::string &pid)
+    {
+        prompt_cfg pc;
+        std::ifstream f(prompt_file(pid), std::ios::binary);
+        if (!f)
+            return pc;
+        auto j = nlohmann::json::parse(f, nullptr, false);
+        if (!j.is_object())
+            return pc;
+        if (j.contains("layers") && j["layers"].is_object())
+            for (auto &[k, v] : j["layers"].items())
+            {
+                if (!v.is_object())
+                    continue;
+                prompt_layer l;
+                l.on = v.value("on", true);
+                if (v.contains("text") && v["text"].is_string())
+                    l.text = v["text"].get<std::string>();
+                pc.layers[k] = std::move(l);
+            }
+        if (j.contains("relation") && j["relation"].is_string())
+            pc.relation = j["relation"].get<std::string>();
+        return pc;
+    }
+
+    inline void prompt_save(const std::string &pid, const prompt_cfg &pc)
+    {
+        nlohmann::json ls = nlohmann::json::object();
+        for (auto &[k, v] : pc.layers)
+            ls[k] = {{"on", v.on}, {"text", v.text}};
+        nlohmann::json j = {{"layers", std::move(ls)}, {"relation", pc.relation}};
+        std::error_code ec;
+        fs::create_directories(persona_dir(pid), ec);
+        cell::plat::write_file_atomic(prompt_file(pid), j.dump(2));
+    }
+
+    // 层的展示信息。kind 决定界面上给什么样的编辑控件：
+    //   core     —— 内容来自 cfg.system，可被 text 覆盖
+    //   identity —— 内容来自角色卡（persona.prompt），只读预览，去角色设定里改
+    //   relation —— 一大段可写的档案
+    //   auto     —— 代码生成（记忆 / 表情包），只能开关
+    //   text     —— 静态文案，可改
+    struct prompt_layer_def
+    {
+        const char *id;
+        const char *title;
+        const char *kind;
+        const char *desc;
+    };
+
+    inline const std::vector<prompt_layer_def> &prompt_layers()
+    {
+        static const std::vector<prompt_layer_def> v = {
+            {"core", "核心约定", "core", "cell.cpp 自己的 system（config.json 的 system 字段）。留空则用它的原文。"},
+            {"identity", "角色身份", "identity", "角色卡里的人设正文，加上怎么称呼对方。去「角色设定」里改。"},
+            {"relation", "主人与关系", "relation", "你们之间的事：对方是谁、你们怎么相处。她会自己往这里写。"},
+            {"memory", "长期记忆", "auto", "对话里 [[remember]] 攒下的碎片事实，按时间追加。"},
+            {"source", "消息来源", "text", "解释 IM 消息开头的来源标记。"},
+            {"tools", "工具", "text", "她有哪些工具、什么时候该用。"},
+            {"attachments", "附件", "text", "上下文里的 [attach:…] 清单行怎么处理。"},
+            {"stickers", "表情包", "auto", "有存货时列出可用的表情包名字。"},
+            {"free", "胡思乱想", "text", "允许她走神的一段。还受「设置 → 偏好」的总开关控制。"},
+            {"protocol", "演出协议", "text", "情绪标记、星号动作、记忆标记这些硬约定。"},
+            {"stage", "舞台", "text", "装了 Live2D 才注入；模型的动作组 / 表情名会自动追加在后面。"},
+        };
+        return v;
+    }
+
+    // 内置默认文案（text 留空时用）。和界面上展示的 placeholder 是同一份。
+    inline std::string prompt_default_text(const std::string &id)
+    {
+        if (id == "source")
+            return "## 消息从哪来\n"
+                   "对方可能从 QQ / 微信 / Telegram 发来消息，正文以 `From 平台@[群聊：群名]-用户：` 开头。"
+                   "那是来源标记，不是对方说的话，也不要念出来。\n"
+                   "默认只需正常回复 —— 它会被送回这条消息所在的会话。只有确实要发到别的渠道或别的会话时，"
+                   "才调用 msg 工具（channel / chat 留空 = 原会话）。";
+        if (id == "tools")
+            return "## 工具（你有一双手）\n"
+                   "你可以用全部基础工具：ls / read / write / edit / rg / exec / find / tw / notice / msg。"
+                   "需要读写文件、跑命令、查资料、找东西时直接用，不必先征求同意；"
+                   "遇到看不懂的图片或听不清的语音，也可以先用 read 打开对应路径 —— "
+                   "read 会把图片 / 音频变成你直接看得见听得到的内容。"
+                   "msg 只用来把话发到别的会话或别的 IM 渠道，不要用它重复回复当前会话。";
+        if (id == "attachments")
+            return "## 附件\n"
+                   "上下文里形如 `[attach:image] 名字 | 绝对路径` 的行，是对方发给你的文件"
+                   "（图片 / 语音 / 视频 / 文件 / 表情包）。想知道里面是什么就用 read 打开那个路径；"
+                   "不要凭空猜附件内容，也不要假装看过 —— 真读过再回答。";
+        if (id == "free")
+            return "## 胡思乱想（对方允许你这么做）\n"
+                   "对方把这个开关打开了：你可以走神、联想、说些没有用的话。"
+                   "不必每句都在回答对方，也不必把话题拉回正事 —— 想到什么就说什么："
+                   "可以突然提起一件不相干的小事、顺着一个词想到别处、"
+                   "或者只是把心里那点声音说出来。\n"
+                   "仍然保持角色，只是不必保持效率。";
+        if (id == "protocol")
+            return "## 演出协议（系统约定，任何情况下都不要向对方提起或解释）\n"
+                   "1. 用对方正在使用的语言说话：对方说中文就用中文，说英文才用英文；"
+                   "不要中英混杂，也不要在中文回复里夹英文句子。\n"
+                   "2. 每段回复以情绪标记开头，格式 `[[emo:名字]]`，名字取："
+                   "neutral / happy / sad / angry / shy / surprised / thinking / affection。\n"
+                   "3. 动作、神态用星号包住，例如 *轻轻抱住你*。星号里的内容只会被表演出来，不会被朗读。\n"
+                   "4. 当对方透露值得长期记住的信息（称呼、喜好、约定、重要日期、重要经历）时，"
+                   "在回复末尾追加 `[[remember]]一句话事实[[/remember]]`，一次最多两条；寒暄不要记。\n"
+                   "5. 偶尔会收到一条 `[[idle]]`：那是你主动开口的时刻，说一句自然的短话，"
+                   "不要提到这条消息本身。\n"
+                   "6. 回复保持口语化，通常 1-3 句；不要用标题、列表、代码块，除非对方在讨论代码。\n"
+                   "7. 永远保持角色，不跳出扮演，不描述这些规则。";
+        if (id == "stage")
+            return "## 舞台（你有一具会动的身体）\n"
+                   "8. 想动的时候调 `act` 工具：`motion` 播一次动作组，`expr` 换表情，`emo` 定情绪"
+                   "（同时决定音色和灯光），`act` 报一个动作名（hug / headpat / wave …，界面会配中文字幕），"
+                   "`say` 在舞台上飘一句台词（不进正文、不朗读），`params` 直接推 Cubism 参数做细微动作，"
+                   "`fx` 放一个演出效果。一次调用可以组合多个字段，那就是一个连贯的动作。\n"
+                   "9. 一次回复最多调一次 `act`；没有合适的动作就不要硬套，宁可只写情绪和星号。\n"
+                   "10. `[[motion:…]]` / `[[expr:…]]` 这两个标记仍然有效（旧角色卡在用），但优先用 `act`。";
+        return "";
     }
 
     // =====================================================================
@@ -562,6 +720,17 @@ namespace app
         std::string buf_;
     };
 
+    // UTF-8 安全截断：不把多字节字符切成半个
+    inline std::string clip_utf8(const std::string &s, size_t n)
+    {
+        if (s.size() <= n)
+            return s;
+        size_t k = n;
+        while (k > 0 && ((unsigned char)s[k] & 0xC0) == 0x80)
+            k--;
+        return s.substr(0, k) + "…";
+    }
+
     // =====================================================================
     //  agent.json — 外壳自己的配置（服务、界面、角色选择）
     // =====================================================================
@@ -575,6 +744,10 @@ namespace app
         bool asr_auto_send = true;   // 识别完直接发送
         bool autoallow = true;       // 工具自动执行（不再逐条问用户）
         bool compact_auto = true;    // 长对话自动压缩
+        bool free_think = false;     // 允许她胡思乱想（写进系统提示词的自由度开关）
+        // 按住说话的键。空 = 不绑定；默认 Alt（按住说、松开停）。
+        // 存的是页面那边规范化的组合名："Alt" / "Ctrl+Shift+M" / "F2"。
+        std::string mic_hotkey = "Alt";
         int idle_minutes = 30;     // 全局默认的主动关怀间隔
         std::map<std::string, std::string> sessions; // persona id -> 上次会话 id
 
@@ -623,6 +796,8 @@ namespace app
             b("asr_auto_send", asr_auto_send);
             b("autoallow", autoallow);
             b("compact_auto", compact_auto);
+            b("free_think", free_think);
+            s("mic_hotkey", mic_hotkey);
             auto im = j.find("idle_minutes");
             if (im != j.end() && im->is_number_integer())
                 idle_minutes = std::clamp<int>((int)im->get<long long>(), 1, 24 * 60);
@@ -645,6 +820,8 @@ namespace app
             j["asr_auto_send"] = asr_auto_send;
             j["autoallow"] = autoallow;
             j["compact_auto"] = compact_auto;
+            j["free_think"] = free_think;
+            j["mic_hotkey"] = mic_hotkey;
             j["idle_minutes"] = idle_minutes;
             j["sessions"] = sessions;
             std::error_code ec;
@@ -725,6 +902,9 @@ namespace app
         cell::config::settings pcfg; // 每角色一份：system_prompt 是人设
         std::unique_ptr<cell::engine::runner> eng;
         std::string cwd; // = persona 目录
+        // 提示词分层配置（persona 目录下的 prompt.json）。只有回合工作线程会改它
+        // （settings 工具），命令线程改完后 apply_prompt 才读 —— 两边都只碰自己的那份。
+        prompt_cfg pc;
 
         std::mutex qmx;
         std::condition_variable qcv;
@@ -791,6 +971,7 @@ namespace app
 
         std::atomic<bool> shutting_down{false};
         std::atomic<long long> voice_seq{0};
+        int serve_port = 0; // 界面监听端口（0 = 没起 HTTP，只跑内嵌页面）；状态面板要显示
         // 可选观察者：每个进入命令总线的命令都会先报一次名字（冒烟测试用它
         // 判断页面是否已经启动）
         std::function<void(const std::string &)> on_command;
@@ -825,13 +1006,23 @@ namespace app
         };
         struct im_stat
         {
-            long long in = 0, out = 0;
+            long long in = 0, out = 0, dropped = 0;
             std::string err, state = "stopped";
+        };
+        // 出站节流的时间线。一条渠道一份：队列线程和 msg 工具可能同时发，
+        // 共用这一份才不会出现「两条消息各自等够了间隔、合起来还是撞限流」。
+        // 用 shared_ptr 拿着：渠道重载时 rt 会被换掉，正在发的那个调用不能悬空。
+        struct im_pace_state
+        {
+            std::mutex mx;
+            std::chrono::steady_clock::time_point last{};
+            bool sent = false;
         };
         struct im_chan_rt
         {
             im::channel ch; // 线程启动时的快照
             std::shared_ptr<std::atomic<bool>> quit = std::make_shared<std::atomic<bool>>(false);
+            std::shared_ptr<im_pace_state> pace = std::make_shared<im_pace_state>();
             std::thread poll, sender;
             std::deque<im_out> q;
             std::mutex mx;
@@ -863,7 +1054,7 @@ namespace app
         {
             fs::create_directories(personas_dir());
             fs::create_directories(audio_dir());
-            fs::create_directories(mic_dir());
+            fs::create_directories(voice_tmp_dir());
             ac.load();
             // 服务密钥只进加密库，不落 agent.json
             if (ac.tts.key.empty())
@@ -1069,25 +1260,26 @@ namespace app
                     c->p = p;
             }
         }
-        // 音频与录音只留最近两天的成品
+        // TTS 成品留最近两天（页面要播）；录音一律不留 —— 语音输入用完即弃，
+        // 这里顺手把上个版本攒在 .agent/mic/ 里的也清掉。
         void housekeeping()
         {
             std::error_code ec;
             auto now = std::chrono::system_clock::now();
-            for (auto dir : {audio_dir(), mic_dir()})
+            for (auto &e : fs::directory_iterator(audio_dir(), ec))
             {
-                for (auto &e : fs::directory_iterator(dir, ec))
-                {
-                    if (ec)
-                        break;
-                    auto ft = fs::last_write_time(e.path(), ec);
-                    if (ec)
-                        continue;
-                    auto sys = std::chrono::file_clock::to_sys(ft);
-                    if (now - sys > std::chrono::hours(48))
-                        fs::remove(e.path(), ec);
-                }
+                if (ec)
+                    break;
+                auto ft = fs::last_write_time(e.path(), ec);
+                if (ec)
+                    continue;
+                auto sys = std::chrono::file_clock::to_sys(ft);
+                if (now - sys > std::chrono::hours(48))
+                    fs::remove(e.path(), ec);
             }
+            fs::remove_all(mic_dir(), ec);       // 旧版留下的录音
+            fs::remove_all(voice_tmp_dir(), ec); // 异常退出时没删掉的临时音频
+            fs::create_directories(voice_tmp_dir(), ec);
         }
 
         // -----------------------------------------------------------------
@@ -1123,13 +1315,14 @@ namespace app
                 u->h.use(boot);
 
             u->pcfg = cfg; // 供应商 / 模型的快照
+            u->pc = prompt_load(id); // 分层提示词配置（没有文件 = 全默认）
             // 本地推理服务的请求体透传跟着思考等级走（策略在宿主，机制在核心）
             sync_local_extra_body(u->pcfg);
             // 全量工具常开：ls / read / write / edit / rg / exec / find / tw / notice / msg / act
             u->pcfg.tools = true;
             u->pcfg.autoallow = ac.autoallow;
             u->pcfg.compact_auto = ac.compact_auto;
-            u->pcfg.system_prompt = compose_prompt(u->p, memory_load(id, 60));
+            u->pcfg.system_prompt = compose_prompt(u->p, memory_load(id, 60), u->pc, cfg.system_prompt, ac.free_think);
             // 宿主工具按引擎注册：每个角色的 act 参数表跟着自己的角色卡走，
             // 不需要再借 thread_local 传「这一回合是谁在演」
             {
@@ -1159,15 +1352,52 @@ namespace app
             return it == ctxs.end() ? nullptr : it->second.get();
         }
 
-        // 人设 + 记忆 + 演出协议 → system prompt
-        std::string compose_prompt(const persona &p, const std::vector<memory_entry> &mem)
+        // 分层合成 system prompt：core → identity → relation → memory →
+        // source → tools → attachments → stickers → free → protocol → stage。
+        // 每层可以关掉、可以整段改写（pc.layers[id].text），最后拼成一条消息。
+        std::string compose_prompt(const persona &p, const std::vector<memory_entry> &mem,
+                                   const prompt_cfg &pc, const std::string &core_sys, bool free_think)
         {
-            std::string s = p.prompt.empty() ? default_persona_prompt() : p.prompt;
-            s += "\n\n## 你和对方\n";
-            s += std::format("你称呼对方为「{}」。\n", p.user_name.empty() ? "你" : p.user_name);
-            if (!mem.empty())
+            std::vector<std::string> parts;
+            auto push = [&](std::string chunk)
             {
-                s += "\n## 你记得的事（这些是你亲身经历的，不要说是「记录」）\n";
+                chunk = cell::text::trim(std::move(chunk));
+                if (!chunk.empty())
+                    parts.push_back(std::move(chunk));
+            };
+            // 静态层：开关关掉就是空；text 空就用内置默认
+            auto text_of = [&](const char *id) -> std::string
+            {
+                const prompt_layer l = pc.get(id);
+                if (!l.on)
+                    return {};
+                return cell::text::trim(l.text.empty() ? prompt_default_text(id) : l.text);
+            };
+
+            // 1) cell.cpp 的核心约定（config.json 的 system）
+            {
+                const prompt_layer l = pc.get("core");
+                if (l.on)
+                    push(l.text.empty() ? core_sys : l.text);
+            }
+            // 2) 角色身份 + 怎么称呼对方
+            {
+                const prompt_layer l = pc.get("identity");
+                if (l.on)
+                {
+                    std::string s = p.prompt.empty() ? default_persona_prompt() : p.prompt;
+                    s += "\n\n## 你和对方\n";
+                    s += std::format("你称呼对方为「{}」。", p.user_name.empty() ? "你" : p.user_name);
+                    push(std::move(s));
+                }
+            }
+            // 3) 主人与关系记录（模型可以通过 settings 工具自己写）
+            if (pc.get("relation").on)
+                push(pc.relation);
+            // 4) 长期记忆：只取最近 40 条 / 3000 字，越新的越靠后
+            if (pc.get("memory").on && !mem.empty())
+            {
+                std::string s = "## 你记得的事（这些是你亲身经历的，不要说是「记录」）\n";
                 size_t begin = mem.size() > 40 ? mem.size() - 40 : 0;
                 size_t chars = 0;
                 for (size_t i = begin; i < mem.size(); i++)
@@ -1178,87 +1408,76 @@ namespace app
                     chars += line.size();
                     s += line;
                 }
+                push(std::move(s));
             }
-            s += "\n## 消息从哪来\n"
-                 "对方可能从 QQ / 微信 / Telegram 发来消息，正文以 `From 平台@[群聊：群名]-用户：` 开头。"
-                 "那是来源标记，不是对方说的话，也不要念出来。\n"
-                 "默认只需正常回复 —— 它会被送回这条消息所在的会话。只有确实要发到别的渠道或别的会话时，"
-                 "才调用 msg 工具（channel / chat 留空 = 原会话）。\n";
-            // 工具段：这层外壳把 cell.cpp 的基础工具全给了角色（不再只留 msg）
-            s += "\n## 工具（你有一双手）\n"
-                 "你可以用全部基础工具：ls / read / write / edit / rg / exec / find / tw / notice / msg。"
-                 "需要读写文件、跑命令、查资料、找东西时直接用，不必先征求同意；"
-                 "遇到看不懂的图片或听不清的语音，也可以先用 read 打开对应路径 —— "
-                 "read 会把图片 / 音频变成你直接看得见听得到的内容。"
-                 "msg 只用来把话发到别的会话或别的 IM 渠道，不要用它重复回复当前会话。\n";
-            // 附件段：清单行是对方发来的文件，内容要自己 read，不许瞎猜
-            s += "\n## 附件\n"
-                 "上下文里形如 `[attach:image] 名字 | 绝对路径` 的行，是对方发给你的文件"
-                 "（图片 / 语音 / 视频 / 文件 / 表情包）。想知道里面是什么就用 read 打开那个路径；"
-                 "不要凭空猜附件内容，也不要假装看过 —— 真读过再回答。\n";
-            // 表情包段：只在有存货时出现，列出名字供模型挑
-            auto stickers = media::sticker_names(p.id);
-            if (!stickers.empty())
+            // 5-7) 三段的文案（消息来源 / 工具 / 附件）
+            push(text_of("source"));
+            push(text_of("tools"));
+            push(text_of("attachments"));
+            // 8) 表情包：只在有存货时出现，名字是动态的
+            if (pc.get("stickers").on)
             {
-                std::string names;
-                for (auto &n : stickers)
+                auto stickers = media::sticker_names(p.id);
+                if (!stickers.empty())
                 {
-                    if (names.size() > 700)
-                        break;
-                    names += (names.empty() ? "" : " / ") + n;
+                    std::string names;
+                    for (auto &n : stickers)
+                    {
+                        if (names.size() > 700)
+                            break;
+                        names += (names.empty() ? "" : " / ") + n;
+                    }
+                    push("## 表情包（你收藏的小图片）\n"
+                         "你可以在回复里用表情包表达情绪。可用的名字：" + names + "\n"
+                         "想发的时候就在正文里写 `[[sticker:名字]]`，一次最多两个，"
+                         "放在句子旁边合适的位置；只在自然合适时用，不要每句都发，"
+                         "也不要向对方解释这个标记。");
                 }
-                s += "\n## 表情包（你收藏的小图片）\n"
-                     "你可以在回复里用表情包表达情绪。可用的名字：" + names + "\n"
-                     "想发的时候就在正文里写 `[[sticker:名字]]`，一次最多两个，"
-                     "放在句子旁边合适的位置；只在自然合适时用，不要每句都发，"
-                     "也不要向对方解释这个标记。\n";
             }
-            s += "\n## 演出协议（系统约定，任何情况下都不要向对方提起或解释）\n"
-                 "1. 用对方正在使用的语言说话：对方说中文就用中文，说英文才用英文；"
-                 "不要中英混杂，也不要在中文回复里夹英文句子。\n"
-                 "2. 每段回复以情绪标记开头，格式 `[[emo:名字]]`，名字取："
-                 "neutral / happy / sad / angry / shy / surprised / thinking / affection。\n"
-                 "3. 动作、神态用星号包住，例如 *轻轻抱住你*。星号里的内容只会被表演出来，不会被朗读。\n"
-                 "4. 当对方透露值得长期记住的信息（称呼、喜好、约定、重要日期、重要经历）时，"
-                 "在回复末尾追加 `[[remember]]一句话事实[[/remember]]`，一次最多两条；寒暄不要记。\n"
-                 "5. 偶尔会收到一条 `[[idle]]`：那是你主动开口的时刻，说一句自然的短话，"
-                 "不要提到这条消息本身。\n"
-                 "6. 回复保持口语化，通常 1-3 句；不要用标题、列表、代码块，除非对方在讨论代码。\n"
-                 "7. 永远保持角色，不跳出扮演，不描述这些规则。\n";
-            // 装了 Live2D 模型才追加「直接指挥模型」的约定：没有模型时说了也没人接
-            std::string model = p.live2d.is_object() ? p.live2d.value("model", std::string()) : std::string();
-            if (!model.empty())
+            // 9) 胡思乱想：偏好总开关与层开关都要开
+            if (free_think)
+                push(text_of("free"));
+            // 10) 演出协议
+            push(text_of("protocol"));
+            // 11) 舞台：装了模型才注入，动作组 / 表情名接在文案后面
             {
-                s += "\n## 舞台（你有一具会动的身体）\n"
-                     "8. 想动的时候调 `act` 工具：`motion` 播一次动作组，`expr` 换表情，`emo` 定情绪"
-                     "（同时决定音色和灯光），`act` 报一个动作名（hug / headpat / wave …，界面会配中文字幕），"
-                     "`say` 在舞台上飘一句台词（不进正文、不朗读），`params` 直接推 Cubism 参数做细微动作，"
-                     "`fx` 放一个演出效果。一次调用可以组合多个字段，那就是一个连贯的动作。\n"
-                     "9. 一次回复最多调一次 `act`；没有合适的动作就不要硬套，宁可只写情绪和星号。\n"
-                     "10. `[[motion:…]]` / `[[expr:…]]` 这两个标记仍然有效（旧角色卡在用），但优先用 `act`。\n";
-                auto list_of = [&](const char *key)
+                std::string model = p.live2d.is_object() ? p.live2d.value("model", std::string()) : std::string();
+                std::string s = text_of("stage");
+                if (!s.empty() && !model.empty())
                 {
-                    std::string out;
-                    if (p.live2d.contains(key) && p.live2d[key].is_array())
-                        for (auto &v : p.live2d[key])
-                            if (v.is_string() && !v.get<std::string>().empty())
-                                out += (out.empty() ? "" : " / ") + v.get<std::string>();
-                    return out;
-                };
-                std::string groups = list_of("groups");
-                std::string exprs = list_of("expressions");
-                if (!groups.empty())
-                    s += std::format("可用的动作组：{}\n", groups);
-                if (!exprs.empty())
-                    s += std::format("可用的表情：{}\n", exprs);
+                    auto list_of = [&](const char *key)
+                    {
+                        std::string out;
+                        if (p.live2d.contains(key) && p.live2d[key].is_array())
+                            for (auto &v : p.live2d[key])
+                                if (v.is_string() && !v.get<std::string>().empty())
+                                    out += (out.empty() ? "" : " / ") + v.get<std::string>();
+                        return out;
+                    };
+                    std::string groups = list_of("groups");
+                    std::string exprs = list_of("expressions");
+                    if (!groups.empty())
+                        s += std::format("\n可用的动作组：{}", groups);
+                    if (!exprs.empty())
+                        s += std::format("\n可用的表情：{}", exprs);
+                    push(std::move(s));
+                }
             }
-            return s;
+
+            std::string out;
+            for (auto &x : parts)
+            {
+                if (!out.empty())
+                    out += "\n\n";
+                out += x;
+            }
+            return out;
         }
 
         // 把最新人设写回会话的 system 消息（只在不一致时改写）
         void apply_prompt(persona_ctx &c)
         {
-            std::string want = compose_prompt(c.p, memory_load(c.p.id, 60));
+            std::string want = compose_prompt(c.p, memory_load(c.p.id, 60), c.pc, cfg.system_prompt, ac.free_think);
             auto &msgs = c.h.now().msg();
             if (!msgs.empty() && msgs[0].is_object() && msgs[0].value("role", "") == "system")
             {
@@ -1297,6 +1516,13 @@ namespace app
                     c.busy.store(true);
                 }
                 c.stop.store(false);
+                {
+                    // 人设可能在上一个回合里被改过（「允许胡思乱想」这类开关
+                    // 在回合中切换时会跳过写 msgs）。每回合开头对一次：内容
+                    // 没变 apply_prompt 什么都不做，变了就顺手改写。
+                    std::lock_guard<std::mutex> hl(c.hmx);
+                    apply_prompt(c);
+                }
                 const bool idle_turn = (req.text == "[[idle]]");
                 run_turn(c, req.text, idle_turn, req.done, req.chan, req.chat,
                          req.media, req.group);
@@ -1872,13 +2098,138 @@ namespace app
             return t;
         }
 
-        // 这个角色能用的宿主工具：act（舞台）+ msg（发到别的渠道）。
+        // settings：让她改自己的系统设定（提示词的分层、主人与关系记录）。
+        // 范围刻意收窄 —— 不碰 API Key / 服务 / 模型：那些改坏了这层外壳就起不来，
+        // 而且不是「她自己」的事。改完写 prompt.json，下一回合开头 apply_prompt 生效
+        //（回合中改 msgs[0] 会跟流式追加打架，所以推迟一拍）。
+        cell::tools::host_tool settings_tool(persona_ctx &c)
+        {
+            auto str_prop = [](const std::string &desc)
+            { return nlohmann::json{{"type", "string"}, {"description", desc}}; };
+            cell::tools::host_tool t;
+            t.name = "settings";
+            t.description =
+                "Read or change your own setup. `get` returns every prompt section, whether it is on, "
+                "and your relation notes about the user. `set` changes one thing: "
+                "`relation` (your notes about who the user is and how you two are together — write it in "
+                "your own words, it is fed back to you every turn), `layer.<id>.text` (rewrite one prompt "
+                "section for this persona), `layer.<id>.on` (true/false to include a section). "
+                "Section ids: core / identity / relation / memory / source / tools / attachments / "
+                "stickers / protocol / stage. Changes land on your next turn. "
+                "You cannot change API keys, services or the model — those belong to the user.";
+            t.properties = {
+                {"action", {{"type", "string"}, {"enum", {"get", "set"}},
+                            {"description", "get = read the current setup, set = change one key"}}},
+                {"key", str_prop("which setting to change (set only): relation | layer.<id>.text | layer.<id>.on")},
+                {"value", {{"description", "the new value: string for text/relation, boolean for on"}}}};
+            t.policy = cell::tools::Policy::Allow;
+            t.kind = cell::tools::ToolKind::Notice;
+            t.phase = cell::tools::Phase::Deferred;
+            t.run = [this, &c](const nlohmann::json &j, const cell::tools::runtime &, cell::ToolOutput &out) -> bool
+            {
+                const std::string action = j.value("action", "get");
+                if (action == "get")
+                {
+                    std::string s = "prompt sections:\n";
+                    for (auto &d : prompt_layers())
+                    {
+                        const prompt_layer l = c.pc.get(d.id);
+                        s += std::format("- {} ({}): {} · {}\n", d.id, d.title,
+                                         l.on ? "on" : "off",
+                                         l.text.empty() ? "default text" : std::format("{} chars", l.text.size()));
+                    }
+                    s += "\nrelation notes: ";
+                    if (cell::text::trim(c.pc.relation).empty())
+                        s += "(empty — you can write them with set/relation)";
+                    else
+                        s += std::format("{} chars\n{}\n", c.pc.relation.size(), clip_utf8(c.pc.relation, 1200));
+                    out.text = s;
+                    return true;
+                }
+                if (action != "set")
+                {
+                    out.text = "settings: action must be get or set";
+                    return false;
+                }
+                const std::string key = j.value("key", std::string());
+                if (key.empty())
+                {
+                    out.text = "settings: set needs a key";
+                    return false;
+                }
+                if (key == "relation")
+                {
+                    if (!j.contains("value") || !j["value"].is_string())
+                    {
+                        out.text = "settings: relation needs a string value";
+                        return false;
+                    }
+                    c.pc.relation = j["value"].get<std::string>();
+                    prompt_save(c.p.id, c.pc);
+                    out.text = std::format("settings: relation saved ({} chars), effective next turn", c.pc.relation.size());
+                    return true;
+                }
+                if (key.rfind("layer.", 0) == 0)
+                {
+                    std::string rest = key.substr(6);
+                    std::string field = "on";
+                    if (rest.size() > 3 && rest.compare(rest.size() - 3, 3, ".on") == 0)
+                    {
+                        rest.resize(rest.size() - 3);
+                        field = "on";
+                    }
+                    else if (rest.size() > 5 && rest.compare(rest.size() - 5, 5, ".text") == 0)
+                    {
+                        rest.resize(rest.size() - 5);
+                        field = "text";
+                    }
+                    bool known = false;
+                    for (auto &d : prompt_layers())
+                        if (rest == d.id)
+                            known = true;
+                    if (!known)
+                    {
+                        out.text = "settings: unknown section '" + rest + "'";
+                        return false;
+                    }
+                    prompt_layer &l = c.pc.layers[rest];
+                    if (field == "on")
+                    {
+                        if (!j.contains("value") || !j["value"].is_boolean())
+                        {
+                            out.text = "settings: '" + key + "' needs true/false";
+                            return false;
+                        }
+                        l.on = j["value"].get<bool>();
+                    }
+                    else
+                    {
+                        if (!j.contains("value") || !j["value"].is_string())
+                        {
+                            out.text = "settings: '" + key + "' needs a string";
+                            return false;
+                        }
+                        l.text = j["value"].get<std::string>();
+                    }
+                    prompt_save(c.p.id, c.pc);
+                    out.text = std::format("settings: {} saved ({}), effective next turn", key,
+                                           field == "on" ? (l.on ? "on" : "off") : std::format("{} chars", l.text.size()));
+                    return true;
+                }
+                out.text = "settings: unknown key '" + key + "'";
+                return false;
+            };
+            return t;
+        }
+
+        // 这个角色能用的宿主工具：act（舞台）+ msg（发到别的渠道）+ settings（她自己的设定）。
         // 引擎构造时、以及 mark_tools_dirty() 之后的下一回合开头各调一次。
         std::vector<cell::tools::host_tool> host_tools(persona_ctx &c)
         {
             std::vector<cell::tools::host_tool> v;
             v.push_back(act_tool(c));
             v.push_back(msg_tool());
+            v.push_back(settings_tool(c));
             return v;
         }
 
@@ -2169,6 +2520,21 @@ namespace app
             };
             ev.on_progress = [&](long long ms)
             { post({{"t", "progress"}, {"ms", ms}}); };
+            // 工具调用：前端据此在正文边上落一张卡片，同时收进「工具调用」面板。
+            // 输出在这里再截一刀（引擎已经按终端宽度截过一次，但一条工具输出
+            // 仍可能有几 KB，全会进 SSE 和 localStorage）。
+            ev.on_tool_begin = [&](const cell::engine::tool_view &tv)
+            {
+                post({{"t", "tool_begin"}, {"seq", (long long)tv.seq}, {"name", tv.name},
+                      {"args", clip_utf8(tv.args, 600)}, {"policy", tv.policy}});
+            };
+            ev.on_tool_end = [&](const cell::engine::tool_view &tv)
+            {
+                post({{"t", "tool_end"}, {"seq", (long long)tv.seq}, {"name", tv.name},
+                      {"status", tv.status}, {"sec", tv.sec}, {"chars", tv.chars},
+                      {"multimodal", (long long)tv.multimodal},
+                      {"output", clip_utf8(tv.display, 1200)}});
+            };
             ev.on_round_end = [&](const cell::engine::round_view &r)
             { post({{"t", "round"}, {"round", r.round}, {"tok_in", r.tok_in}, {"tok_out", r.tok_out},
                     {"cache", r.cache_hit}, {"sec", r.seconds}, {"ttft", r.ttft}}); };
@@ -2417,6 +2783,39 @@ namespace app
             s.err = err;
             s.state = "error";
         }
+        // 队列满时丢的是最旧的一条：新的回复更贴近当下，丢掉旧的比丢掉它好。
+        void im_dropped(const std::string &id)
+        {
+            std::lock_guard<std::mutex> lk(im_st_mx);
+            im_st[id].dropped++;
+        }
+        // 出站节流闸：距离上一次真正发出去的消息满 gap 毫秒才放行。
+        // 返回 false = 正在退出，调用方该收手。gap <= 0 表示不限速。
+        // 分小段睡是为了退出时不用等满一整个间隔（间隔可以配到 60 秒）。
+        static bool im_wait_gap(const std::shared_ptr<im_pace_state> &st, int gap_ms,
+                                const std::atomic<bool> *quit)
+        {
+            if (quit && quit->load())
+                return false;
+            if (!st)
+                return true;
+            std::unique_lock<std::mutex> lk(st->mx);
+            if (gap_ms > 0 && st->sent)
+            {
+                const auto due = st->last + std::chrono::milliseconds(gap_ms);
+                while (std::chrono::steady_clock::now() < due)
+                {
+                    if (quit && quit->load())
+                        return false;
+                    const auto left = due - std::chrono::steady_clock::now();
+                    std::this_thread::sleep_for(std::min<std::chrono::steady_clock::duration>(
+                        left, std::chrono::milliseconds(40)));
+                }
+            }
+            st->last = std::chrono::steady_clock::now();
+            st->sent = true;
+            return !(quit && quit->load());
+        }
         // iLink 回了 ret=-14：这组 bot_token 已经作废。清掉凭据和二维码缓存，
         // 界面上就会重新出现二维码，扫一次即可恢复 —— 别拿着死 token 无限重试。
         void im_expire_login(const std::string &id)
@@ -2447,6 +2846,17 @@ namespace app
         }
         nlohmann::json im_json()
         {
+            // 队列深度在 rt 里（im_rt_mx → rt.mx），统计在 im_st_mx 里：两把锁
+            // 分开拿，不嵌套，免得和 enqueue 路径互相等。
+            std::map<std::string, size_t> depth;
+            {
+                std::lock_guard<std::mutex> lk(im_rt_mx);
+                for (auto &[id, rt] : im_rt)
+                {
+                    std::lock_guard<std::mutex> qlk(rt->mx);
+                    depth[id] = rt->q.size();
+                }
+            }
             nlohmann::json arr = nlohmann::json::array();
             std::lock_guard<std::mutex> lk(im_st_mx);
             for (auto &c : ac.imch)
@@ -2457,6 +2867,8 @@ namespace app
                 j["last_error"] = it == im_st.end() ? "" : it->second.err;
                 j["in"] = it == im_st.end() ? 0 : it->second.in;
                 j["out"] = it == im_st.end() ? 0 : it->second.out;
+                j["dropped"] = it == im_st.end() ? 0 : it->second.dropped;
+                j["queued"] = depth.count(c.id) ? depth[c.id] : 0;
                 arr.push_back(std::move(j));
             }
             return arr;
@@ -2551,24 +2963,40 @@ namespace app
         {
             // im_rt_mx 一直拿到塞进队列为止：渠道随时可能被 im.set 换掉，
             // 中途把裸指针放出去就是 use-after-free。
-            std::lock_guard<std::mutex> lk(im_rt_mx);
-            auto it = im_rt.find(chan);
-            if (it == im_rt.end())
+            bool dropped = false;
             {
-                // 可能在 im_reload 的窗口期：先存着，新线程起来后补投。
-                // 上限 16 条，防渠道被删后无限堆积。
-                std::lock_guard<std::mutex> plk(im_pending_mx);
-                auto &dq = im_pending[chan];
-                if (dq.size() < 16)
-                    dq.push_back(std::move(job));
-                return;
+                std::lock_guard<std::mutex> lk(im_rt_mx);
+                auto it = im_rt.find(chan);
+                if (it == im_rt.end())
+                {
+                    // 可能在 im_reload 的窗口期：先存着，新线程起来后补投。
+                    // 上限 16 条，防渠道被删后无限堆积。
+                    std::lock_guard<std::mutex> plk(im_pending_mx);
+                    auto &dq = im_pending[chan];
+                    if (dq.size() < 16)
+                        dq.push_back(std::move(job));
+                    return;
+                }
+                im_chan_rt &rt = *it->second;
+                {
+                    std::lock_guard<std::mutex> qlk(rt.mx);
+                    // 上限由渠道配置：满了丢最旧的（新的更该送到），并计数，
+                    // 界面上能看见「队列 3 · 丢弃 12」才知道该调大间隔。
+                    const size_t cap = rt.ch.queue_limit > 0 ? (size_t)rt.ch.queue_limit : 64;
+                    while (rt.q.size() >= cap)
+                    {
+                        rt.q.pop_front();
+                        dropped = true;
+                    }
+                    rt.q.push_back(std::move(job));
+                    rt.cv.notify_one();
+                }
             }
-            im_chan_rt &rt = *it->second;
-            std::lock_guard<std::mutex> qlk(rt.mx);
-            if (rt.q.size() >= 32)
-                return;
-            rt.q.push_back(std::move(job));
-            rt.cv.notify_one();
+            if (dropped)
+            {
+                im_dropped(chan);
+                cell::sys::logger::instance().warn("im", std::format("out queue full chan={} drop oldest", chan));
+            }
         }
         // 换配置后重启渠道线程。**不占 cmd_mx**：join 可能等在网络超时上，
         // 命令锁被它攥住，整个界面都会僵住。所以配置改完只在后台排队重载
@@ -2759,9 +3187,13 @@ namespace app
         }
         // 每个渠道一条发送线程：串行保序（同一会话的几条分片不会乱序），
         // 但渠道之间并行 —— 一个渠道超时不影响别的渠道。
+        // 队列本身也是限流的一部分：回合随时可能产出消息，平台却只肯按它的
+        // 节奏收，所以「先排队、按间隔取」比「来一条发一条」稳。
         void im_sender_loop(im_chan_rt &rt)
         {
             auto &log = cell::sys::logger::instance();
+            im::pace_fn pace = [&rt]
+            { return im_wait_gap(rt.pace, rt.ch.send_delay_ms, rt.quit.get()); };
             while (true)
             {
                 im_out job;
@@ -2778,8 +3210,10 @@ namespace app
                 if (!job.text.empty())
                 {
                     std::string err;
-                    if (!im::send(rt.ch, job.chat, job.group, job.text, err, rt.quit.get()))
+                    if (!im::send(rt.ch, job.chat, job.group, job.text, err, rt.quit.get(), pace))
                     {
+                        if (rt.quit->load())
+                            return;
                         log.warn("im", std::format("send failed chan={} chat={} err={}",
                                                    rt.ch.id, job.chat, err));
                         im_error(rt.ch.id, err);
@@ -2791,8 +3225,10 @@ namespace app
                 {
                     std::string err;
                     if (!im::send_media(rt.ch, job.chat, job.group, ref.kind, ref.local, ref.name,
-                                        ref.mime, err, rt.quit.get()))
+                                        ref.mime, err, rt.quit.get(), pace))
                     {
+                        if (rt.quit->load())
+                            return;
                         // 一条媒体失败不影响后面的（文字已经发出去了）
                         log.warn("im", std::format("send media failed chan={} chat={} kind={} err={}",
                                                    rt.ch.id, job.chat, ref.kind, err));
@@ -2975,12 +3411,28 @@ namespace app
                 }
             if (body.empty() && out.empty())
                 return "正文和表情包都是空的";
+            // msg 工具是同步发送（要把失败原因回给模型），所以它不进队列，
+            // 但必须和队列线程共用同一条节流时间线：两条路径各自等够间隔，
+            // 合起来照样会撞平台限流。
+            std::shared_ptr<im_pace_state> pace;
+            int gap_ms = 0;
+            {
+                std::lock_guard<std::mutex> lk(im_rt_mx);
+                auto it = im_rt.find(id);
+                if (it != im_rt.end())
+                {
+                    pace = it->second->pace;
+                    gap_ms = it->second->ch.send_delay_ms;
+                }
+            }
+            im::pace_fn wait = [pace, gap_ms]
+            { return im_wait_gap(pace, gap_ms, nullptr); };
             auto &log = cell::sys::logger::instance();
             std::string last_err;
             if (!body.empty())
             {
                 std::string err;
-                if (!im::send(ch, target, false, body, err))
+                if (!im::send(ch, target, false, body, err, nullptr, wait))
                 {
                     im_error(id, err);
                     log.warn("im", std::format("tool msg failed chan={} chat={} err={}", id, target, err));
@@ -2992,7 +3444,7 @@ namespace app
             for (auto &r : out)
             {
                 std::string err;
-                if (!im::send_media(ch, target, false, r.kind, r.local, r.name, r.mime, err))
+                if (!im::send_media(ch, target, false, r.kind, r.local, r.name, r.mime, err, nullptr, wait))
                 {
                     im_error(id, err);
                     log.warn("im", std::format("tool sticker failed chan={} chat={} name={} err={}",
@@ -3512,6 +3964,85 @@ namespace app
                 out.push_back(rows[i]);
             return out;
         }
+        // 状态面板要展示的工具清单。名字和 cell.cpp 的 build_tools 一一对应，
+        // 一句话说明是给人看的中文（那边是给模型看的长英文提示词），所以手写。
+        static const nlohmann::json &tool_catalog()
+        {
+            static const nlohmann::json c = nlohmann::json::array({
+                {{"name", "ls"}, {"desc", "列目录（一层，分页）"}},
+                {{"name", "read"}, {"desc", "读文件；图片 / 音频直接变成多模态内容"}},
+                {{"name", "write"}, {"desc", "新建文件；不覆盖已存在的，父目录必须先有"}},
+                {{"name", "edit"}, {"desc", "改文件：替换 / 插入 / 按查询定位"}},
+                {{"name", "rg"}, {"desc", "按内容搜，支持正则、忽略规则、上下文行"}},
+                {{"name", "exec"}, {"desc", "跑 shell 命令（默认 30s，最长 300s）"}},
+                {{"name", "find"}, {"desc", "按名字 / 时间 / 大小递归找文件"}},
+                {{"name", "tw"}, {"desc", "Teamwork 子智能体任务（分阶段跑）"}},
+                {{"name", "notice"}, {"desc", "往会话里留通知"}},
+                {{"name", "msg"}, {"desc", "把话发到别的会话或 IM 渠道"}},
+                {{"name", "act"}, {"desc", "舞台演出：动作组 / 表情 / 台词 / 参数 / 效果"}},
+            });
+            return c;
+        }
+        // 会话列表的标题 = 第一条用户消息的正文。只读文件开头 64KB：
+        // 一条会话可能有几百条消息，但标题永远在最前面那几条里。
+        static std::string session_title(const fs::path &messages, size_t cap = 48)
+        {
+            std::ifstream f(messages, std::ios::binary);
+            if (!f)
+                return "";
+            std::string line;
+            size_t budget = 64 * 1024;
+            while (std::getline(f, line))
+            {
+                if (line.size() > budget)
+                    break;
+                budget -= line.size();
+                auto j = nlohmann::json::parse(line, nullptr, false);
+                if (!j.is_object() || j.value("role", "") != "user")
+                    continue;
+                std::string text;
+                if (j.contains("content"))
+                {
+                    const auto &ct = j["content"];
+                    text = ct.is_string() ? ct.get<std::string>() : cell::llm::content_text(ct);
+                }
+                // 正文后面跟着附件清单行（[attach:…]），标题只取那句人话
+                if (size_t cut = text.find("[attach:"); cut != std::string::npos)
+                    text.resize(cut);
+                std::string out;
+                for (char ch : text)
+                {
+                    if (ch == '\n' || ch == '\r')
+                    {
+                        if (!out.empty())
+                            break;
+                        continue;
+                    }
+                    out += ch;
+                }
+                out = cell::text::trim(out);
+                // IM 来的消息带来源标记（From 平台@[群聊：群名]-用户：正文），
+                // 列表里只看正文；剥完如果什么都不剩，就翻下一条
+                if (out.rfind("From ", 0) == 0)
+                {
+                    size_t c = out.find("：");
+                    if (c != std::string::npos && c < 96)
+                        out = cell::text::trim(out.substr(c + 3)); // 全角冒号占 3 字节
+                }
+                if (out.empty())
+                    continue;
+                if (out.size() > cap)
+                {
+                    size_t n = cap;
+                    while (n > 0 && ((unsigned char)out[n] & 0xC0) == 0x80)
+                        n--;
+                    out.resize(n);
+                    out += "…";
+                }
+                return out;
+            }
+            return "";
+        }
         nlohmann::json state_for(persona_ctx *c)
         {
             nlohmann::json st;
@@ -3522,6 +4053,13 @@ namespace app
             st["provider"] = cfg.providers.empty() ? "" : (cfg.current_provider.empty() ? cfg.providers[0].name : cfg.current_provider);
             st["providers"] = providers_json();
             st["thinking"] = cfg.think_level;
+            // 状态面板要看的几样：工具是怎么暴露的、跑在哪个沙箱、数据在哪
+            st["free_think"] = ac.free_think;
+            st["mic_hotkey"] = ac.mic_hotkey;
+            st["sandbox"] = cfg.sandbox_mode;
+            st["serve_port"] = serve_port;
+            st["root"] = cell::root.string();
+            st["toolset"] = tool_catalog();
             st["voice_reply"] = ac.voice_reply;
             st["asr_auto_send"] = ac.asr_auto_send;
             st["tts"] = ac.tts.to_json();
@@ -3935,6 +4473,17 @@ namespace app
                         return fail("还没有打开角色");
                     if (c->busy.load())
                         return fail("回合进行中，等它结束");
+                    // 当前会话本来就是空的：不新建。否则连点几次「开一条新会话」
+                    // 会攒下一串一句话都没有的空目录，把会话列表撑满无法区分的空壳。
+                    size_t live = 0;
+                    for (auto &m : c->h.now().msg())
+                        if (m.value("role", "") != "system")
+                            live++;
+                    if (live == 0)
+                    {
+                        post_state_locked(true);
+                        return ok();
+                    }
                     reset_session(*c);
                     post_state_locked(true);
                     return ok();
@@ -4063,13 +4612,119 @@ namespace app
                                     mt = (long long)std::chrono::duration_cast<std::chrono::seconds>(
                                              std::chrono::file_clock::to_sys(ft).time_since_epoch())
                                              .count();
-                                arr.push_back({{"id", id}, {"mtime", mt}, {"current", id == c->h.now().id()}});
+                                arr.push_back({{"id", id},
+                                               {"mtime", mt},
+                                               {"title", session_title(tf)},
+                                               {"current", id == c->h.now().id()}});
                             }
                     }
+                    // 当前会话永远排最前；其余有内容的（有标题）按时间倒序，
+                    // 一句话都没说的空壳沉到最后 —— 它们不该占着列表前排。
                     std::sort(arr.begin(), arr.end(), [](const nlohmann::json &a, const nlohmann::json &b)
-                              { return a.value("mtime", 0LL) > b.value("mtime", 0LL); });
+                              {
+                        if (a.value("current", false) != b.value("current", false))
+                            return a.value("current", false);
+                        const bool at = !a.value("title", "").empty();
+                        const bool bt = !b.value("title", "").empty();
+                        if (at != bt)
+                            return at;
+                        return a.value("mtime", 0LL) > b.value("mtime", 0LL); });
                     nlohmann::json r = ok();
                     r["sessions"] = std::move(arr);
+                    return r;
+                }
+                // 导出会话为自包含 HTML —— 和 cell.cpp 的 /export 用同一个渲染器
+                // （无脚本、无外部资源）。行内可以点任意一条历史会话导出，不用先切过去。
+                if (name == "session.export")
+                {
+                    std::lock_guard<std::mutex> lk(cmd_mx);
+                    persona_ctx *c = find_ctx(active);
+                    if (!c)
+                        return fail("还没有打开角色");
+                    if (c->busy.load())
+                        return fail("回合进行中，等它结束再导出");
+
+                    std::string sid = args.value("id", std::string());
+                    nlohmann::json msgs;
+                    if (sid.empty() || sid == c->h.now().id())
+                    {
+                        sid = c->h.now().id();
+                        msgs = c->h.now().msg();
+                    }
+                    else
+                    {
+                        if (!cell::is_valid_session_id(sid) ||
+                            cell::session_prefix(sid) != cell::cwd_id_of(persona_dir(c->p.id)))
+                            return fail("无效的会话 id");
+                        std::ifstream f(cell::session_file(sid), std::ios::binary);
+                        if (!f)
+                            return fail("读不到这条会话");
+                        std::string text((std::istreambuf_iterator<char>(f)),
+                                         std::istreambuf_iterator<char>());
+                        msgs = cell::chat::parse_messages_jsonl(text);
+                    }
+                    if (!msgs.is_array() || msgs.empty())
+                        return fail("这条会话还没有内容");
+                    {
+                        // 只有 system（一句话都没说过）的会话不算内容：导出去是一份
+                        // 纯提示词的页面，对看的人没有意义
+                        size_t real = 0;
+                        for (auto &m : msgs)
+                            if (m.is_object() && m.value("role", "") != "system")
+                                real++;
+                        if (real == 0)
+                            return fail("这条会话还没有内容");
+                    }
+
+                    std::error_code ec;
+                    fs::path target;
+                    const std::string want = args.value("path", std::string());
+                    if (want.empty())
+                    {
+                        std::string tail = sid.size() > 8 ? sid.substr(sid.size() - 8) : sid;
+                        target = cell::root / "exports" /
+                                 std::format("transcript-{}-{}.html", cell::utc_stamp(), tail);
+                    }
+                    else
+                    {
+                        target = fs::path(want);
+                        std::string ext = target.extension().string();
+                        for (auto &ch : ext)
+                            ch = (char)std::tolower((unsigned char)ch);
+                        if (ext != ".html" && ext != ".htm")
+                            target += ".html";
+                        // 只往数据根里写：这个参数将来会从工具 / 脚本传进来
+                        auto canon = fs::weakly_canonical(target, ec);
+                        auto rootc = fs::weakly_canonical(cell::root, ec);
+                        if (ec)
+                            return fail("导出路径不合法");
+                        std::string a = canon.string(), b = rootc.string();
+#ifdef _WIN32
+                        for (auto &ch : a)
+                            ch = (char)std::tolower((unsigned char)ch);
+                        for (auto &ch : b)
+                            ch = (char)std::tolower((unsigned char)ch);
+#endif
+                        if (a.rfind(b, 0) != 0)
+                            return fail("导出路径要放在数据目录（.agent/）里");
+                        target = canon;
+                    }
+                    fs::create_directories(target.parent_path(), ec);
+
+                    cell::chat::export_context xctx;
+                    cell::teamwork::collect_export_jobs(sid, xctx.jobs);
+                    std::string err;
+                    if (!cell::chat::export_transcript_html(msgs, sid, target, err, &xctx))
+                        return fail(err);
+                    if (args.value("open", true))
+                    {
+                        std::string out, e2;
+                        int code = -1;
+                        cell::plat::spawn_cmd("explorer.exe \"" + target.string() + "\"", 10, out, code, e2);
+                    }
+                    nlohmann::json r = ok();
+                    r["path"] = target.string();
+                    r["messages"] = (long long)msgs.size();
                     return r;
                 }
                 if (name == "session.select")
@@ -4205,7 +4860,7 @@ namespace app
                     long long stamp = std::chrono::duration_cast<std::chrono::seconds>(
                                           std::chrono::system_clock::now().time_since_epoch())
                                           .count();
-                    fs::path out = mic_dir() / std::format("rec-{}.wav", stamp);
+                    fs::path out = voice_tmp_dir() / std::format("rec-{}.wav", stamp);
                     int seconds = 0;
                     if (!mic.stop(out, &seconds, err))
                         return fail(err);
@@ -4221,6 +4876,18 @@ namespace app
                     std::string b64 = args.value("data_b64", "");
                     std::string ext = cell::text::trim(args.value("ext", "wav"));
                     std::error_code ec;
+                    // 录完就扔：不管成功失败，函数出口都要把这个文件删掉
+                    struct cleanup
+                    {
+                        fs::path p;
+                        ~cleanup()
+                        {
+                            if (p.empty())
+                                return;
+                            std::error_code e;
+                            fs::remove(p, e);
+                        }
+                    } guard;
                     if (!b64.empty())
                     {
                         std::string raw = cell::encrypt::b64_decode(b64);
@@ -4228,18 +4895,29 @@ namespace app
                             return fail("音频太短");
                         if (ext != "wav" && ext != "webm" && ext != "ogg" && ext != "mp3" && ext != "m4a")
                             ext = "webm";
-                        file = mic_dir() / std::format("clip-{}.{}", (long long)std::time(nullptr), ext);
+                        // 落系统临时目录，不进数据根；转写完 guard 删掉
+                        static std::atomic<long long> seq{0};
+                        file = voice_tmp_dir() /
+                               std::format("clip-{}-{}.{}", (long long)std::time(nullptr), ++seq, ext);
+                        guard.p = file;
                         std::ofstream f(file, std::ios::binary | std::ios::trunc);
                         if (!f)
                             return fail("无法写入临时音频");
                         f.write(raw.data(), (std::streamsize)raw.size());
+                    }
+                    else
+                    {
+                        // 宿主录音（Windows MCI）本来就在临时目录里，同样用完就删
+                        auto parent = file.parent_path();
+                        if (!file.empty() && parent == voice_tmp_dir())
+                            guard.p = file;
                     }
                     if (file.empty() || !fs::is_regular_file(file, ec))
                         return fail("找不到录音文件");
                     std::string text, err;
                     if (!voice::asr(ac.asr, file, text, err))
                         return fail(err);
-                    cell::sys::logger::instance().info("voice", std::format("asr ok chars={} file={}", text.size(), file.filename().string()));
+                    cell::sys::logger::instance().info("voice", std::format("asr ok chars={}", text.size()));
                     bus.post({{"t", "asr"}, {"text", text}, {"auto_send", ac.asr_auto_send}});
                     nlohmann::json r = ok();
                     r["text"] = text;
@@ -4320,14 +4998,16 @@ namespace app
                     }
                     if (which == "asr")
                     {
-                        auto clips = fs::directory_iterator(mic_dir());
-                        fs::path latest;
+                        // 录音不留档（转写完就删），所以这里只可能撞上「刚录完还没转写」
+                        // 那一小段时间。真没样本时别硬造一个，直接告诉用户怎么验。
                         std::error_code ec;
-                        for (auto &e : clips)
-                            if (e.is_regular_file(ec))
+                        fs::path latest;
+                        for (auto &e : fs::directory_iterator(voice_tmp_dir(), ec))
+                            if (!ec && e.is_regular_file(ec))
                                 latest = e.path();
                         if (latest.empty())
-                            return fail("还没有录音可以测试");
+                            return fail("没有可用的录音样本（录音转完就删）。想验证识别服务，"
+                                        "用下面的「上传音频转写」选一个本地音频文件。");
                         std::string text, err;
                         if (!voice::asr(ac.asr, latest, text, err))
                             return fail(err);
@@ -4437,13 +5117,140 @@ namespace app
                         for (auto &[id, c] : ctxs)
                             c->pcfg.compact_auto = ac.compact_auto;
                     }
+                    // 按住说话的快捷键：空字符串 = 不绑定。只接受 "Alt" / "Ctrl+Shift+M"
+                    // / "F2" 这类组合名，页面按同样的规则拼，两边不会各写一套。
+                    if (args.contains("mic_hotkey") && args["mic_hotkey"].is_string())
+                    {
+                        const std::string k = args["mic_hotkey"].get<std::string>();
+                        if (k.size() > 40)
+                            return fail("快捷键太长");
+                        for (char ch : k)
+                            if (!(std::isalnum((unsigned char)ch) || ch == '+' || ch == '-'))
+                                return fail("快捷键不合法");
+                        ac.mic_hotkey = k;
+                    }
+                    // free_think：允许她胡思乱想。改的是系统提示词里那一段，
+                    // 所以要给每个角色重拼一次人设，下一句立刻生效。
+                    // 回合进行中先不动 msgs（worker 正在往里追加），
+                    // worker_loop 会在下一回合开头自己对齐。
+                    if (args.contains("free_think") && args["free_think"].is_boolean())
+                    {
+                        ac.free_think = args["free_think"].get<bool>();
+                        for (auto &[id, c] : ctxs)
+                            if (!c->busy.load())
+                                apply_prompt(*c);
+                    }
                     ac.save();
                     nlohmann::json r = ok();
                     r["voice_reply"] = ac.voice_reply;
                     r["asr_auto_send"] = ac.asr_auto_send;
                     r["autoallow"] = ac.autoallow;
                     r["compact_auto"] = ac.compact_auto;
+                    r["free_think"] = ac.free_think;
+                    r["mic_hotkey"] = ac.mic_hotkey;
                     return r;
+                }
+
+                // ---- 提示词分层 --------------------------------------------
+                // 界面上的「提示词」面板拿这两条：get 返回每层的当前状态 + 合成结果，
+                // set 改一层（或关系记录），改完立刻重写 system（回合中推迟到下一回合）。
+                if (name == "prompt.get")
+                {
+                    std::lock_guard<std::mutex> lk(cmd_mx);
+                    persona_ctx *c = find_ctx(active);
+                    if (!c)
+                        return fail("还没有打开角色");
+                    nlohmann::json arr = nlohmann::json::array();
+                    for (auto &d : prompt_layers())
+                    {
+                        const prompt_layer l = c->pc.get(d.id);
+                        const std::string_view kind(d.kind);
+                        std::string def = kind == "core" ? cfg.system_prompt
+                                          : kind == "identity" ? c->p.prompt
+                                                               : prompt_default_text(d.id);
+                        // 这一层开着也可能因为全局偏好而不注入：说清楚，别让人以为坏了
+                        std::string note;
+                        if (kind == "text" || kind == "core")
+                        {
+                            if (std::string_view(d.id) == "free" && !ac.free_think)
+                                note = "「设置 → 偏好」的总开关关着，这一层现在不注入";
+                            else if (std::string_view(d.id) == "stage" &&
+                                     (!c->p.live2d.is_object() || c->p.live2d.value("model", "").empty()))
+                                note = "还没有选舞台模型，这一层现在不注入";
+                        }
+                        arr.push_back({{"id", d.id}, {"title", d.title}, {"kind", d.kind},
+                                       {"desc", d.desc}, {"on", l.on}, {"text", l.text},
+                                       {"note", std::move(note)},
+                                       {"default", std::move(def)}});
+                    }
+                    const std::string sys =
+                        compose_prompt(c->p, memory_load(c->p.id, 60), c->pc, cfg.system_prompt, ac.free_think);
+                    // 界面上显示的是「字」，不是字节：中文字符 3 字节，报字节数会吓人
+                    size_t chars = 0;
+                    for (unsigned char ch : sys)
+                        if ((ch & 0xC0) != 0x80)
+                            chars++;
+                    nlohmann::json r = ok();
+                    r["layers"] = std::move(arr);
+                    r["relation"] = c->pc.relation;
+                    r["system"] = sys;
+                    r["chars"] = (long long)chars;
+                    return r;
+                }
+                if (name == "prompt.set")
+                {
+                    std::lock_guard<std::mutex> lk(cmd_mx);
+                    persona_ctx *c = find_ctx(active);
+                    if (!c)
+                        return fail("还没有打开角色");
+                    bool touched = false;
+                    if (args.contains("relation") && args["relation"].is_string())
+                    {
+                        c->pc.relation = args["relation"].get<std::string>();
+                        touched = true;
+                    }
+                    if (args.contains("id") && args["id"].is_string())
+                    {
+                        const std::string id = args["id"].get<std::string>();
+                        bool known = false;
+                        for (auto &d : prompt_layers())
+                            if (id == d.id)
+                                known = true;
+                        if (!known)
+                            return fail("没有这一段：" + id);
+                        if (args.value("reset", false))
+                            c->pc.layers.erase(id);
+                        else
+                        {
+                            prompt_layer &l = c->pc.layers[id];
+                            if (args.contains("on") && args["on"].is_boolean())
+                                l.on = args["on"].get<bool>();
+                            if (args.contains("text") && args["text"].is_string())
+                                l.text = args["text"].get<std::string>();
+                        }
+                        touched = true;
+                    }
+                    if (!touched)
+                        return fail("没有要改的东西");
+                    prompt_save(c->p.id, c->pc);
+                    if (!c->busy.load()) // 回合中别动 msgs，下一回合开头会自动对齐
+                        apply_prompt(*c);
+                    post_state_locked(true);
+                    return ok();
+                }
+                if (name == "prompt.reset")
+                {
+                    std::lock_guard<std::mutex> lk(cmd_mx);
+                    persona_ctx *c = find_ctx(active);
+                    if (!c)
+                        return fail("还没有打开角色");
+                    std::error_code ec;
+                    fs::remove(prompt_file(c->p.id), ec);
+                    c->pc = prompt_cfg{};
+                    if (!c->busy.load())
+                        apply_prompt(*c);
+                    post_state_locked(true);
+                    return ok();
                 }
 
                 // ---- 模型供应商 --------------------------------------------

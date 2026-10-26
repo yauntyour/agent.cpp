@@ -199,6 +199,38 @@
   color: var(--faint); font-style: italic;
 }
 
+/* ---------------- 工具调用 ----------------
+   一条窄条：平时只占一行（工具名 + 关键参数 + 耗时），点开才看参数全文和输出。
+   比正文弱一档，不抢戏；失败的那条把状态染红。 */
+.tool-call {
+  margin: 4px auto 8px; max-width: 620px;
+  border: 1px solid var(--line); border-radius: 10px;
+  background: rgba(12, 12, 18, .55);
+  text-align: left; font-size: 11.5px; overflow: hidden;
+}
+.tool-call > summary {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 10px; cursor: pointer; list-style: none;
+  color: var(--muted);
+}
+.tool-call > summary::-webkit-details-marker { display: none; }
+.tool-call .tc-name { flex: 0 0 auto; font-family: var(--mono); color: var(--text-2); }
+.tool-call .tc-arg {
+  flex: 1; min-width: 0; color: var(--faint);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tool-call .tc-meta { flex: 0 0 auto; font-size: 10.5px; color: var(--faint); }
+.tool-call .tc-status { flex: 0 0 auto; font-size: 10.5px; }
+.tool-call .tc-status.ok { color: var(--ok); }
+.tool-call .tc-status.fail { color: var(--err); }
+.tool-call .tc-status.run { color: var(--accent); }
+.tool-call .tc-body {
+  padding: 8px 10px 10px; border-top: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; line-height: 1.55;
+  color: var(--text-2); white-space: pre-wrap; word-break: break-word;
+  max-height: 260px; overflow: auto;
+}
+
 /* 一条消息的操作：平时藏起来，指到这一条才浮出来 */
 .msg .actions {
   display: flex; justify-content: center; gap: 4px;

@@ -24,17 +24,28 @@ const S = {
   asr: { enabled: false, kind: 'off' },
   voice_reply: true,
   asr_auto_send: true,
+  mic_hotkey: 'Alt',
   providers: [],
+  provider: '',
   model: '',
   thinking: 0,
   recording: false,
   sessions: [],
+  session: '',
+  cwd: '',
+  sandbox: '',
+  port: 0,
+  root: '',
+  toolset: [],
   lastAct: '',
   // 表情包 / 附件 / 工具偏好（服务端 state 的新字段，见 team-contract 2.5）
   stickers: [],
   autoallow: true,
   compact_auto: true,
   tools: true,
+  free_think: false,
+  // 工具调用流水（本进程内累积，按会话存 localStorage，见 02-chat）
+  toolLog: [],
 };
 
 /* 附件托盘的状态。放在核心层：paintComposer 只读它，真正的读取 / 上传在 12-attach。 */
@@ -50,16 +61,25 @@ const EMO_ZH = {
   shy: '害羞', surprised: '惊讶', thinking: '思索', affection: '亲昵',
 };
 
+/* 思考强度的五档（0 = 关）。后端 think.set 收的就是这个下标。 */
+const THINK_ZH = ['关', '低', '中', '高', '最高'];
+
 /* ---------------- 小工具 ---------------- */
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
-function el(tag, cls, child) {
+/* 建节点。第三个参数起是内容：Node 就 append，其余当文本。
+   早先只收一个 child，于是 el('div','btn-row', a, b, c) 会静默丢掉 b、c
+   （舞台面板的「JSON 编辑」「恢复内置默认」就是这样一直不显示的）。 */
+function el(tag, cls, ...kids) {
   const n = document.createElement(tag);
   if (cls) n.className = cls;
-  if (child instanceof Node) n.appendChild(child);
-  else if (child != null) n.textContent = child;
+  for (const k of kids) {
+    if (k == null) continue;
+    if (k instanceof Node) n.appendChild(k);
+    else n.textContent = k;
+  }
   return n;
 }
 function fmtClock(ts) {
@@ -70,6 +90,13 @@ function fmtDay(ts) {
   if (!ts) return '';
   const d = new Date(ts * 1000);
   return `${d.getMonth() + 1}月${d.getDate()}日`;
+}
+/* 会话清单要能区分同一天里的多条记录，所以精确到分钟 */
+function fmtStamp(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts * 1000);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 function icon(name) {
   const p = {
@@ -168,7 +195,13 @@ function applyState(st, rebuild) {
   if (st.voice && st.voice.recording !== undefined) S.recording = !!st.voice.recording;
   if (st.voice_reply !== undefined) S.voice_reply = !!st.voice_reply;
   if (st.asr_auto_send !== undefined) S.asr_auto_send = !!st.asr_auto_send;
+  if (st.mic_hotkey !== undefined) S.mic_hotkey = String(st.mic_hotkey || '');
   if (st.model !== undefined) S.model = st.model;
+  if (st.provider !== undefined) S.provider = st.provider;
+  if (st.sandbox !== undefined) S.sandbox = st.sandbox;
+  if (st.serve_port !== undefined) S.port = st.serve_port;
+  if (st.root !== undefined) S.root = st.root;
+  if (Array.isArray(st.toolset)) S.toolset = st.toolset;
   if (st.thinking !== undefined) S.thinking = st.thinking;
   if (Array.isArray(st.stickers)) S.stickers = st.stickers;
   if (st.attach) {
@@ -178,6 +211,9 @@ function applyState(st, rebuild) {
   if (st.autoallow !== undefined) S.autoallow = !!st.autoallow;
   if (st.compact_auto !== undefined) S.compact_auto = !!st.compact_auto;
   if (st.tools !== undefined) S.tools = !!st.tools;
+  if (st.free_think !== undefined) S.free_think = !!st.free_think;
+  if (st.session !== undefined) S.session = st.session;
+  if (st.cwd !== undefined) S.cwd = st.cwd;
   applyAccent(S.persona && S.persona.accent);
   if (rebuild) paintAll();
 }

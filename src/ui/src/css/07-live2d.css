@@ -137,14 +137,10 @@
 .act-body .field > label { font-size: 10.5px; }
 .act-body .field input, .act-body .field select, .act-body .field textarea { font-size: 12px; padding: 6px 9px; }
 
-/* 底部保存条：滚到哪都贴着底边，改没改一眼看得见 */
+/* 底部保存条：挂在抽屉的 #drawer-foot 里（见 06-drawer.css），
+   不参与滚动，所以这里只排一行：左状态、右按钮。 */
 .stage-bar {
-  position: sticky; bottom: 0; z-index: 3;
-  margin: 24px -22px -40px; padding: 12px 22px 14px;
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  background: linear-gradient(180deg, rgba(16, 16, 22, .62), #0f0f15 46%);
-  border-top: 1px solid var(--line);
-  backdrop-filter: blur(10px);
 }
 .stage-bar .bar-text {
   display: flex; align-items: center; gap: 7px;

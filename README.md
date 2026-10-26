@@ -194,6 +194,18 @@ agent.exe --debug            开发模式：空数据根时自动生成一个测
 回合进行中，输入框右边的发送键会变成红色的「停止」（Esc 同效），点一下打断她。
 语音合成与语音识别默认关闭，界面里不会出现报错刷屏；接上之后才会自动朗读、才会亮起麦克风。
 
+界面上的几处入口：左栏顶部的箭头把侧边栏收成一条 22px 的窄边（状态记在本机，
+下次打开还是收着的）；顶栏 `>_` 是**工具调用记录** —— 她每调一次工具都会在正文边上
+落一张可展开的窄条，同一条也收进这个面板，刷新之后还在（localStorage，最近 300 条）；
+输入框右边的灯泡是**思考强度**，点一下在头顶弹五档（关 / 低 / 中 / 高 / 最高），
+选完立刻生效；语音输入除了点麦克风，还可以**按住 Alt 说话、松开结束**（默认键，位置在
+**设置 → 偏好 → 麦克风快捷键** —— 点键位重新录，纯修饰键也支持，清空即取消绑定）；
+**会话记录**里每条右边有垃圾桶和下载箭头 —— 箭头把那条会话导出成一份自包含 HTML
+（和 cell.cpp 的 `/export` 同一个渲染器，不切过去也能导）；
+设置里的**运行状态**把服务（模型 / TTS / ASR / IM 渠道）、工具暴露清单、沙箱模式、
+数据根与端口摊在一屏，排查「为什么她不动」时先看这里；**设置 → 提示词**是 system
+prompt 的分层编辑器（见下文）。
+
 **换头像**：角色设定里点「换头像」选图之后，会先弹一个截取窗——正方形视口、
 圆形Mask 圈出最终范围，拖动平移、滚轮 / 滑块缩放（图片始终被钳在覆盖视口的范围内，
 裁不出黑边），确认后按当前变换裁出 512×512 PNG 上传。左栏、会话消息、角色设定
@@ -217,7 +229,6 @@ build/agent.exe --headless 8787 --ui src/ui/index.html
 ├── uploads/<owner>/      聊天附件：桌面拖入/粘贴的、IM 收到的（owner = 角色 id 或 im-<渠道 id>）
 ├── stickers/             全局表情包（也可以放在 personas/<id>/stickers/，角色自己的优先）
 ├── audio/                TTS 成品（保留两天）
-├── mic/                  录音与上传的音频（保留两天）
 ├── live2d/
 │   ├── runtime/          运行时库（点「下载运行时」取回，不随 exe 分发）
 │   └── models/<任意>/     模型（自带一份默认的，第一次运行自动解出来）
@@ -266,6 +277,8 @@ png / jpg / gif / webp，文件名（去扩展名）就是名字。提示词里�
 | `exec` | 跑命令（默认 30s，最长 300s；结果以 `exitcode=N` 结尾） |
 | `tw` `notice` | cell.cpp 的 Teamwork 子代理与消息总线（多个子 agent 并行干活） |
 | `msg` | 往别的 IM 渠道 / 会话说一句（支持贴纸） |
+| `act` | 舞台演出：动作组 / 表情 / 台词 / 参数 / 效果（`Phase::Deferred`，按顺序播） |
+| `settings` | 改**她自己**的设定：提示词分层、主人与关系记录（见「系统提示词」一节）。只管这些——密钥 / 服务 / 模型是用户的，工具碰不到 |
 
 默认设置：
 
@@ -276,7 +289,16 @@ png / jpg / gif / webp，文件名（去扩展名）就是名字。提示词里�
   上下文不会越聊越爆。也可以在设置里手动触发一次 `context.compact`。
 
 两项都能在 **设置 → 偏好** 里关掉；关掉 autoallow 后需要审批的工具会直接拒绝（本机界面没有
-逐条审批弹窗），所以默认保持开启。`state` 里带 `tools / autoallow / compact_auto`，脚本可以检查。
+逐条审批弹窗），所以默认保持开启。`state` 里带 `tools / autoallow / compact_auto / free_think / sandbox`，
+脚本可以检查。
+
+她每次调工具都会在字幕边上落一张窄条（工具名、参数摘要、字数、状态），点开是完整参数和输出；
+同一条也进顶栏 `>_` 的调用记录。工具被沙箱挡住时状态是「失败 / 被拒」，原因就在输出里 ——
+这是排查「她为什么什么都做不了」最快的一条路径。
+
+**允许胡思乱想**（设置 → 偏好）不是「思考强度」：那个是模型的 CoT 档位，这个是把一段
+「可以走神、联想、说些没有用的话」写进系统提示词。开关一拨，空闲时立刻重写 system，回合进行中
+则在下一回合开头对齐（`worker_loop` 每回合会比对一次，内容没变什么都不做）。
 
 > 这是一个「把电脑交给她」级别的开关。默认开启是用户明确要求的；不放心就先去偏好里关掉。
 > 工具的默认 cwd 是角色自己的目录（`.agent/personas/<id>/`），但 full-access 下 `exec` 可以访问
@@ -295,7 +317,7 @@ png / jpg / gif / webp，文件名（去扩展名）就是名字。提示词里�
 | `command` | 本地进程：`piper`、`bert-vits2`、`whisper-cli`、任何 Python 脚本 | `cmd` 里的 `{in} {out}` 占位符；TTS 正文走文本文件，不放命令行 |
 | `off` | 关闭 | — |
 
-界面里：**设置 → 语音合成 / 语音识别**，选形态、填字段、点「保存」，再点「试一下」—— TTS 会合成一句「你好，我在。」并直接播放，ASR 会拿最近一条录音转写给你看。
+界面里：**设置 → 语音合成 / 语音识别**，选形态、填字段、点「保存」，再点「试一下」—— TTS 会合成一句「你好，我在。」并直接播放；ASR 需要一段样本，而录音转完就删，所以请用同一页的「上传音频转写」选一个本地文件来验。
 
 几个实际接过的例子：
 
@@ -326,6 +348,25 @@ png / jpg / gif / webp，文件名（去扩展名）就是名字。提示词里�
 
 密钥永远不落配置文件：`service.set` 收到 `key` 就写进 `cell::encrypt::crypt`（`.agent/.crypt`），`agent.json` 里只留 `has_key`。
 
+### ASR 的上传格式
+
+各家 OpenAI 兼容的识别服务对「上传的音频是什么」要求不一样：有的只看扩展名，有的看
+`Content-Type`，有的还要一个 `format` 表单字段。以前这三样是写死的（`file` / 按扩展名 /
+无额外字段），服务端不认就只能改代码；现在是配置：
+
+| 字段 | 默认 | 作用 |
+| --- | --- | --- |
+| `upload_format` | `auto` | `auto` 原样上传；`wav` 由页面转成 16k 单声道；`mp3 / m4a / ogg / flac` 由宿主用 ffmpeg 转 |
+| `upload_field` | `file` | multipart 里音频那一段的名字（个别实现要 `audio`） |
+| `upload_extra` | 空 | 附加表单字段，`format=wav&channel=1` |
+| `upload_mime` | 空 | 覆盖 file part 的 `Content-Type`，空则按格式推导 |
+
+「上传格式 = wav」是**真的换字节**，不是把 webm 改个后缀糊过去：FunASR / SenseVoice /
+faster-whisper 这类服务端只认 wav，而浏览器录出来的是 webm/opus。转码在页面里做
+（`decodeAudioData` + `OfflineAudioContext` 重采样成 16bit PCM），所以**不需要宿主装 ffmpeg**；
+只有选 mp3 / m4a / ogg / flac 时才要求 PATH 里有 `ffmpeg`。转不动会按原格式上传并在日志里
+留一行 —— 一次识别不该因为格式偏好整个丢掉。
+
 ### 麦克风：页面自己采集
 
 ![录音中](assets/shots/mic.png)
@@ -344,7 +385,19 @@ WebView2 就是 Chromium，`http://127.0.0.1:8899` 属于可信来源（`isSecur
 所以 `third_party/include/webview/webview.h` 有一处**本地改动**：麦克风请求按 `get_Uri` 判断，来源是回环地址才 `ALLOW`，其余（比如点链接跳出去之后的页面）一律 `DENY`。升级上游 webview.h 时记得保留这段。
 
 - **实时电平**：`AudioContext` + `AnalyserNode` 算 RMS，写进 `--mic-lvl` 这个 CSS 变量，麦克风按钮的光晕跟着说话大小呼吸。
+- **录音不留档**：语音输入是一次性的 —— 录音只写进系统临时目录（`%TEMP%/agent-voice`），
+  ASR 读完立刻删（成功失败都一样，靠一个 RAII guard 兜底）。`.agent/` 里不会留下任何
+  「说过什么」的音频；启动时的 housekeeping 还会把旧版本攒在 `.agent/mic/` 的整个清掉。
+  宿主 MCI 录音必须落到文件才能录，所以它也只落临时目录、同样用完即删。
 - **兜底**：浏览器通道拿不到麦克风（旧运行时、没有设备、权限被拒）时自动退回宿主的 `voice.record.start`（Windows MCI），提示会说明切换了来源；两条都不通就直说原因，并指向「上传音频转写」。
+- **按住说话**：绑定的键（默认 `Alt`，设置里可重录，纯修饰键也支持）按下开始、松开结束。
+  两个必须处理的坑：单独按 Alt 会被系统 / 菜单栏抢，所以按下后先等 180ms 再真开录 ——
+  这期间又按了别的键（Alt+Tab、Alt+F4）= 组合键，撤销这次录音；窗口失焦收不到 `keyup`，
+  `blur` / `visibilitychange` 时主动收尾，别把麦克风留在开着的状态。
+  绑纯修饰键还有个细节：`keyup` 那一刻修饰键标志已经复位（松开 Alt 时 `altKey === false`），
+  所以比较前要把它自己补回去（`comboOfRelease`），否则永远匹配不上。
+  按住说话的轻点（<0.6s）静默丢弃，不弹「太短了」—— 对讲机按一下是常事。
+  配置存在 `agent.json` 的 `mic_hotkey`，换端口 / 换浏览器都跟着走。
 - **浏览器里打开**：`--headless 8787 --ui src/ui/index.html` 时页面跑在真浏览器里，权限框由浏览器自己弹，行为和普通网页一致。
 
 ---
@@ -615,6 +668,23 @@ QQ 渠道（绑角色 A） ──┐
 - 需要「一个角色里再开多个子 agent」时用 `tw` 工具（cell.cpp 的 Teamwork），
   子 agent 并行跑、进度经 `notice` 总线回来。
 
+### 发送队列与节流（避免撞平台限流）
+
+回复不是「来一条发一条」，而是先进入渠道自己的出站队列，由发送线程按间隔取。
+两个字段都在渠道子页的「发送节奏」里：
+
+| 字段 | 默认 | 作用 |
+| --- | --- | --- |
+| `send_delay_ms` | `600` | 两次平台 API 调用之间的最小间隔，`0` = 不限速 |
+| `queue_limit` | `64` | 出站队列上限，满了丢**最旧**的一条（新的更该送到） |
+
+- 间隔按**平台调用**算，不按回合：一条长回复切成 3 条就是 3 次调用、3 个间隔。
+- 队列线程和 `msg` 工具共用同一条时间线。工具是同步发送（要把失败原因回给模型），
+  但它同样会等够间隔，两条路径加起来也不会超过平台阈值。
+- 平台对同一会话的速率限制是硬的（Telegram 约 1 条/秒，NapCat 与企微各有阈值），
+  撞上去就是 429 / 风控 / 掉线。600ms 对单人对话完全无感；群聊刷屏、桥很慢时调大。
+- 渠道卡上直接能看到「间隔 600ms · 队列 3/64 · 丢弃 12」—— 丢弃数不为零就该调大间隔了。
+
 ### 线程模型
 
 ```text
@@ -674,7 +744,7 @@ Host 到这里已经是公网域名。鉴权因此下沉到渠道自己：
 | 状态 | `state` |
 | 角色 | `personas.list` `persona.select` `persona.save` `persona.delete` `persona.avatar` |
 | 对话 | `send`（可带 `attachments`） `stop` |
-| 会话 | `session.new` `sessions.list` `session.select` `session.delete` `context.clear`（`{"remember":true}` 先把这段对话整理成长期记忆再清空） `context.compact`（立即压缩一次上下文） |
+| 会话 | `session.new` `sessions.list` `session.select` `session.delete` `session.export`（导出为自包含 HTML：`{id?, path?, open?}`，不切换当前会话也能导出历史） `context.clear`（`{"remember":true}` 先把这段对话整理成长期记忆再清空） `context.compact`（立即压缩一次上下文） |
 | 记忆 | `memory.list` `memory.add` `memory.forget` `memory.clear` |
 | 语音 | `voice.record.start` `voice.record.stop`（宿主录音，兜底） `voice.transcribe` `voice.speak` `voice.stop` |
 | 舞台 | `live2d.scan` `live2d.open_dir` `live2d.fetch_runtime` |
@@ -682,7 +752,8 @@ Host 到这里已经是公网域名。鉴权因此下沉到渠道自己：
 | IM | `im.set` `im.del` `im.test` `im.qr`（渠道 / 凭据 / 扫码登录 / 绑定角色；改完后台重启该渠道的线程） |
 | 表情包 | `sticker.list` `sticker.add`（`{data_b64,ext,name?}`） `sticker.del` `open.stickers_dir` |
 | 模型 | `providers.add` `providers.rm` `providers.select` `provider.set_key` `models.fetch` `model.set` `think.set` |
-| 杂项 | `ui.pref`（`voice_reply` / `asr_auto_send` / `autoallow` / `compact_auto`） `open.data_dir` `app.quit` |
+| 提示词 | `prompt.get`（每层定义 + 当前值 + 合成全文） `prompt.set`（`{id, on?, text?, reset?}` 或 `{relation}`） `prompt.reset`（清空自定义，回默认） |
+| 杂项 | `ui.pref`（`voice_reply` / `asr_auto_send` / `autoallow` / `compact_auto` / `free_think`） `open.data_dir` `app.quit` |
 
 ```bash
 # 用脚本跟她说话（host 头必须是回环地址，服务只认自己）
@@ -705,16 +776,60 @@ curl -sN http://127.0.0.1:8899/api/events    # SSE：一条事件一行 data:
 | `GET\|POST /api/im/<id>` | IM 平台回调（唯一不做 loopback 校验的路由，见「IM 接入」） |
 | `POST /api/cmd/<name>` | 命令总线 |
 
-事件：`hello` `turn_begin` `answer_begin` `answer` `reason` `status` `progress` `error` `emo` `act` `motion` `expr` `sticker` `round` `turn_end` `voice` `voice_error` `voice_stop` `memory` `asr` `voice_state` `quit`。除 `hello` 外每条都带 `persona`，页面按角色分流。
+事件：`hello` `turn_begin` `answer_begin` `answer` `reason` `status` `progress` `error` `emo` `act` `motion` `expr` `sticker` `round` `tool_begin` `tool_end` `turn_end` `voice` `voice_error` `voice_stop` `memory` `asr` `voice_state` `quit`。除 `hello` 外每条都带 `persona`，页面按角色分流。
 
 - `sticker`：`{"name":"happy","url":"/api/stickers/<pid>/happy"}` —— 桌面回合里模型写了 `[[sticker:名字]]`；IM 回合则作为媒体发回来源会话。
-- `hello` / `state` 新增 `stickers` `attach`（`max_files` / `max_bytes`）`tools` `autoallow` `compact_auto`。
+- `tool_begin` / `tool_end`：一次工具调用。开始时只有 `name` / `args` / `policy`，结束时补上 `status`（`ok` / `failed` / `blocked` / …）、`sec`、`chars`、`output`（截断）。页面在正文边上落一张可展开的窄条，同时收进顶栏的「工具调用」面板（最近 300 条，存在 localStorage）。
+- `hello` / `state` 新增 `stickers` `attach`（`max_files` / `max_bytes`）`tools` `autoallow` `compact_auto` `free_think`（允许她胡思乱想）`sandbox` `serve_port` `root` `toolset`（工具清单，状态面板用）。
+- `sessions.list` 的每一行带 `title`（第一条用户消息的正文，IM 来源标记会剥掉）与 `current`；空会话没有标题，排在最后。
+
+---
+
+## 系统提示词：分层注入
+
+system prompt 不是一段硬编码文本，而是按**来源**分成 11 层，按顺序合成**一条**
+消息放在 `msg[0]`（不是好几条 system）。每层能单独关掉、单独改写文案，改动写
+`personas/<id>/prompt.json`，下一回合生效。
+
+| # | 层 | 来源 | 能改什么 |
+| --- | --- | --- | --- |
+| 1 | `core` | cell.cpp 的 `cfg.system`（`config.json` 的 `system`） | 文案（留空 = 用原文） |
+| 2 | `identity` | 角色卡的 `prompt` + 「你称呼对方为…」 | 去角色设定里改 |
+| 3 | `relation` | 主人与关系记录 —— **她自己能写** | 文案（`settings` 工具也行） |
+| 4 | `memory` | `memory.jsonl` 的碎片事实（最近 40 条 / 3000 字） | 只管开关 |
+| 5 | `source` | IM 消息来源标记的说明 | 文案 |
+| 6 | `tools` | 有哪些工具、什么时候用 | 文案 |
+| 7 | `attachments` | `[attach:…]` 清单行怎么处理 | 文案 |
+| 8 | `stickers` | 表情包名字（有存货才出现） | 只管开关 |
+| 9 | `free` | 胡思乱想的自由（还受「设置 → 偏好」总开关） | 文案 |
+| 10 | `protocol` | 演出协议（emo / 星号 / remember / idle） | 文案 |
+| 11 | `stage` | 舞台（装了 Live2D 才有；动作组 / 表情名自动追加在后面） | 文案 |
+
+**设置 → 提示词** 就是这张表的界面：合成字数、全文预览、逐层开关、改写文案、
+关系记录的编辑框。`prompt.get` 返回的每层还带一个 `note`（例如「总开关关着，
+这一层现在不注入」「还没选舞台模型」），免得把条件当成坏了。
+
+**她也能改自己的设定。** 宿主工具 `settings`：
+
+```text
+settings {action:"get"}                                   # 每层状态 + 关系记录
+settings {action:"set", key:"relation", value:"…"}         # 写主人与关系
+settings {action:"set", key:"layer.stage.text", value:"…"} # 改写舞台那一段
+settings {action:"set", key:"layer.free.on", value:false}  # 关掉某层
+```
+
+改完落盘 `prompt.json`，**下一回合开头**生效 —— 回合进行中不动 `msgs[0]`，否则会和
+流式追加抢同一个位置。`worker_loop` 每回合开头调一次 `apply_prompt`，内容没变时它
+什么都不做（不会白改写 transcript，也不打断 prefix cache）。
+
+刻意不给她的东西：API Key、服务配置、模型选择。那些改坏了这层外壳就起不来，
+也不属于「她自己」。
 
 ---
 
 ## 演出协议
 
-系统提示里追加的约定（`compose_prompt`）：
+系统提示里追加的约定（`compose_prompt` 的 `protocol` 层，可以在「设置 → 提示词」里改写）：
 
 | 标记 | 含义 | 去向 |
 | --- | --- | --- |

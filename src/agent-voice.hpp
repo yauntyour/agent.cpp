@@ -14,6 +14,9 @@
 // 录音在宿主侧完成（Windows MCI，16k/16bit/单声道），页面只发命令，
 // 因此不需要浏览器的麦克风权限 —— WebView2 里也不弹权限框。
 //
+// ASR 的「上传形态」也是配置：扩展名、Content-Type、文件字段名、附加表单字段
+// 见 service::upload_*。服务端认什么就发什么，不用改代码。
+//
 // 所有网络请求都走 libcurl，CA 由 cell::net::ca_bundle() 解析（与模型请求同一套信任链）。
 #pragma once
 
@@ -57,6 +60,18 @@ namespace app::voice
         std::string cmd;          // command: {in} {out} {text} {voice} 占位符
         long timeout_s = 60;
 
+        // ---- ASR 上传形态（只有 openai 式 multipart 用得上）--------------
+        // 各家服务端对「上传的音频是什么」要求不一致：有的只看扩展名，有的看
+        // Content-Type，有的还要一个 format 表单字段。以前这些是写死的，服务
+        // 端不认就只能改代码；现在都是配置。
+        //   upload_format  auto  原样上传（按文件的真实扩展名）
+        //                  wav   页面已经把录音转成 16k 单声道 WAV（不依赖 ffmpeg）
+        //                  mp3 / m4a / ogg / flac / aac  宿主用 ffmpeg 转
+        std::string upload_format = "auto";
+        std::string upload_mime;           // 覆盖 file part 的 Content-Type
+        std::string upload_field = "file"; // 文件字段名（OpenAI 是 file，个别实现是 audio）
+        std::string upload_extra;          // 额外表单字段：k=v&k2=v2
+
         bool enabled() const { return kind != "off" && kind != ""; }
         std::string endpoint(const std::string &dflt_path) const
         {
@@ -75,6 +90,8 @@ namespace app::voice
             return {{"kind", kind}, {"base", base}, {"path", path}, {"url", url}, {"body", body},
                     {"model", model}, {"voice", voice}, {"format", format}, {"language", language},
                     {"prompt", prompt}, {"cmd", cmd}, {"timeout_s", timeout_s},
+                    {"upload_format", upload_format}, {"upload_mime", upload_mime},
+                    {"upload_field", upload_field}, {"upload_extra", upload_extra},
                     {"has_key", !key.empty()}};
         }
         static service from_json(const nlohmann::json &j)
@@ -97,6 +114,10 @@ namespace app::voice
             str("language", s.language);
             str("prompt", s.prompt);
             str("cmd", s.cmd);
+            str("upload_format", s.upload_format);
+            str("upload_mime", s.upload_mime);
+            str("upload_field", s.upload_field);
+            str("upload_extra", s.upload_extra);
             auto t = j.find("timeout_s");
             if (t != j.end() && t->is_number_integer())
                 s.timeout_s = std::clamp<long>(t->get<long>(), 5, 600);
@@ -196,6 +217,35 @@ namespace app::voice
             }
         }
 
+        // "format=wav&channel=1" / 一行一个 k=v —— 原样变成 multipart 的文本字段。
+        // 有的服务端要靠这类字段才知道音频是什么格式，所以它必须是可配的。
+        inline std::vector<std::pair<std::string, std::string>> split_fields(const std::string &s)
+        {
+            std::vector<std::pair<std::string, std::string>> out;
+            std::string cur;
+            auto flush = [&]
+            {
+                std::string t = cell::text::trim(cur);
+                cur.clear();
+                const size_t eq = t.find('=');
+                if (eq == std::string::npos)
+                    return;
+                std::string k = cell::text::trim(t.substr(0, eq));
+                std::string v = cell::text::trim(t.substr(eq + 1));
+                if (!k.empty())
+                    out.emplace_back(std::move(k), std::move(v));
+            };
+            for (char ch : s)
+            {
+                if (ch == '&' || ch == ';' || ch == ',' || ch == '\n' || ch == '\r')
+                    flush();
+                else
+                    cur.push_back(ch);
+            }
+            flush();
+            return out;
+        }
+
         inline reply post_json(const service &svc, const std::string &url, const std::string &payload)
         {
             reply r;
@@ -226,7 +276,10 @@ namespace app::voice
         }
 
         // multipart：一个音频文件 + 若干文本字段（ASR）
+        // field 是文件字段名，mime 是 file part 的 Content-Type（空 = 由 libcurl 猜）。
+        // 这三样都由配置决定 —— 各家 OpenAI 兼容实现的口味不一样。
         inline reply post_audio(const service &svc, const std::string &url, const fs::path &file,
+                                const std::string &field, const std::string &mime,
                                 const std::vector<std::pair<std::string, std::string>> &fields)
         {
             reply r;
@@ -237,17 +290,19 @@ namespace app::voice
                 return r;
             }
             detail::base_opts(c, svc, &r.body);
-            curl_mime *mime = curl_mime_init(c);
-            curl_mimepart *part = curl_mime_addpart(mime);
-            curl_mime_name(part, "file");
+            curl_mime *mime_part = curl_mime_init(c);
+            curl_mimepart *part = curl_mime_addpart(mime_part);
+            curl_mime_name(part, field.empty() ? "file" : field.c_str());
             std::string fname = file.filename().string();
             curl_mime_filename(part, fname.c_str());
+            if (!mime.empty())
+                curl_mime_type(part, mime.c_str());
             curl_mime_filedata(part, file.string().c_str());
             for (auto &[k, v] : fields)
             {
                 if (v.empty())
                     continue;
-                curl_mimepart *f = curl_mime_addpart(mime);
+                curl_mimepart *f = curl_mime_addpart(mime_part);
                 curl_mime_name(f, k.c_str());
                 curl_mime_data(f, v.c_str(), CURL_ZERO_TERMINATED);
             }
@@ -257,12 +312,12 @@ namespace app::voice
             curl_easy_setopt(c, CURLOPT_URL, url.c_str());
             if (hdrs)
                 curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdrs);
-            curl_easy_setopt(c, CURLOPT_MIMEPOST, mime);
+            curl_easy_setopt(c, CURLOPT_MIMEPOST, mime_part);
             CURLcode rc = curl_easy_perform(c);
             if (rc != CURLE_OK)
                 r.err = curl_easy_strerror(rc);
             curl_slist_free_all(hdrs);
-            curl_mime_free(mime);
+            curl_mime_free(mime_part);
             r = finish(c, std::move(r));
             curl_easy_cleanup(c);
             return r;
@@ -431,9 +486,80 @@ namespace app::voice
         return f.good();
     }
 
+    // 音频扩展名 ← 配置里的 format
+    inline std::string ext_for(const std::string &format)
+    {
+        std::string f = format;
+        cell::lower_ascii(f);
+        if (f == "wav" || f == "mp3" || f == "opus" || f == "aac" || f == "flac" || f == "pcm")
+            return f;
+        return "mp3";
+    }
+    inline const char *mime_for(const std::string &ext)
+    {
+        if (ext == "wav")
+            return "audio/wav";
+        if (ext == "mp3")
+            return "audio/mpeg";
+        if (ext == "opus" || ext == "ogg")
+            return "audio/ogg";
+        if (ext == "aac")
+            return "audio/aac";
+        if (ext == "flac")
+            return "audio/flac";
+        if (ext == "m4a" || ext == "mp4")
+            return "audio/mp4";
+        if (ext == "webm")
+            return "audio/webm";
+        if (ext == "amr")
+            return "audio/amr";
+        if (ext == "silk")
+            return "audio/silk";
+        return "application/octet-stream";
+    }
     // ---------------------------------------------------------------------
     //  ASR
     // ---------------------------------------------------------------------
+    // 上传前把音频换成目标格式：ffmpeg 在 PATH 里就用它。
+    // 语音只要 16k 单声道，所以除了采样率之外不碰别的参数。
+    // 目标格式只允许下面这几个 —— ffmpeg 靠扩展名选编码器，写错了只会得到
+    // 一个 0 字节的文件，不如提前拒绝。
+    inline bool convert_audio(const service &svc, const fs::path &in, const std::string &fmt,
+                              fs::path &out, std::string &err)
+    {
+        out.clear();
+        err.clear();
+        static const char *kOk[] = {"wav", "mp3", "m4a", "ogg", "flac", "aac"};
+        if (std::find(std::begin(kOk), std::end(kOk), fmt) == std::end(kOk))
+        {
+            err = "不支持的上传格式：" + fmt;
+            return false;
+        }
+        std::error_code ec;
+        fs::path dst = in.parent_path() / (in.stem().string() + "-up." + fmt);
+        fs::remove(dst, ec);
+        std::string cmd = std::format("ffmpeg -hide_banner -loglevel error -y -i \"{}\" -ar 16000 -ac 1 \"{}\"",
+                                      in.string(), dst.string());
+        std::string output, stderr_out;
+        int code = -1;
+        if (!cell::plat::spawn_cmd(cmd, std::max(30.0, (double)svc.timeout_s), output, code,
+                                   stderr_out, in.parent_path()))
+        {
+            err = "无法启动 ffmpeg";
+            return false;
+        }
+        if (code != 0 || !fs::is_regular_file(dst, ec) || fs::file_size(dst, ec) < 128)
+        {
+            std::string why = stderr_out.empty() ? output : stderr_out;
+            err = code == 0 ? "ffmpeg 没有产出文件"
+                            : std::format("ffmpeg 退出码 {}：{}", code, why.substr(0, 200));
+            fs::remove(dst, ec);
+            return false;
+        }
+        out = dst;
+        return true;
+    }
+
     inline bool asr(const service &svc, const fs::path &wav, std::string &text, std::string &err)
     {
         text.clear();
@@ -490,6 +616,39 @@ namespace app::voice
         }
 
         // openai: multipart /audio/transcriptions
+        // 先按 upload_format 把「真正要发出去的字节」准备好 —— 服务端认什么格式
+        // 就发什么格式，而不是把 webm 改个后缀去骗它。
+        std::string fmt = svc.upload_format;
+        cell::lower_ascii(fmt);
+        if (fmt == "auto")
+            fmt.clear();
+        fs::path send_file = wav;
+        fs::path converted;
+        if (!fmt.empty())
+        {
+            std::string have = wav.extension().string();
+            if (!have.empty() && have.front() == '.')
+                have.erase(have.begin());
+            cell::lower_ascii(have);
+            if (have != fmt)
+            {
+                std::string cerr;
+                fs::path conv;
+                if (convert_audio(svc, wav, fmt, conv, cerr))
+                    converted = conv;
+                else // 转不动就按原格式发：一次识别不该因为格式偏好整个丢掉
+                    cell::sys::logger::instance().warn(
+                        "voice", std::format("asr 转码失败，按原格式上传：{}", cerr));
+            }
+            if (!converted.empty())
+                send_file = converted;
+        }
+        std::string ext = send_file.extension().string();
+        if (!ext.empty() && ext.front() == '.')
+            ext.erase(ext.begin());
+        cell::lower_ascii(ext);
+        const std::string mime = svc.upload_mime.empty() ? mime_for(ext) : svc.upload_mime;
+
         std::vector<std::pair<std::string, std::string>> fields{
             {"model", svc.model.empty() ? "whisper-1" : svc.model}};
         if (!svc.language.empty())
@@ -497,7 +656,14 @@ namespace app::voice
         if (!svc.prompt.empty())
             fields.emplace_back("prompt", svc.prompt);
         fields.emplace_back("response_format", "json");
-        reply r = detail::post_audio(svc, svc.endpoint("/audio/transcriptions"), wav, fields);
+        // 配置里的附加字段排在后面：同名的以配置为准（模型/语言还是走上面的
+        // 结构化输入，这里留给服务端自己的小开关）
+        for (auto &kv : detail::split_fields(svc.upload_extra))
+            fields.push_back(kv);
+        reply r = detail::post_audio(svc, svc.endpoint("/audio/transcriptions"), send_file,
+                                     svc.upload_field, mime, fields);
+        if (!converted.empty())
+            fs::remove(converted, ec);
         if (!r.ok)
         {
             err = r.err.empty() ? "ASR 请求失败" : r.err;
@@ -637,27 +803,4 @@ namespace app::voice
 #endif
     };
 
-    // 音频扩展名 ← 配置里的 format
-    inline std::string ext_for(const std::string &format)
-    {
-        std::string f = format;
-        cell::lower_ascii(f);
-        if (f == "wav" || f == "mp3" || f == "opus" || f == "aac" || f == "flac" || f == "pcm")
-            return f;
-        return "mp3";
-    }
-    inline const char *mime_for(const std::string &ext)
-    {
-        if (ext == "wav")
-            return "audio/wav";
-        if (ext == "mp3")
-            return "audio/mpeg";
-        if (ext == "opus")
-            return "audio/ogg";
-        if (ext == "aac")
-            return "audio/aac";
-        if (ext == "flac")
-            return "audio/flac";
-        return "application/octet-stream";
-    }
 } // namespace app::voice

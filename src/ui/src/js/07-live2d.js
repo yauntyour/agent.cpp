@@ -243,6 +243,7 @@ async function l2dMountInner(path, token) {
     l2dSetStatus('ready', '');
     l2dBindPointer();
     l2dStartTicker();
+    l2dStartCursor(); // 窗口外的光标也跟（桌面壳提供 host_cursor 时）
     if (window.ResizeObserver && !L2D._ro) {
       L2D._ro = new ResizeObserver(() => l2dScheduleResize());
       L2D._ro.observe($('#l2d-wrap'));
@@ -346,6 +347,40 @@ function l2dPreview(patch) {
   if (L2D.status !== 'ready' || !L2D.model) return;
   L2D.cfg = Object.assign({}, L2D.cfg, patch);
   l2dFit();
+}
+
+/* ---------------- 光标跟随 ----------------
+   pixi-live2d 的 autoInteract 只听画布上的 pointermove：鼠标一移出窗口
+   （去任务栏、去别的窗口）就再也收不到事件，视线会停在最后那一点。
+   桌面壳能问系统要光标的客户区坐标（host_cursor），所以由页面自己喂 focus()，
+   窗口内外都跟得上。浏览器里打开时没有这个绑定，退回库自己的交互。 */
+const CURSOR = { timer: 0, busy: false };
+
+function l2dCursorSupported() {
+  return typeof window.host_cursor === 'function';
+}
+
+async function l2dCursorPoll() {
+  if (CURSOR.busy || L2D.status !== 'ready' || !L2D.model) return;
+  if (document.hidden || !l2dCursorSupported()) return;
+  CURSOR.busy = true;
+  try {
+    const raw = await window.host_cursor();
+    const r = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!r || !r.ok || !(r.w > 0) || !(r.h > 0)) return;
+    // 宿主给的是客户区的物理像素。按比例换成 CSS 像素，
+    // 这样显示器缩放（125% / 150%）和窗口尺寸都不用各算一遍。
+    const x = r.x / r.w * window.innerWidth;
+    const y = r.y / r.h * window.innerHeight;
+    L2D.model.focus(x, y, false);
+  } catch { /* 宿主一时拿不到光标（锁屏、切换桌面）就跳过这一拍 */ }
+  finally { CURSOR.busy = false; }
+}
+
+function l2dStartCursor() {
+  if (!l2dCursorSupported() || CURSOR.timer) return;
+  CURSOR.timer = setInterval(l2dCursorPoll, 120);
+  l2dCursorPoll();
 }
 
 function l2dStartTicker() {

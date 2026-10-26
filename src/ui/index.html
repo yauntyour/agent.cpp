@@ -142,6 +142,22 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   background: linear-gradient(90deg, rgba(8, 8, 12, .78), rgba(8, 8, 12, .34));
   backdrop-filter: blur(10px);
 }
+
+/* 收纳：收起后只剩一条窄边，里面的东西全藏起来，只留这个把手。
+   状态在 localStorage（agent.rail.off），刷新后还记得。 */
+#app.rail-off { grid-template-columns: 22px minmax(0, 1fr); }
+#app.rail-off #rail { padding: 14px 0; gap: 0; }
+#app.rail-off #rail > *:not(.rail-toggle) { display: none; }
+#app.rail-off .rail-toggle svg { transform: rotate(180deg); }
+
+.rail-toggle {
+  flex: 0 0 auto; width: 22px; height: 26px; border-radius: 8px;
+  display: grid; place-items: center; color: var(--faint);
+  transition: color .16s, background .16s;
+}
+.rail-toggle:hover { color: var(--text); background: var(--card); }
+.rail-toggle svg { width: 14px; height: 14px; transition: transform .22s var(--ease); }
+
 .rail-mark { width: 44px; height: 44px; display: grid; place-items: center; margin-bottom: 8px; }
 .rail-logo {
   width: 36px; height: 36px; display: block;
@@ -599,6 +615,38 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   color: var(--faint); font-style: italic;
 }
 
+/* ---------------- 工具调用 ----------------
+   一条窄条：平时只占一行（工具名 + 关键参数 + 耗时），点开才看参数全文和输出。
+   比正文弱一档，不抢戏；失败的那条把状态染红。 */
+.tool-call {
+  margin: 4px auto 8px; max-width: 620px;
+  border: 1px solid var(--line); border-radius: 10px;
+  background: rgba(12, 12, 18, .55);
+  text-align: left; font-size: 11.5px; overflow: hidden;
+}
+.tool-call > summary {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 10px; cursor: pointer; list-style: none;
+  color: var(--muted);
+}
+.tool-call > summary::-webkit-details-marker { display: none; }
+.tool-call .tc-name { flex: 0 0 auto; font-family: var(--mono); color: var(--text-2); }
+.tool-call .tc-arg {
+  flex: 1; min-width: 0; color: var(--faint);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tool-call .tc-meta { flex: 0 0 auto; font-size: 10.5px; color: var(--faint); }
+.tool-call .tc-status { flex: 0 0 auto; font-size: 10.5px; }
+.tool-call .tc-status.ok { color: var(--ok); }
+.tool-call .tc-status.fail { color: var(--err); }
+.tool-call .tc-status.run { color: var(--accent); }
+.tool-call .tc-body {
+  padding: 8px 10px 10px; border-top: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; line-height: 1.55;
+  color: var(--text-2); white-space: pre-wrap; word-break: break-word;
+  max-height: 260px; overflow: auto;
+}
+
 /* 一条消息的操作：平时藏起来，指到这一条才浮出来 */
 .msg .actions {
   display: flex; justify-content: center; gap: 4px;
@@ -698,8 +746,13 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .mic-btn svg, .attach-btn svg { width: 17px; height: 17px; position: relative; z-index: 1; }
 .attach-btn:disabled { opacity: .35; cursor: not-allowed; }
 .mic-btn.rec { color: #fff; background: color-mix(in srgb, var(--err) 80%, #000); }
-.mic-btn.rec .mic-ring {
+/* 脉冲环一直 absolute：它要是留在 grid 流里，网格会多出一行，
+   svg 就被挤到上半格（图标看起来"没居中"—— 实际是这一行干的）。 */
+.mic-ring {
   position: absolute; inset: 0; border-radius: 50%;
+  pointer-events: none;
+}
+.mic-btn.rec .mic-ring {
   border: 2px solid color-mix(in srgb, var(--err) 70%, transparent);
   animation: mic-pulse 1.5s ease-out infinite;
 }
@@ -719,6 +772,45 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 }
 @keyframes mic-pulse { from { transform: scale(1); opacity: .9; } to { transform: scale(1.55); opacity: 0; } }
 .mic-btn:disabled { opacity: .35; cursor: not-allowed; }
+
+/* 思考强度：输入框右侧的小胶囊。关着的时候只露一个灰灯泡，
+   开着才点亮 + 显示档位；点一下在头顶弹出五档。 */
+.think-btn {
+  flex: 0 0 auto; height: 30px; margin-bottom: 4px; padding: 0 9px 0 7px;
+  display: inline-flex; align-items: center; gap: 4px;
+  border-radius: 999px; font-size: 11px; letter-spacing: .02em;
+  color: var(--muted); border: 1px solid transparent;
+  transition: background .16s, color .16s, border-color .16s;
+}
+.think-btn:hover { background: rgba(255, 255, 255, .05); color: var(--text); }
+.think-btn.on {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
+}
+.think-btn svg { width: 14px; height: 14px; }
+.think-lv { line-height: 1; }
+
+.think-menu {
+  position: fixed; z-index: 60;
+  display: flex; flex-direction: column; gap: 2px; padding: 6px;
+  border-radius: 12px;
+  background: rgba(18, 18, 26, .96);
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow-2);
+  backdrop-filter: blur(12px);
+  animation: toast-in .16s var(--ease) both;
+}
+.think-opt {
+  padding: 5px 16px 5px 12px; border-radius: 7px; text-align: left;
+  font-size: 12px; color: var(--text-2); white-space: nowrap;
+}
+.think-opt:hover { background: var(--card-2); color: var(--text); }
+.think-opt.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.think-menu .think-hd {
+  padding: 2px 10px 5px; font-size: 10.5px; color: var(--faint);
+  letter-spacing: .12em;
+}
 
 .send-btn {
   background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 92%, #fff), var(--accent));
@@ -833,6 +925,15 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 }
 .drawer-body { flex: 1; overflow-y: auto; padding: 20px 22px 40px; }
 
+/* 底部常驻条（舞台的「保存并生效」）。放在 body 外面，才不会被滚动内容压住，
+   也不需要 sticky —— 抽屉本身就是一列 flex。 */
+.drawer-foot {
+  flex: 0 0 auto;
+  padding: 12px 22px 14px;
+  border-top: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(21, 21, 28, .92), #101016);
+}
+
 /* ---------------- 表单 ---------------- */
 .sect { margin-bottom: 26px; }
 .sect-h {
@@ -879,6 +980,31 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 9px 0; }
 .switch-row .k { font-size: 13px; }
 .switch-row .d { font-size: 11px; color: var(--faint); margin-top: 2px; }
+
+/* 麦克风快捷键：左边说明、右边键位 + 清除 */
+.hotkey-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 0; }
+.hotkey-main { flex: 1; min-width: 0; }
+.hotkey-row .k { font-size: 13px; }
+.hotkey-row .d { font-size: 11px; color: var(--faint); margin-top: 2px; }
+.hotkey-key {
+  flex: 0 0 auto; min-width: 76px; padding: 6px 11px; border-radius: 9px;
+  font-family: var(--mono); font-size: 11.5px; letter-spacing: .03em;
+  color: var(--text-2); background: var(--card); border: 1px solid var(--line-strong);
+  transition: color .16s, border-color .16s, background .16s;
+}
+.hotkey-key:hover { color: var(--text); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.hotkey-key.capturing {
+  color: var(--accent); border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.hotkey-clr {
+  flex: 0 0 auto; width: 24px; height: 24px; border-radius: 6px;
+  display: grid; place-items: center; color: var(--faint);
+  transition: color .15s, background .15s;
+}
+.hotkey-clr:hover { color: var(--err); background: var(--card-2); }
+.hotkey-clr svg { width: 12px; height: 12px; }
+.hotkey-tip { margin-top: -2px; padding-bottom: 2px; }
 .switch {
   flex: 0 0 38px; width: 38px; height: 21px; border-radius: 999px;
   background: var(--card-2); border: 1px solid var(--line-strong);
@@ -927,6 +1053,74 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .list-row:hover .del { opacity: 1; }
 .list-row .del:hover { color: var(--err); }
 .empty { padding: 26px 4px; text-align: center; color: var(--faint); font-size: 12.5px; }
+
+/* 会话行：标题一行（当前会话带徽标），时间一行；空会话压一档 */
+.list-row.on { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.list-row.dim:not(.on) { opacity: .52; }
+.sess-t { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.sess-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 工具调用记录 */
+.log-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+.log-n { font-size: 11.5px; color: var(--faint); }
+.tool-log-row { margin-bottom: 10px; }
+.tl-when { margin: 0 0 3px 2px; font-size: 10.5px; color: var(--faint); letter-spacing: .04em; }
+#drawer .tool-call { max-width: none; margin: 0; background: rgba(255, 255, 255, .012); }
+
+/* ---------------- 运行状态 ---------------- */
+.kv {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 6px 0; border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+}
+.kv:last-child { border-bottom: 0; }
+.kv-k { flex: 0 0 82px; font-size: 11.5px; color: var(--faint); letter-spacing: .04em; }
+.kv-v { flex: 1; min-width: 0; word-break: break-all; color: var(--text-2); }
+.kv-v.mono { font-family: var(--mono); font-size: 11.5px; }
+
+.tool-list { margin-top: 8px; }
+.tool-row {
+  display: flex; gap: 10px; padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+.tool-row:last-child { border-bottom: 0; }
+.tool-row .tn { flex: 0 0 82px; font-family: var(--mono); font-size: 11.5px; color: var(--accent); }
+.tool-row .td { flex: 1; min-width: 0; font-size: 11.5px; color: var(--muted); line-height: 1.55; }
+
+/* ---------------- 提示词分层 ---------------- */
+.pl-item {
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  padding: 10px 12px; margin-bottom: 8px;
+  background: rgba(255, 255, 255, .012);
+}
+.pl-item.off { opacity: .55; }
+.pl-top { display: flex; align-items: flex-start; gap: 12px; }
+.pl-main { flex: 1; min-width: 0; }
+.pl-name { font-size: 13px; font-weight: 600; }
+.pl-desc { margin-top: 3px; font-size: 11px; color: var(--faint); line-height: 1.6; }
+.pl-note { margin-top: 4px; font-size: 11px; color: var(--warn); line-height: 1.6; }
+.pl-item .switch { flex: 0 0 38px; margin-top: 2px; }
+.pl-item textarea {
+  width: 100%; margin-top: 9px; padding: 9px 11px;
+  background: var(--bg-2); border: 1px solid var(--line-strong); border-radius: 10px;
+  font-size: 12px; line-height: 1.65; outline: none; resize: vertical;
+}
+.pl-item textarea.mono { font-family: var(--mono); font-size: 11.5px; }
+.pl-edit { margin-top: 9px; }
+.pl-edit > summary {
+  list-style: none; cursor: pointer; font-size: 11.5px; color: var(--muted);
+  display: flex; align-items: center; gap: 6px;
+}
+.pl-edit > summary::-webkit-details-marker { display: none; }
+.pl-edit > summary::before { content: "▸"; transition: transform .2s; }
+.pl-edit[open] > summary::before { transform: rotate(90deg); }
+
+.prompt-pre {
+  margin: 10px 0 0; padding: 12px; max-height: 320px; overflow: auto;
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px;
+  font-family: var(--mono); font-size: 11px; line-height: 1.6;
+  color: var(--text-2); white-space: pre-wrap; word-break: break-word;
+}
 
 /* 头像选择 */
 .avatar-edit { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
@@ -1157,14 +1351,10 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .act-body .field > label { font-size: 10.5px; }
 .act-body .field input, .act-body .field select, .act-body .field textarea { font-size: 12px; padding: 6px 9px; }
 
-/* 底部保存条：滚到哪都贴着底边，改没改一眼看得见 */
+/* 底部保存条：挂在抽屉的 #drawer-foot 里（见 06-drawer.css），
+   不参与滚动，所以这里只排一行：左状态、右按钮。 */
 .stage-bar {
-  position: sticky; bottom: 0; z-index: 3;
-  margin: 24px -22px -40px; padding: 12px 22px 14px;
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  background: linear-gradient(180deg, rgba(16, 16, 22, .62), #0f0f15 46%);
-  border-top: 1px solid var(--line);
-  backdrop-filter: blur(10px);
 }
 .stage-bar .bar-text {
   display: flex; align-items: center; gap: 7px;
@@ -1350,8 +1540,12 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
     <div class="stage-veil"></div>
   </div>
 
-  <!-- ================= 左侧角色栏 ================= -->
+  <!-- ================= 左侧角色栏 =================
+       可收纳：收起来只剩一条窄边，箭头反转，点一下再展开（状态在 localStorage）。 -->
   <aside id="rail">
+    <button class="rail-toggle" id="btn-rail" title="收起侧边栏">
+      <svg viewBox="0 0 24 24"><path d="M14 6l-6 6 6 6"/></svg>
+    </button>
     <div class="rail-mark" title="agent">
       <img class="rail-logo" src="data:image/png;base64,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" alt="agent">
     </div>
@@ -1386,6 +1580,9 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
         </button>
         <button class="ico-btn" id="btn-sessions" title="会话记录">
           <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+        </button>
+        <button class="ico-btn" id="btn-tools" title="工具调用记录">
+          <svg viewBox="0 0 24 24"><path d="m4 7 4 5-4 5"/><path d="M12.5 17H20"/></svg>
         </button>
         <button class="ico-btn" id="btn-voice" title="朗读回复">
           <svg viewBox="0 0 24 24"><path d="M11 5 6.5 9H3v6h3.5L11 19V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18 6a8.5 8.5 0 0 1 0 12"/></svg>
@@ -1428,12 +1625,16 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
         <button class="attach-btn" id="btn-attach" title="添加图片或文件（也可以拖进来 / 粘贴）">
           <svg viewBox="0 0 24 24"><path d="m21.4 11.6-8.9 8.9a6 6 0 0 1-8.5-8.5l8.9-8.9a4 4 0 0 1 5.7 5.7l-8.9 8.9a2 2 0 0 1-2.8-2.8l8.2-8.2"/></svg>
         </button>
-        <button class="mic-btn" id="btn-mic" title="点击开始 / 结束录音">
+        <button class="mic-btn" id="btn-mic" title="点击开始 / 结束录音（Ctrl+Shift+M）">
           <span class="mic-lvl"></span>
-          <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"/></svg>
+          <svg viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="10.5" rx="3"/><path d="M5.5 12.5a6.5 6.5 0 0 0 13 0M12 19v3"/></svg>
           <span class="mic-ring"></span>
         </button>
         <textarea id="input" rows="1" placeholder="说点什么…（Enter 发送，Shift+Enter 换行）"></textarea>
+        <button class="think-btn" id="btn-think" title="思考强度">
+          <svg viewBox="0 0 24 24"><path d="M9.5 18h5M10.5 21h3"/><path d="M12 3a6 6 0 0 0-3.6 10.8c.4.3.6.8.6 1.3V17h6v-1.9c0-.5.2-1 .6-1.3A6 6 0 0 0 12 3Z"/></svg>
+          <span class="think-lv" id="think-lv">关</span>
+        </button>
         <button class="send-btn" id="btn-send" title="发送">
           <svg viewBox="0 0 24 24" class="i-send"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
           <svg viewBox="0 0 24 24" class="i-stop"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>
@@ -1460,6 +1661,9 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
     <button class="ico-btn" id="btn-drawer-close"><svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
   </header>
   <div class="drawer-body" id="drawer-body"></div>
+  <!-- 抽屉自己的底栏：需要常驻的保存条挂在这里（不再用滚动内容里的 sticky，
+       那样会浮在内容上面、压住最后几行） -->
+  <div class="drawer-foot hidden" id="drawer-foot"></div>
 </section>
 
 <!-- 图片全屏预览：Esc 或点背景关闭（逻辑在 12-attach.js） -->
@@ -1537,17 +1741,28 @@ const S = {
   asr: { enabled: false, kind: 'off' },
   voice_reply: true,
   asr_auto_send: true,
+  mic_hotkey: 'Alt',
   providers: [],
+  provider: '',
   model: '',
   thinking: 0,
   recording: false,
   sessions: [],
+  session: '',
+  cwd: '',
+  sandbox: '',
+  port: 0,
+  root: '',
+  toolset: [],
   lastAct: '',
   // 表情包 / 附件 / 工具偏好（服务端 state 的新字段，见 team-contract 2.5）
   stickers: [],
   autoallow: true,
   compact_auto: true,
   tools: true,
+  free_think: false,
+  // 工具调用流水（本进程内累积，按会话存 localStorage，见 02-chat）
+  toolLog: [],
 };
 
 /* 附件托盘的状态。放在核心层：paintComposer 只读它，真正的读取 / 上传在 12-attach。 */
@@ -1563,16 +1778,25 @@ const EMO_ZH = {
   shy: '害羞', surprised: '惊讶', thinking: '思索', affection: '亲昵',
 };
 
+/* 思考强度的五档（0 = 关）。后端 think.set 收的就是这个下标。 */
+const THINK_ZH = ['关', '低', '中', '高', '最高'];
+
 /* ---------------- 小工具 ---------------- */
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
-function el(tag, cls, child) {
+/* 建节点。第三个参数起是内容：Node 就 append，其余当文本。
+   早先只收一个 child，于是 el('div','btn-row', a, b, c) 会静默丢掉 b、c
+   （舞台面板的「JSON 编辑」「恢复内置默认」就是这样一直不显示的）。 */
+function el(tag, cls, ...kids) {
   const n = document.createElement(tag);
   if (cls) n.className = cls;
-  if (child instanceof Node) n.appendChild(child);
-  else if (child != null) n.textContent = child;
+  for (const k of kids) {
+    if (k == null) continue;
+    if (k instanceof Node) n.appendChild(k);
+    else n.textContent = k;
+  }
   return n;
 }
 function fmtClock(ts) {
@@ -1583,6 +1807,13 @@ function fmtDay(ts) {
   if (!ts) return '';
   const d = new Date(ts * 1000);
   return `${d.getMonth() + 1}月${d.getDate()}日`;
+}
+/* 会话清单要能区分同一天里的多条记录，所以精确到分钟 */
+function fmtStamp(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts * 1000);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 function icon(name) {
   const p = {
@@ -1681,7 +1912,13 @@ function applyState(st, rebuild) {
   if (st.voice && st.voice.recording !== undefined) S.recording = !!st.voice.recording;
   if (st.voice_reply !== undefined) S.voice_reply = !!st.voice_reply;
   if (st.asr_auto_send !== undefined) S.asr_auto_send = !!st.asr_auto_send;
+  if (st.mic_hotkey !== undefined) S.mic_hotkey = String(st.mic_hotkey || '');
   if (st.model !== undefined) S.model = st.model;
+  if (st.provider !== undefined) S.provider = st.provider;
+  if (st.sandbox !== undefined) S.sandbox = st.sandbox;
+  if (st.serve_port !== undefined) S.port = st.serve_port;
+  if (st.root !== undefined) S.root = st.root;
+  if (Array.isArray(st.toolset)) S.toolset = st.toolset;
   if (st.thinking !== undefined) S.thinking = st.thinking;
   if (Array.isArray(st.stickers)) S.stickers = st.stickers;
   if (st.attach) {
@@ -1691,6 +1928,9 @@ function applyState(st, rebuild) {
   if (st.autoallow !== undefined) S.autoallow = !!st.autoallow;
   if (st.compact_auto !== undefined) S.compact_auto = !!st.compact_auto;
   if (st.tools !== undefined) S.tools = !!st.tools;
+  if (st.free_think !== undefined) S.free_think = !!st.free_think;
+  if (st.session !== undefined) S.session = st.session;
+  if (st.cwd !== undefined) S.cwd = st.cwd;
   applyAccent(S.persona && S.persona.accent);
   if (rebuild) paintAll();
 }
@@ -1827,6 +2067,7 @@ function mdToHtml(src) {
 const LIVE = {
   node: null, body: null, raw: '', reasoning: '', rnode: null, rbody: null, rsum: null,
   started: false, streaming: false, pendingAct: '', reasonTouched: false,
+  toolPending: [],
 };
 let pinned = true;  // 视口是否贴着底部
 let autoScroll = 0; // >0：这一次滚动是我们自己做的，别当成「用户翻走了」
@@ -1979,6 +2220,136 @@ function paintHistory() {
   stick(true);
 }
 
+/* ---------------- 工具调用记录 ----------------
+   两条通道，同一份数据：
+   - 回合内联：每调一次就在正文边上落一条窄条（点开看参数和输出）；
+   - 记录面板：S.toolLog 累积本次运行的所有调用，按会话存 localStorage，
+     刷新之后还翻得到（历史正文里没有工具痕迹，所以只能靠这份日志）。 */
+const TOOL_LOG_KEY = 'agent.tool.log';
+const TOOL_LOG_MAX = 300;
+
+function toolLogLoad() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(TOOL_LOG_KEY) || '[]');
+    if (Array.isArray(raw)) S.toolLog = raw.filter(x => x && x.name);
+  } catch { }
+}
+function toolLogSave() {
+  try { localStorage.setItem(TOOL_LOG_KEY, JSON.stringify(S.toolLog)); } catch { }
+}
+function toolLogPush(rec) {
+  S.toolLog.push(rec);
+  if (S.toolLog.length > TOOL_LOG_MAX) S.toolLog.splice(0, S.toolLog.length - TOOL_LOG_MAX);
+  toolLogSave();
+}
+
+/* 参数里挑最有信息量的那一个当标题，没有就摊平前几个键 */
+function toolArgBrief(args) {
+  let a = args;
+  if (typeof a === 'string') {
+    try { a = JSON.parse(a); } catch { return String(a).slice(0, 90); }
+  }
+  if (!a || typeof a !== 'object') return '';
+  for (const k of ['path', 'cmd', 'command', 'pattern', 'query', 'url', 'text', 'name', 'mode']) {
+    if (typeof a[k] === 'string' && a[k]) return a[k].slice(0, 96);
+  }
+  return Object.keys(a).slice(0, 3).map(k => k + '=' + String(a[k]).slice(0, 28)).join(' ');
+}
+function toolStatusText(rec) {
+  if (rec.status === 'running') return '执行中';
+  if (rec.status === 'ok') return rec.sec ? rec.sec.toFixed(2) + 's' : '完成';
+  return ({ failed: '失败', blocked: '被拒', unknown: '未知', exception: '异常' }[rec.status]) || '失败';
+}
+
+/* 一条工具调用：details 展开看参数 + 输出 */
+function toolCard(rec, live) {
+  const det = el('details', 'tool-call');
+  const sum = el('summary');
+  const status = el('span', 'tc-status ' + (rec.status === 'running' ? 'run' : (rec.status === 'ok' ? 'ok' : 'fail')));
+  sum.appendChild(el('span', 'tc-name', rec.name || 'tool'));
+  sum.appendChild(el('span', 'tc-arg', rec.brief || ''));
+  sum.appendChild(el('span', 'tc-meta', ''));
+  sum.appendChild(status);
+  const body = el('div', 'tc-body');
+  det.append(sum, body);
+  const view = { det, sum, body, status, meta: sum.querySelector('.tc-meta'), rec };
+  toolCardPaint(view);
+  if (live) det.open = false;
+  return view;
+}
+function toolCardPaint(view) {
+  const rec = view.rec;
+  view.status.className = 'tc-status ' + (rec.status === 'running' ? 'run' : (rec.status === 'ok' ? 'ok' : 'fail'));
+  view.status.textContent = toolStatusText(rec);
+  view.meta.textContent = rec.chars ? rec.chars + ' 字' : '';
+  const bits = [];
+  if (rec.args) bits.push('参数：' + rec.args);
+  if (rec.output) bits.push('输出：' + rec.output);
+  view.body.textContent = bits.join('\n\n') || '（没有输出）';
+}
+/* 记录面板开着时实时跟着更新，但别把滚动位置弄丢 */
+function toolPanelRedraw() {
+  if (typeof paintDrawer !== 'function' || DRAWER.current !== 'tools') return;
+  const body = $('#drawer-body');
+  const top = body ? body.scrollTop : 0;
+  paintDrawer();
+  if (body) body.scrollTop = top;
+}
+
+/* 工具开始：日志里落一条 running，正文边上落一张卡片 */
+function toolBegin(m) {
+  const rec = {
+    id: 't' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6),
+    ts: Date.now(),
+    session: S.session || '',
+    name: m.name || 'tool',
+    args: String(m.args || '').slice(0, 400),
+    brief: toolArgBrief(m.args),
+    status: 'running',
+    sec: 0, chars: 0, output: '',
+  };
+  toolLogPush(rec);
+  if (!LIVE.node) ensureLiveNode();
+  const host = LIVE.node && LIVE.node.querySelector('.body');
+  if (host) {
+    const view = toolCard(rec, true);
+    host.appendChild(view.det);
+    LIVE.toolPending.push(view);
+  }
+  stick();
+  toolPanelRedraw();
+}
+
+/* 工具结束：认领最近一个同名的 running 卡片（seq 每轮从 1 数起，不能当唯一键） */
+function toolEnd(m) {
+  const name = m.name || 'tool';
+  let idx = -1;
+  for (let i = LIVE.toolPending.length - 1; i >= 0; i--) {
+    if (LIVE.toolPending[i].rec.name === name) { idx = i; break; }
+  }
+  if (idx < 0 && LIVE.toolPending.length) idx = LIVE.toolPending.length - 1;
+  let rec;
+  if (idx >= 0) {
+    const view = LIVE.toolPending.splice(idx, 1)[0];
+    rec = view.rec;
+    rec.status = m.status || 'unknown';
+    rec.sec = m.sec || 0;
+    rec.chars = m.chars || 0;
+    rec.output = String(m.output || '').slice(0, 800);
+    toolCardPaint(view);
+  } else {
+    // 没收到 begin（中途刷新之类）：补一条收尾记录，记录面板里不至于丢掉
+    rec = {
+      id: 't' + Date.now().toString(36), ts: Date.now(), session: S.session || '',
+      name, args: '', brief: toolArgBrief(m.args), status: m.status || 'unknown',
+      sec: m.sec || 0, chars: m.chars || 0, output: String(m.output || '').slice(0, 800),
+    };
+    toolLogPush(rec);
+  }
+  toolLogSave(); // begin 时 push 的就是这个对象，改完就地落盘
+  toolPanelRedraw();
+}
+
 /* ---------------- 流式 ---------------- */
 function ensureLiveNode() {
   if (LIVE.node) return;
@@ -2001,6 +2372,7 @@ function ensureLiveNode() {
   LIVE.rsum = null;
   LIVE.reasonTouched = false;
   LIVE.started = false;
+  LIVE.toolPending = [];
   pinned = true;
   stick(true);
 }
@@ -2150,6 +2522,12 @@ onEvent((m) => {
     case 'progress':
       if (!LIVE.node) showTyping('正在想');
       break;
+    case 'tool_begin':
+      toolBegin(m);
+      break;
+    case 'tool_end':
+      toolEnd(m);
+      break;
     case 'status':
       if (m.d && /compact|summar/i.test(m.d)) showTyping('整理记忆');
       break;
@@ -2282,14 +2660,17 @@ function paintComposer() {
     ? '先创建一个角色…'
     : (S.busy ? '正在回应… 点右边停止' : '说点什么…（Enter 发送，Shift+Enter 换行）');
   $('#btn-mic').disabled = !S.asr.enabled || none;
-  $('#btn-mic').title = S.asr.enabled ? '点击开始 / 结束录音' : '还没有配置语音识别服务';
+  $('#btn-mic').title = S.asr.enabled
+    ? `点击开始 / 结束录音${S.mic_hotkey ? `；按住 ${S.mic_hotkey} 说话` : ''}`
+    : '还没有配置语音识别服务';
   $('#btn-mic').classList.toggle('rec', S.recording);
+  if (typeof paintThink === 'function') paintThink();
   // 发送键：回合中它永远是「停止」；平时文字与附件都空才置灰
   const hasText = !!input.value.trim();
   btn.disabled = !S.busy && (none || (!hasText && !ATTACH.items.length));
   const hint = $('#composer-hint');
   if (S.recording) {
-    hint.textContent = '正在听…再点一次结束，随后自动转写';
+    hint.textContent = `正在听…${S.mic_hotkey ? `松开 ${S.mic_hotkey}` : '再点一次'}结束，随后自动转写`;
     hint.classList.add('rec');
   } else if (ATTACH.items.length) {
     hint.textContent = '已选 ' + ATTACH.items.length + ' / ' + ATTACH.max + ' 个附件 · Enter 发送';
@@ -2361,6 +2742,7 @@ async function speakText(text) {
 const MIC = {
   stream: null, rec: null, chunks: [], ctx: null, analyser: null, raf: 0,
   t0: 0, host: false,
+  hold: false, // 这次录音是「按住说话」起的：太短就静默丢弃，不弹提示
 };
 
 function micError(e) {
@@ -2466,12 +2848,76 @@ async function stopBrowserMic() {
 }
 
 async function transcribeBlob(blob, ext) {
+  ({ blob, ext } = await prepareUpload(blob, ext));
   const buf = new Uint8Array(await blob.arrayBuffer());
   let bin = '';
   for (let i = 0; i < buf.length; i += 0x8000)
     bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
   // 转写结果由服务端的 asr 事件送回（02-chat 负责填框 / 自动发送）
   await cmd('voice.transcribe', { data_b64: btoa(bin), ext });
+}
+
+/* ---------------- 上传格式（设置 → 语音识别 → 上传格式） ----------------
+   「wav」时把字节真的换成 WAV，而不是只改扩展名：FunASR / SenseVoice /
+   faster-whisper 这类服务端大多只认 wav，浏览器录出来的却是 webm/opus。
+   解码 + 重采样都在页面里做，宿主不需要装 ffmpeg。
+   转不动就按原格式上传 —— 宁可发出去，也不要因为格式偏好整条丢掉。 */
+function asrUploadFormat() {
+  const f = (S.asr && S.asr.upload_format) || 'auto';
+  return f === 'auto' ? '' : f;
+}
+
+function encodeWavPcm16(samples, rate) {
+  const n = samples.length;
+  const buf = new ArrayBuffer(44 + n * 2);
+  const v = new DataView(buf);
+  const tag = (off, s) => { for (let i = 0; i < s.length; i++) v.setUint8(off + i, s.charCodeAt(i)); };
+  tag(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); tag(8, 'WAVE');
+  tag(12, 'fmt '); v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true);           // PCM
+  v.setUint16(22, 1, true);           // 单声道
+  v.setUint32(24, rate, true);
+  v.setUint32(28, rate * 2, true);    // 字节率
+  v.setUint16(32, 2, true);           // 块对齐
+  v.setUint16(34, 16, true);          // 位深
+  tag(36, 'data'); v.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    v.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return new Blob([buf], { type: 'audio/wav' });
+}
+
+async function toWavBlob(blob, rate = 16000) {
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  const Off = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  if (!Ctx || !Off || !blob || !blob.size) return null;
+  let ctx = null;
+  try {
+    ctx = new Ctx();
+    const pcm = await ctx.decodeAudioData(await blob.arrayBuffer());
+    const frames = Math.max(1, Math.ceil(pcm.duration * rate));
+    const off = new Off(1, frames, rate);
+    const src = off.createBufferSource();
+    src.buffer = pcm;
+    src.connect(off.destination);
+    src.start();
+    const out = await off.startRendering();
+    return encodeWavPcm16(out.getChannelData(0), rate);
+  } catch (e) {
+    console.warn('wav transcode failed:', e && e.message);
+    return null;
+  } finally {
+    if (ctx) { try { ctx.close(); } catch { } }
+  }
+}
+
+/* 按配置把要上传的音频准备好；返回 {blob, ext}。 */
+async function prepareUpload(blob, ext) {
+  if (asrUploadFormat() !== 'wav' || ext === 'wav') return { blob, ext };
+  const wav = await toWavBlob(blob);
+  if (!wav) { toast('转成 WAV 失败，按原格式上传', 'err', 4000); return { blob, ext }; }
+  return { blob: wav, ext: 'wav' };
 }
 
 async function toggleMic() {
@@ -2481,8 +2927,10 @@ async function toggleMic() {
   return startRecording();
 }
 
-async function startRecording() {
+async function startRecording(fromHold) {
+  if (S.recording) return;
   stopAudio();
+  MIC.hold = !!fromHold;
   try {
     await startBrowserMic();
     MIC.host = false;
@@ -2496,20 +2944,29 @@ async function startRecording() {
       // 两条路都走不通：说清楚原因，并指向不需要麦克风的通道
       console.warn('host mic fallback failed:', e2 && e2.message);
       toast(why + '。可以插上麦克风再试，或在设置 → 语音识别里用「上传音频转写」。', 'err', 6000);
+      MIC.hold = false;
       return;
     }
   }
   S.recording = true;
   paintComposer();
+  // 按下的瞬间就松开了（getUserMedia 比较慢）：别再让麦克风开着
+  if (fromHold && HOLD.wantStop) {
+    HOLD.wantStop = false;
+    stopRecording();
+  }
 }
 
 async function stopRecording() {
+  // hold 起来的那次如果只有零点几秒，是按住说话的轻点，静默丢掉就行
+  const wasHold = MIC.hold;
+  MIC.hold = false;
   S.recording = false;
   paintComposer();
   if (MIC.host) {
     try {
       const r = await cmd('voice.record.stop');
-      if (r.seconds && r.seconds < 1) { toast('太短了，再说一次？'); return; }
+      if (r.seconds && r.seconds < 1) { if (!wasHold) toast('太短了，再说一次？'); return; }
       showTyping('正在听写');
       await cmd('voice.transcribe', { path: r.path });
     } catch (e) {
@@ -2526,7 +2983,10 @@ async function stopRecording() {
     toast(micError(e), 'err');
     return;
   }
-  if (!clip || clip.secs < 0.6 || !clip.blob.size) { toast('太短了，再说一次？'); return; }
+  if (!clip || clip.secs < 0.6 || !clip.blob.size) {
+    if (!wasHold) toast('太短了，再说一次？');
+    return;
+  }
   try {
     showTyping('正在听写');
     await transcribeBlob(clip.blob, clip.ext);
@@ -2543,6 +3003,114 @@ window.addEventListener('beforeunload', () => {
   stopLevel();
 });
 
+/* ---------------- 按住说话 ----------------
+   绑定的键（默认 Alt）按住开始录、松开结束 —— 对讲机的手感，也不怕忘了关。
+   键在「设置 → 偏好 → 麦克风快捷键」里录，存后端 agent.json（换端口 / 换浏览器都跟着走）。
+
+   两个必须处理的坑：
+   1. 单独按 Alt 会被系统抢（Windows 菜单、浏览器焦点环）。所以按下后先等 180ms
+      再真开录：这期间又按了别的键（Alt+Tab / Alt+F4 这类组合）就撤销，不录音。
+   2. 窗口失焦收不到 keyup。blur / visibilitychange 时主动收尾，别把麦克风留在开着的状态。
+*/
+const MOD_KEYS = { Alt: 'Alt', Control: 'Ctrl', Shift: 'Shift', Meta: 'Cmd' };
+const HOTKEY = { capture: false }; // 设置里正在录快捷键时，这里的监听让路
+
+function keyLabel(e) {
+  const k = e.key;
+  if (MOD_KEYS[k]) return MOD_KEYS[k];
+  if (k === ' ') return 'Space';
+  if (k === 'Escape') return 'Esc';
+  if (k && k.length === 1) return k.toUpperCase();
+  return k || '';
+}
+
+/* 从键盘事件算「完整组合」：修饰键在前、主键在后，顺序固定，两边比较才可靠。
+   修饰键自己按下时（e.key=Alt）不算主键，只算修饰键 —— 于是得到单键 "Alt"。 */
+function comboOf(e) {
+  const parts = [];
+  if (e.ctrlKey) parts.push('Ctrl');
+  if (e.shiftKey) parts.push('Shift');
+  if (e.altKey) parts.push('Alt');
+  if (e.metaKey) parts.push('Cmd');
+  const isMod = Object.hasOwn(MOD_KEYS, e.key);
+  if (!isMod) {
+    const main = keyLabel(e);
+    if (main) parts.push(main);
+  }
+  return parts.join('+');
+}
+
+/* keyup 时修饰键标志已经复位（松开 Alt 的那一刻 altKey 已经是 false），
+   不补回去就永远匹配不上「Alt」这类单键绑定 */
+function comboOfRelease(e) {
+  const fake = { key: e.key, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, altKey: e.altKey, metaKey: e.metaKey };
+  if (e.key === 'Alt') fake.altKey = true;
+  else if (e.key === 'Control') fake.ctrlKey = true;
+  else if (e.key === 'Shift') fake.shiftKey = true;
+  else if (e.key === 'Meta') fake.metaKey = true;
+  return comboOf(fake);
+}
+
+const HOLD = { down: false, started: false, pending: 0, wantStop: false };
+
+function holdCancel() {
+  if (HOLD.pending) { clearTimeout(HOLD.pending); HOLD.pending = 0; }
+  HOLD.down = false;
+  HOLD.started = false;
+  HOLD.wantStop = false;
+}
+
+function holdRelease() {
+  if (HOLD.pending) { // 还没到 180ms：这次只是轻点，什么都不做
+    clearTimeout(HOLD.pending);
+    HOLD.pending = 0;
+    HOLD.down = false;
+    HOLD.started = false;
+    return;
+  }
+  HOLD.down = false;
+  if (!HOLD.started) return;
+  HOLD.started = false;
+  HOLD.wantStop = true;
+  if (S.recording) stopRecording();
+  // 还在等 getUserMedia：startRecording 收尾时会看到 wantStop
+}
+
+document.addEventListener('keydown', (e) => {
+  if (HOTKEY.capture) return;
+  const hk = S.mic_hotkey;
+  if (!hk || !S.asr.enabled) return;   // 没配语音识别就别抢键
+  if (comboOf(e) !== hk) {
+    if (HOLD.down && !HOLD.started) holdCancel(); // 按的是组合键（Alt+Tab…），撤销
+    return;
+  }
+  if (HOLD.down) return;               // 长按的自动重复
+  e.preventDefault();
+  HOLD.down = true;
+  HOLD.started = false;
+  HOLD.wantStop = false;
+  HOLD.pending = setTimeout(() => {
+    HOLD.pending = 0;
+    if (!HOLD.down) return;
+    HOLD.started = true;
+    if (!S.recording) startRecording(true);
+  }, 180);
+}, true);
+
+document.addEventListener('keyup', (e) => {
+  if (HOTKEY.capture || !HOLD.down) return;
+  const hk = S.mic_hotkey;
+  if (!hk || comboOfRelease(e) !== hk) return;
+  e.preventDefault();
+  holdRelease();
+}, true);
+
+// 切窗口 / 最小化：keyup 收不到，主动收尾
+window.addEventListener('blur', () => { if (HOLD.down) holdRelease(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && HOLD.down) holdRelease();
+});
+
 /* ---------------- 上传音频转写（没有麦克风时的备用通道） ---------------- */
 function pickAudio() {
   if (!S.asr.enabled) { toast('还没有配置语音识别服务', 'err'); return; }
@@ -2553,16 +3121,15 @@ $('#audio-file').addEventListener('change', async (e) => {
   e.target.value = '';
   if (!f) return;
   if (f.size > 24 * 1024 * 1024) { toast('音频太大（上限 24MB）', 'err'); return; }
-  const buf = new Uint8Array(await f.arrayBuffer());
+  const ext0 = (f.name.split('.').pop() || 'wav').toLowerCase();
+  const { blob, ext } = await prepareUpload(f, ext0);
+  const buf = new Uint8Array(await blob.arrayBuffer());
   let bin = '';
   for (let i = 0; i < buf.length; i += 0x8000)
     bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
   try {
     showTyping('正在听写');
-    const r = await cmd('voice.transcribe', {
-      data_b64: btoa(bin),
-      ext: (f.name.split('.').pop() || 'wav').toLowerCase(),
-    });
+    const r = await cmd('voice.transcribe', { data_b64: btoa(bin), ext });
     hideTyping();
     if (r.text) {
       $('#input').value = r.text;
@@ -2697,6 +3264,10 @@ function buildDrawer() {
   if (!DRAWER.build) return;
   const body = $('#drawer-body');
   body.innerHTML = '';
+  // 底栏归每个页面自己管：重建时先清空，要常驻的页面（舞台）会重新挂上来
+  const foot = $('#drawer-foot');
+  foot.innerHTML = '';
+  foot.classList.add('hidden');
   DRAWER.build(body);
 }
 function paintDrawer() {
@@ -2708,6 +3279,8 @@ function paintDrawer() {
 function closeDrawer() {
   $('#drawer').classList.add('hidden');
   $('#scrim').classList.add('hidden');
+  $('#drawer-foot').innerHTML = '';
+  $('#drawer-foot').classList.add('hidden');
   DRAWER_STACK.length = 0;
   DRAWER.current = null;
   DRAWER.build = null;
@@ -3044,21 +3617,39 @@ async function openSessions() {
     const sect = el('div', 'sect');
     sect.appendChild(el('div', 'sect-h', '这个角色的会话'));
     if (!S.sessions.length) sect.appendChild(el('div', 'empty', '还没有记录'));
+    // 顺序由服务端给：当前会话 → 有内容的（新到旧）→ 空壳
     for (const s of S.sessions) {
-      const row = el('div', 'list-row');
+      const row = el('div', 'list-row' + (s.title ? '' : ' dim') + (s.current ? ' on' : ''));
       const grow = el('div', 'grow');
-      grow.appendChild(el('div', null, s.current ? '当前会话' : '历史会话'));
-      grow.appendChild(el('div', 'when', `${fmtDay(s.mtime)} · ${s.id.slice(0, 18)}…`));
-      if (s.current) grow.style.color = 'var(--accent)';
+      const line = el('div', 'sess-t');
+      line.appendChild(el('span', 'sess-name', s.title || '空会话'));
+      if (s.current) line.appendChild(el('span', 'badge ok', '当前'));
+      grow.appendChild(line);
+      grow.appendChild(el('div', 'when', fmtStamp(s.mtime)));
       const del = el('button', 'del');
       del.innerHTML = icon('trash');
-      del.onclick = async () => {
-        if (!confirm('删除这条会话记录？')) return;
-        await cmd('session.delete', { id: s.id });
-        await refreshState();
-        openSessions();
+      del.title = '删除这条会话记录';
+      del.onclick = async (e) => {
+        e.stopPropagation(); // 别让「删除」冒泡成「切到这条会话」
+        if (!confirm(s.current ? '删除当前会话？上下文会一起清空。' : '删除这条会话记录？')) return;
+        try {
+          await cmd('session.delete', { id: s.id });
+          await refreshState();
+          openSessions();
+        } catch (err) { toast(err.message, 'err'); }
       };
-      row.append(grow, del);
+      // 导出：和 cell.cpp 的 /export 同一个渲染器（无脚本、无外部资源）
+      const exp = el('button', 'del');
+      exp.innerHTML = icon('download');
+      exp.title = '导出为 HTML';
+      exp.onclick = async (e) => {
+        e.stopPropagation();
+        try {
+          const r = await cmd('session.export', { id: s.id, open: true });
+          toast(`已导出 ${r.messages} 条消息`, 'ok', 3200);
+        } catch (err) { toast(err.message, 'err'); }
+      };
+      row.append(grow, exp, del);
       if (!s.current) {
         row.style.cursor = 'pointer';
         row.onclick = async () => {
@@ -3073,17 +3664,135 @@ async function openSessions() {
     }
     body.appendChild(sect);
     body.appendChild(el('div', 'btn-row', actionBtn('开一条新会话', async () => {
+      const before = S.session;
       await cmd('session.new');
       await refreshState();
       closeDrawer();
+      // 当前会话一句话都没说时后端不会新建（免得攒一堆空壳），说一声免得以为没反应
+      if (S.session === before) toast('这条还是空的，已经在里面了');
     }, 'btn primary')));
   });
+}
+
+/* ---------------- 工具调用记录 ---------------- */
+function openToolLog() {
+  openDrawer('工具调用', 'tools', (body) => {
+    const n = S.toolLog.length;
+    const mine = S.session ? S.toolLog.filter(r => r.session === S.session).length : n;
+    const sect = el('div', 'sect');
+    sect.appendChild(el('div', 'sect-h', '调用记录'));
+
+    const bar = el('div', 'log-bar');
+    bar.appendChild(el('span', 'log-n', n
+      ? `最近 ${n} 次 · 本次会话 ${mine} 次`
+      : '还没有调用'));
+    if (n) {
+      const clear = el('button', 'btn sm ghost', '清空');
+      clear.onclick = () => {
+        S.toolLog = [];
+        toolLogSave();
+        buildDrawer();
+      };
+      bar.appendChild(clear);
+    }
+    sect.appendChild(bar);
+
+    if (!n) {
+      sect.appendChild(el('div', 'empty', '她用工具的时候（读文件、跑命令、搜内容），这里会一条条记下来。'));
+    }
+    for (const rec of S.toolLog.slice().reverse()) {
+      const row = el('div', 'tool-log-row');
+      const when = el('div', 'tl-when');
+      when.textContent = fmtStamp((rec.ts || 0) / 1000) +
+        (rec.session && S.session && rec.session !== S.session ? ' · 别的会话' : '');
+      row.appendChild(when);
+      row.appendChild(toolCard(rec).det);
+      sect.appendChild(row);
+    }
+    body.appendChild(sect);
+    const tip = el('div', 'tip',
+      '记录只留最近 300 条，存在这台机器上（localStorage）。'
+      + '点开每一条能看到参数和输出；历史正文里不带工具痕迹，所以要回看只能在这里。');
+    tip.style.cssText = 'font-size:11px;color:var(--faint);line-height:1.7';
+    body.appendChild(tip);
+  });
+}
+
+/* ---------------- 侧边栏收纳 ----------------
+   收起后 rail 只剩一条 22px 的窄边（把手箭头反转），状态记在 localStorage。 */
+const RAIL_KEY = 'agent.rail.off';
+
+function applyRailState() {
+  const off = localStorage.getItem(RAIL_KEY) === '1';
+  $('#app').classList.toggle('rail-off', off);
+  const b = $('#btn-rail');
+  if (b) b.title = off ? '展开侧边栏' : '收起侧边栏';
+}
+function toggleRail() {
+  const off = !$('#app').classList.contains('rail-off');
+  localStorage.setItem(RAIL_KEY, off ? '1' : '0');
+  applyRailState();
+}
+
+/* ---------------- 思考强度（输入栏里的胶囊） ----------------
+   五档，点一下在按钮上方弹出选择。档位存在后端（think.set），所以刷新、
+   换设备都跟着走；按钮本身只是它的显示。 */
+let THINK_MENU = null;
+
+function closeThinkMenu() {
+  if (!THINK_MENU) return;
+  THINK_MENU.remove();
+  THINK_MENU = null;
+  document.removeEventListener('pointerdown', thinkMenuOutside, true);
+}
+function thinkMenuOutside(e) {
+  if (!THINK_MENU) return;
+  if (THINK_MENU.contains(e.target) || e.target === $('#btn-think') || $('#btn-think').contains(e.target)) return;
+  closeThinkMenu();
+}
+
+function openThinkMenu() {
+  if (THINK_MENU) { closeThinkMenu(); return; }
+  const anchor = $('#btn-think');
+  const menu = el('div', 'think-menu');
+  menu.appendChild(el('div', 'think-hd', '思考强度'));
+  THINK_ZH.forEach((label, i) => {
+    const b = el('button', 'think-opt' + (i === S.thinking ? ' on' : ''), label);
+    b.onclick = async () => {
+      closeThinkMenu();
+      if (i === S.thinking) return;
+      try {
+        await cmd('think.set', { level: i });
+        await refreshState();
+      } catch (e) { toast(e.message, 'err'); }
+    };
+    menu.appendChild(b);
+  });
+  document.body.appendChild(menu);
+  const r = anchor.getBoundingClientRect();
+  menu.style.left = Math.round(r.left - 6) + 'px';
+  menu.style.bottom = Math.round(window.innerHeight - r.top + 8) + 'px';
+  THINK_MENU = menu;
+  // 捕获阶段：点面板外先关掉，别让它顺手触发别的按钮
+  setTimeout(() => document.addEventListener('pointerdown', thinkMenuOutside, true), 0);
+}
+
+function paintThink() {
+  const b = $('#btn-think');
+  if (!b) return;
+  const lv = THINK_ZH[S.thinking] || '关';
+  b.classList.toggle('on', (S.thinking || 0) > 0);
+  $('#think-lv').textContent = lv;
+  b.title = `思考强度：${lv}${S.thinking ? '（关掉更快，开高更慢）' : '（点一下调）'}`;
 }
 
 /* ---------------- 全局按钮 ---------------- */
 function wireGlobal() {
   $('#btn-send').onclick = () => (S.busy ? stopTurn() : sendCurrent());
   $('#btn-mic').onclick = toggleMic;
+  $('#btn-think').onclick = openThinkMenu;
+  $('#btn-rail').onclick = toggleRail;
+  $('#btn-tools').onclick = openToolLog;
   $('#btn-voice').onclick = async () => {
     try {
       const r = await cmd('ui.pref', { voice_reply: !S.voice_reply });
@@ -3133,6 +3842,8 @@ const SETTINGS_MODULES = [
   { key: 'im', name: 'IM 接入', sub: () => imStatusText(), build: () => imSection() },
   { key: 'stickers', name: '表情包', sub: () => stickerStatusText(), build: () => stickerSection() },
   { key: 'pref', name: '偏好', sub: () => `${S.voice_reply ? '自动朗读' : '手动朗读'} · ${S.autoallow ? '工具自动执行' : '工具逐次确认'}`, build: () => prefSection() },
+  { key: 'prompt', name: '提示词', sub: () => promptSummary(), build: () => promptSection() },
+  { key: 'status', name: '运行状态', sub: () => statusSummary(), build: () => statusSection() },
 ];
 
 /* 表情包列表由服务端随 state 一起下发；打开设置时再拉一次，防止别处加过没刷新 */
@@ -3305,6 +4016,18 @@ function modelSection() {
 }
 
 /* ---------------- 语音服务 ---------------- */
+/* ASR 上传格式：服务端认什么就发什么。
+   wav 由页面自己转（WebAudio 解码 + 重采样，不需要宿主装东西），其余格式
+   宿主会用 ffmpeg 转 —— 所以只有服务端非要 mp3/m4a 时才需要它。 */
+const ASR_UPLOAD_FORMATS = [
+  ['auto', '跟随文件（原样上传）'],
+  ['wav', 'WAV 16k 单声道（页面转码）'],
+  ['mp3', 'MP3（需要 ffmpeg）'],
+  ['m4a', 'M4A（需要 ffmpeg）'],
+  ['ogg', 'OGG（需要 ffmpeg）'],
+  ['flac', 'FLAC（需要 ffmpeg）'],
+];
+
 function serviceSection(which, svc) {
   const isTts = which === 'tts';
   const sect = el('div', 'sect');
@@ -3344,6 +4067,27 @@ function serviceSection(which, svc) {
           field('语言', mk('language', 'zh')),
           field('提示词', mk('prompt', '可选：人名、专有名词，帮助识别')),
         );
+        // 上传形态：以前这三项是写死的（file / 按扩展名 / 无额外字段），
+        // 服务端不认就只能改代码。现在都摆出来。
+        const uf = document.createElement('select');
+        for (const [v, t] of ASR_UPLOAD_FORMATS) {
+          const o = document.createElement('option');
+          o.value = v; o.textContent = t;
+          if ((state.upload_format || 'auto') === v) o.selected = true;
+          uf.appendChild(o);
+        }
+        uf.onchange = () => { state.upload_format = uf.value; };
+        fields.append(
+          field('上传格式', uf,
+            '录音默认是 webm/opus。服务端只认 WAV 时选 wav —— 页面会把字节转成 16k 单声道，'
+            + '不是改个后缀糊过去；选 mp3/m4a/ogg/flac 则由宿主调用 ffmpeg。'),
+          field('文件字段名', mk('upload_field', 'file'),
+            'multipart 里音频那一段的名字。OpenAI 是 file，个别实现是 audio。'),
+          field('附加表单字段', mk('upload_extra', 'format=wav&channel=1'),
+            '服务端要额外的表单字段就填这里，k=v 用 & 或换行分隔。'),
+          field('MIME 覆盖', mk('upload_mime', 'audio/wav'),
+            '留空按格式自动推导；只有服务端认死 Content-Type 时才需要。'),
+        );
       }
       fields.append(field('API Key', mk('key', 'sk-…', 'password'), state.has_key ? '已保存；留空则保持不变。' : ''));
     } else if (state.kind === 'http' && isTts) {
@@ -3372,7 +4116,8 @@ function serviceSection(which, svc) {
     }
     if (!isTts) fields.appendChild(el('div', 'tip',
       '麦克风由页面直接采集（getUserMedia + MediaRecorder），录音不经过宿主；'
-      + '窗口只对 127.0.0.1 的页面放行麦克风权限。'));
+      + '窗口只对 127.0.0.1 的页面放行麦克风权限。'
+      + '录音只在临时目录里过一遍（有的 ASR 只认文件），转写完立刻删掉 —— 本地不留档。'));
     // 保存键一直在：关掉服务也要能存下来（否则「关闭」这个选择没法生效）
     const row = el('div', 'btn-row');
     row.appendChild(actionBtn('保存', async () => {
@@ -3432,7 +4177,33 @@ function prefSection() {
     const r = await cmd('ui.pref', { asr_auto_send: on });
     S.asr_auto_send = r.asr_auto_send;
   }));
-  // 这两个是 app-core 新加的能力：全工具常开，但要不要逐次审批由这里决定
+
+  // ---- 麦克风快捷键（按住说话）----
+  // 键存在后端 agent.json：换端口 / 换浏览器 / 换设备都跟着走。
+  const hkRow = el('div', 'hotkey-row');
+  const hkMain = el('div', 'hotkey-main');
+  hkMain.appendChild(el('div', 'k', '麦克风快捷键'));
+  hkMain.appendChild(el('div', 'd', '按住说话、松开结束。点右边的键位重新录。'));
+  const hkKey = el('button', 'hotkey-key', S.mic_hotkey || '未绑定');
+  hkKey.title = '点击重新录制';
+  hkKey.onclick = () => captureHotkey(hkKey);
+  const hkClr = el('button', 'del hotkey-clr', '');
+  hkClr.innerHTML = icon('x');
+  hkClr.title = '清除绑定（麦克风按钮仍然能点）';
+  hkClr.onclick = async () => {
+    try {
+      const r = await cmd('ui.pref', { mic_hotkey: '' });
+      S.mic_hotkey = r.mic_hotkey || '';
+      await refreshState();
+      toast('已清除快捷键', 'ok');
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  hkRow.append(hkMain, hkKey, hkClr);
+  sect.appendChild(hkRow);
+  sect.appendChild(el('div', 'tip hotkey-tip',
+    '默认 Alt。单独按 Alt 在部分浏览器里会被菜单栏吃掉 —— 按住没反应就换成 Alt+M / F2 这类组合。'
+    + '录音时要一直按着，松开即结束并开始转写。'));
+
   sect.appendChild(switchRow('允许工具自动执行（autoallow）',
     '开启后，她调用工具（读写文件、跑命令、查资料）不需要你逐次点确认；'
     + '关掉则每次都要批准，更安全但更打断。',
@@ -3446,6 +4217,14 @@ function prefSection() {
     S.compact_auto, async (on) => {
       const r = await cmd('ui.pref', { compact_auto: on });
       S.compact_auto = r.compact_auto !== undefined ? !!r.compact_auto : on;
+    }));
+  // 不是「思考强度」：那个是模型的 CoT 档位，这个是给她的自由度
+  sect.appendChild(switchRow('允许胡思乱想',
+    '开启后她可以走神、联想、说些没用的话，不必每句都在回答问题；'
+    + '关掉则每句都冲着你来。写进系统提示词，下一句就生效。',
+    S.free_think, async (on) => {
+      const r = await cmd('ui.pref', { free_think: on });
+      S.free_think = r.free_think !== undefined ? !!r.free_think : on;
     }));
 
   if (S.tools) {
@@ -3543,6 +4322,280 @@ function stickerSection() {
     + '全局的 <code>.agent/stickers/</code> 对所有角色可见。';
   sect.appendChild(tip);
   return sect;
+}
+
+/* 录一个快捷键。纯修饰键（Alt / Ctrl…）也能单独绑：按下时先显示，
+   松开才确认 —— 否则想绑 Alt 永远会被当成「组合键的前缀」。 */
+function captureHotkey(btn) {
+  if (HOTKEY.capture) return;
+  HOTKEY.capture = true;
+  const prev = btn.textContent;
+  btn.classList.add('capturing');
+  btn.textContent = '按下想要的键…';
+  let pending = '';
+
+  const stop = () => {
+    document.removeEventListener('keydown', onKey, true);
+    document.removeEventListener('keyup', onUp, true);
+    HOTKEY.capture = false;
+    btn.classList.remove('capturing');
+  };
+  const finish = async (label) => {
+    stop();
+    if (!label) { btn.textContent = prev; return; }
+    try {
+      const r = await cmd('ui.pref', { mic_hotkey: label });
+      S.mic_hotkey = r.mic_hotkey !== undefined ? r.mic_hotkey : label;
+      await refreshState(); // 抽屉会重建，键位行跟着换成新值
+      toast('已绑定：' + (S.mic_hotkey || '无'), 'ok');
+    } catch (e) {
+      btn.textContent = prev;
+      toast(e.message, 'err');
+    }
+  };
+  const onKey = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.key === 'Escape') { stop(); btn.textContent = prev; return; }
+    if (MOD_KEYS[e.key]) { // 纯修饰键：先摆出来，等松开确认
+      pending = comboOf(e);
+      btn.textContent = pending || '…';
+      return;
+    }
+    finish(comboOf(e));
+  };
+  const onUp = (e) => {
+    if (!MOD_KEYS[e.key] || !pending) return;
+    e.preventDefault();
+    e.stopPropagation();
+    finish(comboOfRelease(e) || pending);
+  };
+  document.addEventListener('keydown', onKey, true);
+  document.addEventListener('keyup', onUp, true);
+}
+
+/* ---------------- 提示词分层 ----------------
+   system prompt 不是一段硬编码文本，而是若干层拼起来的（core / identity /
+   relation / memory / 演出约定…）。这里读 prompt.get 的快照：每层的定义、
+   当前值、以及合成后的全文；改一层就重新拉一次，字数变化一眼看得见。 */
+let PROMPT_DATA = null;
+
+function promptSummary() {
+  if (!PROMPT_DATA) return '分层注入';
+  const on = PROMPT_DATA.layers.filter(l => l.on).length;
+  return `${on}/${PROMPT_DATA.layers.length} 层 · ${PROMPT_DATA.chars} 字`;
+}
+
+async function promptReload() {
+  const pid = S.active;
+  const r = await cmd('prompt.get');
+  r.pid = pid;
+  PROMPT_DATA = r;
+  if (DRAWER.current === 'settings/prompt') paintDrawer();
+}
+
+function promptSection() {
+  const wrap = el('div');
+  if (PROMPT_DATA && PROMPT_DATA.pid !== S.active) PROMPT_DATA = null; // 换了角色，读数作废
+
+  if (!PROMPT_DATA) {
+    const empty = el('div', 'empty', '正在读取…');
+    wrap.appendChild(empty);
+    cmd('prompt.get').then((r) => {
+      r.pid = S.active;
+      PROMPT_DATA = r;
+      if (DRAWER.current === 'settings/prompt') paintDrawer();
+    }).catch((e) => { empty.textContent = '读不到提示词：' + e.message; });
+    return wrap;
+  }
+
+  // ---- 合成结果 ----
+  const head = el('div', 'sect');
+  head.appendChild(el('div', 'sect-h', '合成结果'));
+  const card = el('div', 'card on');
+  card.appendChild(el('div', 'card-name', `system · ${PROMPT_DATA.chars} 字`));
+  card.appendChild(el('div', 'card-sub',
+    '每次对话只有这一条 system 消息（msg[0]）。改动下一个回合生效。'));
+  head.appendChild(card);
+
+  const det = document.createElement('details');
+  det.className = 'pl-edit';
+  det.appendChild(el('summary', null, '查看全文'));
+  det.appendChild(el('pre', 'prompt-pre', PROMPT_DATA.system || '（空）'));
+  head.appendChild(det);
+
+  const row = el('div', 'btn-row');
+  row.appendChild(actionBtn('改用默认（清空自定义）', async () => {
+    if (!confirm('把所有层和关系记录恢复默认？')) return;
+    try { await cmd('prompt.reset'); await promptReload(); toast('已恢复默认', 'ok'); }
+    catch (e) { toast(e.message, 'err'); }
+  }, 'btn sm ghost'));
+  head.appendChild(row);
+  wrap.appendChild(head);
+
+  // ---- 每一层 ----
+  const list = el('div', 'sect');
+  list.appendChild(el('div', 'sect-h', '分层'));
+  for (const L of PROMPT_DATA.layers) {
+    const item = el('div', 'pl-item' + (L.on ? '' : ' off'));
+    const top = el('div', 'pl-top');
+    const main = el('div', 'pl-main');
+    main.appendChild(el('div', 'pl-name', L.title));
+    main.appendChild(el('div', 'pl-desc', L.desc));
+    if (L.note) {
+      const n = el('div', 'pl-note', L.note);
+      main.appendChild(n);
+    }
+    const sw = el('button', 'switch' + (L.on ? ' on' : ''));
+    sw.title = L.on ? '关掉这一段' : '打开这一段';
+    sw.onclick = async () => {
+      try { await cmd('prompt.set', { id: L.id, on: !L.on }); await promptReload(); }
+      catch (e) { toast(e.message, 'err'); }
+    };
+    top.append(main, sw);
+    item.appendChild(top);
+
+    if (L.kind === 'identity') {
+      item.appendChild(el('div', 'btn-row', actionBtn('去角色设定里改', () => {
+        closeDrawer();
+        openPersonaEditor(false);
+      }, 'btn sm ghost')));
+    } else if (L.kind === 'relation') {
+      const ta = textArea(PROMPT_DATA.relation || '', 8, '她是谁、你们怎么相处、有什么约定…');
+      ta.classList.add('mono');
+      item.appendChild(ta);
+      item.appendChild(el('div', 'btn-row', actionBtn('保存关系记录', async () => {
+        await cmd('prompt.set', { relation: ta.value });
+        await promptReload();
+        toast('关系记录已保存', 'ok');
+      }, 'btn primary sm')));
+      item.appendChild(el('div', 'tip',
+        '这一段每次对话都会完整注入。她也能用 settings 工具自己往这里写 —— 聊几句之后回来看看。'));
+    } else if (L.kind !== 'auto') {
+      const d = document.createElement('details');
+      d.className = 'pl-edit';
+      d.appendChild(el('summary', null, L.text ? '已改写（点开编辑）' : '用默认文案（点开改写）'));
+      const ta = textArea(L.text || '', 10, (L.default || '（这一段默认是空的）').slice(0, 300));
+      ta.classList.add('mono');
+      d.appendChild(ta);
+      const bar = el('div', 'btn-row');
+      bar.appendChild(actionBtn('保存', async () => {
+        await cmd('prompt.set', { id: L.id, text: ta.value.trim() });
+        await promptReload();
+        toast('已保存', 'ok');
+      }, 'btn primary sm'));
+      if (L.text) {
+        bar.appendChild(actionBtn('恢复默认', async () => {
+          try { await cmd('prompt.set', { id: L.id, reset: true }); await promptReload(); }
+          catch (e) { toast(e.message, 'err'); }
+        }, 'btn sm ghost'));
+      }
+      d.appendChild(bar);
+      item.appendChild(d);
+    }
+    list.appendChild(item);
+  }
+  wrap.appendChild(list);
+  return wrap;
+}
+
+/* ---------------- 运行状态 ----------------
+   一屏看清：哪些服务真的在跑、工具是怎么暴露的、运行时落在哪。
+   全部来自 state 广播里已有的字段，不额外请求，也不会因为某个服务没配就报错。 */
+const SANDBOX_ZH = { 'read-only': '只读', 'edit-only': '可编辑', 'full-access': '完全访问' };
+
+function statusSummary() {
+  const svc = [S.tts, S.asr].filter(s => s && s.kind && s.kind !== 'off').length;
+  return `${svc}/2 语音服务 · ${(S.toolset || []).length} 个工具`;
+}
+
+function statusKV(k, v, mono) {
+  const row = el('div', 'kv');
+  row.appendChild(el('span', 'kv-k', k));
+  row.appendChild(el('span', 'kv-v' + (mono ? ' mono' : ''), v == null || v === '' ? '—' : String(v)));
+  return row;
+}
+
+function svcLine(svc) {
+  const kind = (svc && svc.kind) || 'off';
+  if (kind === 'off') return '未开启';
+  const bits = [kind];
+  if (svc.base) bits.push(svc.base);
+  if (svc.model) bits.push(svc.model);
+  return bits.join(' · ');
+}
+
+function statusSection() {
+  const wrap = el('div');
+
+  const s1 = el('div', 'sect');
+  s1.appendChild(el('div', 'sect-h', '服务'));
+  s1.appendChild(statusKV('模型', (S.model && S.model !== '(none)') ? S.model : '未选择'));
+  s1.appendChild(statusKV('供应商', S.provider || '—'));
+  s1.appendChild(statusKV('语音合成', svcLine(S.tts)));
+  s1.appendChild(statusKV('语音识别', svcLine(S.asr)));
+  s1.appendChild(statusKV('IM 渠道', imStatusText()));
+  s1.appendChild(statusKV('思考强度', THINK_ZH[S.thinking] || '关'));
+  // IM 的明细跟在服务清单后面：每个渠道一行，状态 + 收发计数，出错时带原因
+  const ims = (S.im || []).filter(c => c.enabled && c.kind && c.kind !== 'off');
+  if (ims.length) {
+    const box = el('div', 'tool-list');
+    for (const c of ims) {
+      const row = el('div', 'tool-row');
+      row.appendChild(el('span', 'tn', c.id));
+      const bits = [imKindName(c.kind)];
+      bits.push(c.state === 'running' ? '运行中' : (c.state === 'error' ? '出错' : '已停止'));
+      if (c.in || c.out) bits.push(`入 ${c.in || 0} / 出 ${c.out || 0}`);
+      if (c.dropped) bits.push(`丢弃 ${c.dropped}`);
+      if (c.state === 'error' && c.last_error) bits.push(String(c.last_error).slice(0, 70));
+      row.appendChild(el('span', 'td', bits.join(' · ')));
+      box.appendChild(row);
+    }
+    s1.appendChild(box);
+  }
+  wrap.appendChild(s1);
+
+  const s2 = el('div', 'sect');
+  s2.appendChild(el('div', 'sect-h', '工具'));
+  s2.appendChild(statusKV('暴露', S.tools ? '全部开启' : '已关闭'));
+  s2.appendChild(statusKV('沙箱', SANDBOX_ZH[S.sandbox] || S.sandbox || '—'));
+  s2.appendChild(statusKV('执行审批', S.autoallow ? '自动执行（不逐条确认）' : '每条都要确认'));
+  const list = S.toolset || [];
+  if (list.length) {
+    const box = el('div', 'tool-list');
+    for (const t of list) {
+      const row = el('div', 'tool-row');
+      row.appendChild(el('span', 'tn', t.name));
+      row.appendChild(el('span', 'td', t.desc || ''));
+      box.appendChild(row);
+    }
+    s2.appendChild(box);
+  } else {
+    s2.appendChild(el('div', 'tip', '还没拿到工具清单（连上后端后会出现）。'));
+  }
+  wrap.appendChild(s2);
+
+  const s3 = el('div', 'sect');
+  s3.appendChild(el('div', 'sect-h', '运行时'));
+  s3.appendChild(statusKV('数据根', S.root, true));
+  s3.appendChild(statusKV('工作目录', S.cwd, true));
+  s3.appendChild(statusKV('当前会话', S.session, true));
+  s3.appendChild(statusKV('端口', S.port ? 'http://127.0.0.1:' + S.port + '/' : '—', true));
+  s3.appendChild(statusKV('舞台', L2D.status === 'ready'
+    ? `Live2D 运行中 · ${L2D.runtimeFrom === 'cdn' ? 'CDN' : '本地'}运行时`
+    : (L2D.status === 'loading' ? '加载中' : (L2D.status === 'error' ? '出错' : '未接入'))));
+  s3.appendChild(statusKV('记忆', (S.memory || []).length + ' 条'));
+  s3.appendChild(statusKV('表情包', (S.stickers || []).length + ' 个'));
+  s3.appendChild(statusKV('工具调用记录', (S.toolLog || []).length + ' 次（点顶栏的扳手看）'));
+  wrap.appendChild(s3);
+
+  const row = el('div', 'btn-row');
+  row.appendChild(actionBtn('刷新', async () => { await refreshState(); buildDrawer(); }, 'btn sm'));
+  if (S.port) row.appendChild(actionBtn('在浏览器里打开', async () => {
+    window.open('http://127.0.0.1:' + S.port + '/', '_blank');
+  }, 'btn sm ghost'));
+  wrap.appendChild(row);
+  return wrap;
 }
 
 function pickSticker() {
@@ -3656,6 +4709,9 @@ async function mockCmd(name, args) {
   if (name === 'voice.record.stop') { S.recording = false; return { ok: true, path: '', seconds: 2 }; }
   if (name === 'voice.transcribe') { handleEvent({ t: 'asr', text: '演示模式听写结果', auto_send: false }); return { ok: true, text: '演示模式听写结果' }; }
   if (name === 'ui.pref') return Object.assign({ ok: true }, args);
+  // 演示模式没有后端，提示词面板给一份空壳，别让抽屉卡在「正在读取…」
+  if (name === 'prompt.get') return { ok: true, layers: [], relation: '', system: '（演示模式没有真后端）', chars: 0 };
+  if (name === 'session.export') return { ok: true, path: '(演示模式没有导出)', messages: 0 };
   return { ok: true };
 }
 
@@ -3663,6 +4719,8 @@ async function mockCmd(name, args) {
 (async function boot() {
   wireGlobal();
   applyAccent('#8b7cff');
+  toolLogLoad();
+  applyRailState();
   // 触发器的状态对象在 08-triggers.js 里，这里只是脚本还没解析到那一层：
   // 放到下一轮事件循环再开静默计时，别在初始化顺序上打架。
   setTimeout(() => TRIG.startIdle(), 0);
@@ -3936,6 +4994,7 @@ async function l2dMountInner(path, token) {
     l2dSetStatus('ready', '');
     l2dBindPointer();
     l2dStartTicker();
+    l2dStartCursor(); // 窗口外的光标也跟（桌面壳提供 host_cursor 时）
     if (window.ResizeObserver && !L2D._ro) {
       L2D._ro = new ResizeObserver(() => l2dScheduleResize());
       L2D._ro.observe($('#l2d-wrap'));
@@ -4039,6 +5098,40 @@ function l2dPreview(patch) {
   if (L2D.status !== 'ready' || !L2D.model) return;
   L2D.cfg = Object.assign({}, L2D.cfg, patch);
   l2dFit();
+}
+
+/* ---------------- 光标跟随 ----------------
+   pixi-live2d 的 autoInteract 只听画布上的 pointermove：鼠标一移出窗口
+   （去任务栏、去别的窗口）就再也收不到事件，视线会停在最后那一点。
+   桌面壳能问系统要光标的客户区坐标（host_cursor），所以由页面自己喂 focus()，
+   窗口内外都跟得上。浏览器里打开时没有这个绑定，退回库自己的交互。 */
+const CURSOR = { timer: 0, busy: false };
+
+function l2dCursorSupported() {
+  return typeof window.host_cursor === 'function';
+}
+
+async function l2dCursorPoll() {
+  if (CURSOR.busy || L2D.status !== 'ready' || !L2D.model) return;
+  if (document.hidden || !l2dCursorSupported()) return;
+  CURSOR.busy = true;
+  try {
+    const raw = await window.host_cursor();
+    const r = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!r || !r.ok || !(r.w > 0) || !(r.h > 0)) return;
+    // 宿主给的是客户区的物理像素。按比例换成 CSS 像素，
+    // 这样显示器缩放（125% / 150%）和窗口尺寸都不用各算一遍。
+    const x = r.x / r.w * window.innerWidth;
+    const y = r.y / r.h * window.innerHeight;
+    L2D.model.focus(x, y, false);
+  } catch { /* 宿主一时拿不到光标（锁屏、切换桌面）就跳过这一拍 */ }
+  finally { CURSOR.busy = false; }
+}
+
+function l2dStartCursor() {
+  if (!l2dCursorSupported() || CURSOR.timer) return;
+  CURSOR.timer = setInterval(l2dCursorPoll, 120);
+  l2dCursorPoll();
 }
 
 function l2dStartTicker() {
@@ -4487,7 +5580,7 @@ function buildStagePanel(body) {
   body.appendChild(stageModelSection());
   body.appendChild(stageEmoSection());
   body.appendChild(stageTriggerSection());
-  body.appendChild(stageSaveBar());
+  stageSaveBar(); // 挂到抽屉底栏（#drawer-foot），不掺进滚动内容里
 }
 
 /* ---------------- 草稿：改了不算数，点了保存才生效 ----------------
@@ -4600,6 +5693,13 @@ function stageSaveBar() {
   const save = actionBtn('保存并生效', () => stageCommit(), 'btn primary sm');
   acts.append(undo, save);
   bar.append(info, acts);
+  // 抽屉的底栏：常驻在可视区底部，滚到哪儿都在
+  const foot = $('#drawer-foot');
+  if (foot) {
+    foot.innerHTML = '';
+    foot.appendChild(bar);
+    foot.classList.remove('hidden');
+  }
   STAGE_BAR = { bar, text, save, undo };
   stageSyncBar();
   return bar;
@@ -5519,6 +6619,8 @@ function imChannelRow(c) {
     bits.push('角色 ' + (p ? (p.name || p.id) : c.persona));
   }
   bits.push(`收 ${c['in'] || 0} · 发 ${c.out || 0}`);
+  if (c.queued) bits.push(`队列 ${c.queued}`);
+  if (c.dropped) bits.push(`丢弃 ${c.dropped}`);
   bits.push(imPolicyText(c));
   left.appendChild(el('div', 'mod-sub', bits.join(' · ')));
   row.append(left, el('span', 'mod-go', '›'));
@@ -5557,7 +6659,10 @@ function imDetail(c) {
   const stateText = !live ? '未启用' : (c.state === 'error' ? '出错' : (c.state === 'running' ? '运行中' : '已停止'));
   top.appendChild(el('span', 'badge' + (live && c.state !== 'error' ? ' ok' : (live ? ' warn' : '')), stateText));
   head.appendChild(top);
-  head.appendChild(el('div', 'card-sub', `收 ${c['in'] || 0} · 发 ${c.out || 0}`));
+  const paceText = `间隔 ${c.send_delay_ms == null ? 600 : c.send_delay_ms}ms`
+    + ` · 队列 ${c.queued || 0}/${c.queue_limit == null ? 64 : c.queue_limit}`
+    + (c.dropped ? ` · 丢弃 ${c.dropped}` : '');
+  head.appendChild(el('div', 'card-sub', `收 ${c['in'] || 0} · 发 ${c.out || 0} · ${paceText}`));
   if (c.last_error) head.appendChild(el('div', 'tip', c.last_error));
   box.appendChild(head);
 
@@ -5673,6 +6778,7 @@ function imForm(initial, submitLabel, onSave) {
   // 空 = 私聊开放 + 群聊关闭；非空 = 私聊白名单 + 群里白名单用户 @ 才回。
   const state = Object.assign({
     allow: [], limit: 0, enabled: true, proxy: '', persona: '',
+    send_delay_ms: 600, queue_limit: 64,
     private_mode: 'open', private_allow: [], group_mode: 'off', group_allow: [], group_ids: [],
   }, initial);
   if (state.persona == null) state.persona = '';
@@ -5781,6 +6887,17 @@ function imForm(initial, submitLabel, onSave) {
       policy.appendChild(field('每条上限', mk('limit', '0 = 平台默认', 'number'),
         '超长回复按句末自动分条，最多四条。'));
       fields.appendChild(policy);
+
+      // 发送节奏：平台对同一会话的速率限制是硬的，撞上去就是 429 / 风控。
+      const pace = el('div', 'im-policy');
+      pace.appendChild(el('div', 'sect-h', '发送节奏'));
+      pace.appendChild(field('发送间隔（毫秒）', mk('send_delay_ms', '600', 'number'),
+        '两条消息之间的最小间隔，0 = 不限速。被平台限流时调大：Telegram 建议 ≥1000，'
+        + 'QQ（NapCat）与企业微信 600~1200 都稳。一次长回复被切成几条时，这几条也算。'));
+      pace.appendChild(field('队列上限', mk('queue_limit', '64', 'number'),
+        '出站消息先排队、再按间隔发。积压超过上限就丢最旧的（新的更该送到），'
+        + '详情页会显示「队列 N · 丢弃 M」。'));
+      fields.appendChild(pace);
     }
     const tip = el('div', 'tip', IM_HELP[k] || '选一种接法。凭据加密保存在 .agent/.crypt 里，不进 agent.json。');
     tip.style.lineHeight = '1.7';

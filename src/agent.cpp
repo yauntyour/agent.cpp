@@ -388,6 +388,7 @@ namespace app
                 log.error("http", err);
                 return false;
             }
+            core.serve_port = serve_port; // 状态面板要显示实际监听在哪个端口
             log.info("http", std::format("serving on http://127.0.0.1:{}/ (desktop={})", serve_port, !headless));
             return true;
         };
@@ -488,6 +489,28 @@ namespace app
                 // 告诉页面“我跑在桌面壳里”（浏览器打开时没有这个绑定）
                 w.bind("host_info", [](std::string) -> std::string
                        { return nlohmann::json{{"desktop", true}, {"os", "windows"}}.dump(); });
+                // 光标位置（客户区物理像素 + 客户区尺寸）。页面拿它驱动 Live2D 的
+                // 视线：指针移出窗口以后，DOM 就收不到 pointermove 了，只有系统
+                // 还知道它在哪。浏览器里没有这个绑定，页面会自己退回库的交互。
+                w.bind("host_cursor", [&w](std::string) -> std::string
+                       {
+                    nlohmann::json r = {{"ok", false}};
+                    auto win = w.window();
+                    if (!win.ok())
+                        return r.dump();
+                    HWND h = reinterpret_cast<HWND>(win.value());
+                    POINT pt{};
+                    if (!GetCursorPos(&pt) || !ScreenToClient(h, &pt))
+                        return r.dump();
+                    RECT rc{};
+                    if (!GetClientRect(h, &rc))
+                        return r.dump();
+                    r["ok"] = true;
+                    r["x"] = (int)pt.x;
+                    r["y"] = (int)pt.y;
+                    r["w"] = (int)(rc.right - rc.left);
+                    r["h"] = (int)(rc.bottom - rc.top);
+                    return r.dump(); });
 #endif
                 if (served)
                 {

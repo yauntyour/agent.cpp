@@ -72,6 +72,9 @@ async function mockCmd(name, args) {
   if (name === 'voice.record.stop') { S.recording = false; return { ok: true, path: '', seconds: 2 }; }
   if (name === 'voice.transcribe') { handleEvent({ t: 'asr', text: '演示模式听写结果', auto_send: false }); return { ok: true, text: '演示模式听写结果' }; }
   if (name === 'ui.pref') return Object.assign({ ok: true }, args);
+  // 演示模式没有后端，提示词面板给一份空壳，别让抽屉卡在「正在读取…」
+  if (name === 'prompt.get') return { ok: true, layers: [], relation: '', system: '（演示模式没有真后端）', chars: 0 };
+  if (name === 'session.export') return { ok: true, path: '(演示模式没有导出)', messages: 0 };
   return { ok: true };
 }
 
@@ -79,6 +82,8 @@ async function mockCmd(name, args) {
 (async function boot() {
   wireGlobal();
   applyAccent('#8b7cff');
+  toolLogLoad();
+  applyRailState();
   // 触发器的状态对象在 08-triggers.js 里，这里只是脚本还没解析到那一层：
   // 放到下一轮事件循环再开静默计时，别在初始化顺序上打架。
   setTimeout(() => TRIG.startIdle(), 0);

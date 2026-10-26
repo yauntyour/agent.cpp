@@ -36,6 +36,22 @@
   background: linear-gradient(90deg, rgba(8, 8, 12, .78), rgba(8, 8, 12, .34));
   backdrop-filter: blur(10px);
 }
+
+/* 收纳：收起后只剩一条窄边，里面的东西全藏起来，只留这个把手。
+   状态在 localStorage（agent.rail.off），刷新后还记得。 */
+#app.rail-off { grid-template-columns: 22px minmax(0, 1fr); }
+#app.rail-off #rail { padding: 14px 0; gap: 0; }
+#app.rail-off #rail > *:not(.rail-toggle) { display: none; }
+#app.rail-off .rail-toggle svg { transform: rotate(180deg); }
+
+.rail-toggle {
+  flex: 0 0 auto; width: 22px; height: 26px; border-radius: 8px;
+  display: grid; place-items: center; color: var(--faint);
+  transition: color .16s, background .16s;
+}
+.rail-toggle:hover { color: var(--text); background: var(--card); }
+.rail-toggle svg { width: 14px; height: 14px; transition: transform .22s var(--ease); }
+
 .rail-mark { width: 44px; height: 44px; display: grid; place-items: center; margin-bottom: 8px; }
 .rail-logo {
   width: 36px; height: 36px; display: block;

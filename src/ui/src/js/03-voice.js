@@ -54,6 +54,7 @@ async function speakText(text) {
 const MIC = {
   stream: null, rec: null, chunks: [], ctx: null, analyser: null, raf: 0,
   t0: 0, host: false,
+  hold: false, // 这次录音是「按住说话」起的：太短就静默丢弃，不弹提示
 };
 
 function micError(e) {
@@ -159,12 +160,76 @@ async function stopBrowserMic() {
 }
 
 async function transcribeBlob(blob, ext) {
+  ({ blob, ext } = await prepareUpload(blob, ext));
   const buf = new Uint8Array(await blob.arrayBuffer());
   let bin = '';
   for (let i = 0; i < buf.length; i += 0x8000)
     bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
   // 转写结果由服务端的 asr 事件送回（02-chat 负责填框 / 自动发送）
   await cmd('voice.transcribe', { data_b64: btoa(bin), ext });
+}
+
+/* ---------------- 上传格式（设置 → 语音识别 → 上传格式） ----------------
+   「wav」时把字节真的换成 WAV，而不是只改扩展名：FunASR / SenseVoice /
+   faster-whisper 这类服务端大多只认 wav，浏览器录出来的却是 webm/opus。
+   解码 + 重采样都在页面里做，宿主不需要装 ffmpeg。
+   转不动就按原格式上传 —— 宁可发出去，也不要因为格式偏好整条丢掉。 */
+function asrUploadFormat() {
+  const f = (S.asr && S.asr.upload_format) || 'auto';
+  return f === 'auto' ? '' : f;
+}
+
+function encodeWavPcm16(samples, rate) {
+  const n = samples.length;
+  const buf = new ArrayBuffer(44 + n * 2);
+  const v = new DataView(buf);
+  const tag = (off, s) => { for (let i = 0; i < s.length; i++) v.setUint8(off + i, s.charCodeAt(i)); };
+  tag(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); tag(8, 'WAVE');
+  tag(12, 'fmt '); v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true);           // PCM
+  v.setUint16(22, 1, true);           // 单声道
+  v.setUint32(24, rate, true);
+  v.setUint32(28, rate * 2, true);    // 字节率
+  v.setUint16(32, 2, true);           // 块对齐
+  v.setUint16(34, 16, true);          // 位深
+  tag(36, 'data'); v.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    v.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return new Blob([buf], { type: 'audio/wav' });
+}
+
+async function toWavBlob(blob, rate = 16000) {
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  const Off = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  if (!Ctx || !Off || !blob || !blob.size) return null;
+  let ctx = null;
+  try {
+    ctx = new Ctx();
+    const pcm = await ctx.decodeAudioData(await blob.arrayBuffer());
+    const frames = Math.max(1, Math.ceil(pcm.duration * rate));
+    const off = new Off(1, frames, rate);
+    const src = off.createBufferSource();
+    src.buffer = pcm;
+    src.connect(off.destination);
+    src.start();
+    const out = await off.startRendering();
+    return encodeWavPcm16(out.getChannelData(0), rate);
+  } catch (e) {
+    console.warn('wav transcode failed:', e && e.message);
+    return null;
+  } finally {
+    if (ctx) { try { ctx.close(); } catch { } }
+  }
+}
+
+/* 按配置把要上传的音频准备好；返回 {blob, ext}。 */
+async function prepareUpload(blob, ext) {
+  if (asrUploadFormat() !== 'wav' || ext === 'wav') return { blob, ext };
+  const wav = await toWavBlob(blob);
+  if (!wav) { toast('转成 WAV 失败，按原格式上传', 'err', 4000); return { blob, ext }; }
+  return { blob: wav, ext: 'wav' };
 }
 
 async function toggleMic() {
@@ -174,8 +239,10 @@ async function toggleMic() {
   return startRecording();
 }
 
-async function startRecording() {
+async function startRecording(fromHold) {
+  if (S.recording) return;
   stopAudio();
+  MIC.hold = !!fromHold;
   try {
     await startBrowserMic();
     MIC.host = false;
@@ -189,20 +256,29 @@ async function startRecording() {
       // 两条路都走不通：说清楚原因，并指向不需要麦克风的通道
       console.warn('host mic fallback failed:', e2 && e2.message);
       toast(why + '。可以插上麦克风再试，或在设置 → 语音识别里用「上传音频转写」。', 'err', 6000);
+      MIC.hold = false;
       return;
     }
   }
   S.recording = true;
   paintComposer();
+  // 按下的瞬间就松开了（getUserMedia 比较慢）：别再让麦克风开着
+  if (fromHold && HOLD.wantStop) {
+    HOLD.wantStop = false;
+    stopRecording();
+  }
 }
 
 async function stopRecording() {
+  // hold 起来的那次如果只有零点几秒，是按住说话的轻点，静默丢掉就行
+  const wasHold = MIC.hold;
+  MIC.hold = false;
   S.recording = false;
   paintComposer();
   if (MIC.host) {
     try {
       const r = await cmd('voice.record.stop');
-      if (r.seconds && r.seconds < 1) { toast('太短了，再说一次？'); return; }
+      if (r.seconds && r.seconds < 1) { if (!wasHold) toast('太短了，再说一次？'); return; }
       showTyping('正在听写');
       await cmd('voice.transcribe', { path: r.path });
     } catch (e) {
@@ -219,7 +295,10 @@ async function stopRecording() {
     toast(micError(e), 'err');
     return;
   }
-  if (!clip || clip.secs < 0.6 || !clip.blob.size) { toast('太短了，再说一次？'); return; }
+  if (!clip || clip.secs < 0.6 || !clip.blob.size) {
+    if (!wasHold) toast('太短了，再说一次？');
+    return;
+  }
   try {
     showTyping('正在听写');
     await transcribeBlob(clip.blob, clip.ext);
@@ -236,6 +315,114 @@ window.addEventListener('beforeunload', () => {
   stopLevel();
 });
 
+/* ---------------- 按住说话 ----------------
+   绑定的键（默认 Alt）按住开始录、松开结束 —— 对讲机的手感，也不怕忘了关。
+   键在「设置 → 偏好 → 麦克风快捷键」里录，存后端 agent.json（换端口 / 换浏览器都跟着走）。
+
+   两个必须处理的坑：
+   1. 单独按 Alt 会被系统抢（Windows 菜单、浏览器焦点环）。所以按下后先等 180ms
+      再真开录：这期间又按了别的键（Alt+Tab / Alt+F4 这类组合）就撤销，不录音。
+   2. 窗口失焦收不到 keyup。blur / visibilitychange 时主动收尾，别把麦克风留在开着的状态。
+*/
+const MOD_KEYS = { Alt: 'Alt', Control: 'Ctrl', Shift: 'Shift', Meta: 'Cmd' };
+const HOTKEY = { capture: false }; // 设置里正在录快捷键时，这里的监听让路
+
+function keyLabel(e) {
+  const k = e.key;
+  if (MOD_KEYS[k]) return MOD_KEYS[k];
+  if (k === ' ') return 'Space';
+  if (k === 'Escape') return 'Esc';
+  if (k && k.length === 1) return k.toUpperCase();
+  return k || '';
+}
+
+/* 从键盘事件算「完整组合」：修饰键在前、主键在后，顺序固定，两边比较才可靠。
+   修饰键自己按下时（e.key=Alt）不算主键，只算修饰键 —— 于是得到单键 "Alt"。 */
+function comboOf(e) {
+  const parts = [];
+  if (e.ctrlKey) parts.push('Ctrl');
+  if (e.shiftKey) parts.push('Shift');
+  if (e.altKey) parts.push('Alt');
+  if (e.metaKey) parts.push('Cmd');
+  const isMod = Object.hasOwn(MOD_KEYS, e.key);
+  if (!isMod) {
+    const main = keyLabel(e);
+    if (main) parts.push(main);
+  }
+  return parts.join('+');
+}
+
+/* keyup 时修饰键标志已经复位（松开 Alt 的那一刻 altKey 已经是 false），
+   不补回去就永远匹配不上「Alt」这类单键绑定 */
+function comboOfRelease(e) {
+  const fake = { key: e.key, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, altKey: e.altKey, metaKey: e.metaKey };
+  if (e.key === 'Alt') fake.altKey = true;
+  else if (e.key === 'Control') fake.ctrlKey = true;
+  else if (e.key === 'Shift') fake.shiftKey = true;
+  else if (e.key === 'Meta') fake.metaKey = true;
+  return comboOf(fake);
+}
+
+const HOLD = { down: false, started: false, pending: 0, wantStop: false };
+
+function holdCancel() {
+  if (HOLD.pending) { clearTimeout(HOLD.pending); HOLD.pending = 0; }
+  HOLD.down = false;
+  HOLD.started = false;
+  HOLD.wantStop = false;
+}
+
+function holdRelease() {
+  if (HOLD.pending) { // 还没到 180ms：这次只是轻点，什么都不做
+    clearTimeout(HOLD.pending);
+    HOLD.pending = 0;
+    HOLD.down = false;
+    HOLD.started = false;
+    return;
+  }
+  HOLD.down = false;
+  if (!HOLD.started) return;
+  HOLD.started = false;
+  HOLD.wantStop = true;
+  if (S.recording) stopRecording();
+  // 还在等 getUserMedia：startRecording 收尾时会看到 wantStop
+}
+
+document.addEventListener('keydown', (e) => {
+  if (HOTKEY.capture) return;
+  const hk = S.mic_hotkey;
+  if (!hk || !S.asr.enabled) return;   // 没配语音识别就别抢键
+  if (comboOf(e) !== hk) {
+    if (HOLD.down && !HOLD.started) holdCancel(); // 按的是组合键（Alt+Tab…），撤销
+    return;
+  }
+  if (HOLD.down) return;               // 长按的自动重复
+  e.preventDefault();
+  HOLD.down = true;
+  HOLD.started = false;
+  HOLD.wantStop = false;
+  HOLD.pending = setTimeout(() => {
+    HOLD.pending = 0;
+    if (!HOLD.down) return;
+    HOLD.started = true;
+    if (!S.recording) startRecording(true);
+  }, 180);
+}, true);
+
+document.addEventListener('keyup', (e) => {
+  if (HOTKEY.capture || !HOLD.down) return;
+  const hk = S.mic_hotkey;
+  if (!hk || comboOfRelease(e) !== hk) return;
+  e.preventDefault();
+  holdRelease();
+}, true);
+
+// 切窗口 / 最小化：keyup 收不到，主动收尾
+window.addEventListener('blur', () => { if (HOLD.down) holdRelease(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && HOLD.down) holdRelease();
+});
+
 /* ---------------- 上传音频转写（没有麦克风时的备用通道） ---------------- */
 function pickAudio() {
   if (!S.asr.enabled) { toast('还没有配置语音识别服务', 'err'); return; }
@@ -246,16 +433,15 @@ $('#audio-file').addEventListener('change', async (e) => {
   e.target.value = '';
   if (!f) return;
   if (f.size > 24 * 1024 * 1024) { toast('音频太大（上限 24MB）', 'err'); return; }
-  const buf = new Uint8Array(await f.arrayBuffer());
+  const ext0 = (f.name.split('.').pop() || 'wav').toLowerCase();
+  const { blob, ext } = await prepareUpload(f, ext0);
+  const buf = new Uint8Array(await blob.arrayBuffer());
   let bin = '';
   for (let i = 0; i < buf.length; i += 0x8000)
     bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
   try {
     showTyping('正在听写');
-    const r = await cmd('voice.transcribe', {
-      data_b64: btoa(bin),
-      ext: (f.name.split('.').pop() || 'wav').toLowerCase(),
-    });
+    const r = await cmd('voice.transcribe', { data_b64: btoa(bin), ext });
     hideTyping();
     if (r.text) {
       $('#input').value = r.text;

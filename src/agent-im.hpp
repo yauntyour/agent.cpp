@@ -40,6 +40,7 @@
 #include <ctime>
 #include <format>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <string>
@@ -148,6 +149,13 @@ namespace app::im
         std::vector<std::string> allow;
         int limit = 0;                  // 每条消息最多多少字符，0 = 用平台默认上限
 
+        // ---- 发送节奏 ---------------------------------------------------
+        // 平台对同一会话的速率限制是硬的（Telegram 约 1 条/秒、NapCat 与企微
+        // 各有自己的阈值），撞上去就是 429 / 风控 / 掉线。所以出站先排队，
+        // 两条之间再隔 send_delay_ms —— 一次长回复会被切成几条，这几条也算。
+        int send_delay_ms = 600; // 0 = 不限速（不建议）
+        int queue_limit = 64;    // 出站队列上限，满了丢最旧的（新的更该送到）
+
         // 凭据 —— 只进加密库（.agent/.crypt），agent.json 里一个都不留。
         // 内存里是 secure_string：mlock + 析构清零，见上面的 secret。
         secret token;            // telegram bot token | onebot access token | wecom 回调 Token | bridge secret
@@ -168,6 +176,7 @@ namespace app::im
         {
             return {{"id", id}, {"kind", kind}, {"enabled", enabled}, {"api_base", api_base},
                     {"proxy", proxy}, {"persona", persona}, {"limit", limit},
+                    {"send_delay_ms", send_delay_ms}, {"queue_limit", queue_limit},
                     {"private_mode", private_mode}, {"private_allow", private_allow},
                     {"group_mode", group_mode}, {"group_allow", group_allow},
                     {"group_ids", group_ids}, {"allow", allow},
@@ -218,6 +227,12 @@ namespace app::im
             auto l = j.find("limit");
             if (l != j.end() && l->is_number_integer())
                 limit = std::clamp<int>((int)l->get<long long>(), 0, 10000);
+            auto d = j.find("send_delay_ms");
+            if (d != j.end() && d->is_number_integer())
+                send_delay_ms = std::clamp<int>((int)d->get<long long>(), 0, 60000);
+            auto ql = j.find("queue_limit");
+            if (ql != j.end() && ql->is_number_integer())
+                queue_limit = std::clamp<int>((int)ql->get<long long>(), 1, 2000);
             // 白名单列表：字符串或数字 id，去空
             auto list = [&](const char *k, std::vector<std::string> &dst) -> bool
             {
@@ -4016,9 +4031,16 @@ namespace app::im
         return false;
     }
 
+    // 节流回调：返回 false = 中止（正在退出 / 渠道被停用）
+    using pace_fn = std::function<bool()>;
+
     // 一条回复：按平台上限自动分条（最多 4 条，多的截断）
+    // pace 在每次真正调用平台 API 之前被问一次（含分条），返回 false 表示中止。
+    // 节流放在这里而不是调用方，是因为「一次 send 会变成几条 API 调用」只有
+    // 这一层知道。
     inline bool send(const channel &ch, const std::string &chat, bool group,
-                     const std::string &text, std::string &err, const std::atomic<bool> *abort = nullptr)
+                     const std::string &text, std::string &err,
+                     const std::atomic<bool> *abort = nullptr, const pace_fn &pace = {})
     {
         if (!ch.live())
         {
@@ -4044,8 +4066,15 @@ namespace app::im
             return false;
         }
         for (auto &p : parts)
+        {
+            if (pace && !pace())
+            {
+                err = "已取消";
+                return false;
+            }
             if (!send_chunk(ch, chat, group, p, err, abort))
                 return false;
+        }
         return true;
     }
 
@@ -4098,7 +4127,8 @@ namespace app::im
     inline bool send_media(const channel &ch, const std::string &chat, bool group,
                            const std::string &kind, const std::string &path,
                            const std::string &name, const std::string &mime,
-                           std::string &err, const std::atomic<bool> *abort = nullptr)
+                           std::string &err, const std::atomic<bool> *abort = nullptr,
+                           const pace_fn &pace = {})
     {
         err.clear();
         if (!ch.live())
@@ -4109,6 +4139,11 @@ namespace app::im
         if (path.empty())
         {
             err = "没有本地文件路径";
+            return false;
+        }
+        if (pace && !pace())
+        {
+            err = "已取消";
             return false;
         }
         const std::string nm = name.empty() ? detail::default_name_for(kind) : name;

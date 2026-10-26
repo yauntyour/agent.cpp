@@ -41,6 +41,10 @@ function buildDrawer() {
   if (!DRAWER.build) return;
   const body = $('#drawer-body');
   body.innerHTML = '';
+  // 底栏归每个页面自己管：重建时先清空，要常驻的页面（舞台）会重新挂上来
+  const foot = $('#drawer-foot');
+  foot.innerHTML = '';
+  foot.classList.add('hidden');
   DRAWER.build(body);
 }
 function paintDrawer() {
@@ -52,6 +56,8 @@ function paintDrawer() {
 function closeDrawer() {
   $('#drawer').classList.add('hidden');
   $('#scrim').classList.add('hidden');
+  $('#drawer-foot').innerHTML = '';
+  $('#drawer-foot').classList.add('hidden');
   DRAWER_STACK.length = 0;
   DRAWER.current = null;
   DRAWER.build = null;
@@ -388,21 +394,39 @@ async function openSessions() {
     const sect = el('div', 'sect');
     sect.appendChild(el('div', 'sect-h', '这个角色的会话'));
     if (!S.sessions.length) sect.appendChild(el('div', 'empty', '还没有记录'));
+    // 顺序由服务端给：当前会话 → 有内容的（新到旧）→ 空壳
     for (const s of S.sessions) {
-      const row = el('div', 'list-row');
+      const row = el('div', 'list-row' + (s.title ? '' : ' dim') + (s.current ? ' on' : ''));
       const grow = el('div', 'grow');
-      grow.appendChild(el('div', null, s.current ? '当前会话' : '历史会话'));
-      grow.appendChild(el('div', 'when', `${fmtDay(s.mtime)} · ${s.id.slice(0, 18)}…`));
-      if (s.current) grow.style.color = 'var(--accent)';
+      const line = el('div', 'sess-t');
+      line.appendChild(el('span', 'sess-name', s.title || '空会话'));
+      if (s.current) line.appendChild(el('span', 'badge ok', '当前'));
+      grow.appendChild(line);
+      grow.appendChild(el('div', 'when', fmtStamp(s.mtime)));
       const del = el('button', 'del');
       del.innerHTML = icon('trash');
-      del.onclick = async () => {
-        if (!confirm('删除这条会话记录？')) return;
-        await cmd('session.delete', { id: s.id });
-        await refreshState();
-        openSessions();
+      del.title = '删除这条会话记录';
+      del.onclick = async (e) => {
+        e.stopPropagation(); // 别让「删除」冒泡成「切到这条会话」
+        if (!confirm(s.current ? '删除当前会话？上下文会一起清空。' : '删除这条会话记录？')) return;
+        try {
+          await cmd('session.delete', { id: s.id });
+          await refreshState();
+          openSessions();
+        } catch (err) { toast(err.message, 'err'); }
       };
-      row.append(grow, del);
+      // 导出：和 cell.cpp 的 /export 同一个渲染器（无脚本、无外部资源）
+      const exp = el('button', 'del');
+      exp.innerHTML = icon('download');
+      exp.title = '导出为 HTML';
+      exp.onclick = async (e) => {
+        e.stopPropagation();
+        try {
+          const r = await cmd('session.export', { id: s.id, open: true });
+          toast(`已导出 ${r.messages} 条消息`, 'ok', 3200);
+        } catch (err) { toast(err.message, 'err'); }
+      };
+      row.append(grow, exp, del);
       if (!s.current) {
         row.style.cursor = 'pointer';
         row.onclick = async () => {
@@ -417,17 +441,135 @@ async function openSessions() {
     }
     body.appendChild(sect);
     body.appendChild(el('div', 'btn-row', actionBtn('开一条新会话', async () => {
+      const before = S.session;
       await cmd('session.new');
       await refreshState();
       closeDrawer();
+      // 当前会话一句话都没说时后端不会新建（免得攒一堆空壳），说一声免得以为没反应
+      if (S.session === before) toast('这条还是空的，已经在里面了');
     }, 'btn primary')));
   });
+}
+
+/* ---------------- 工具调用记录 ---------------- */
+function openToolLog() {
+  openDrawer('工具调用', 'tools', (body) => {
+    const n = S.toolLog.length;
+    const mine = S.session ? S.toolLog.filter(r => r.session === S.session).length : n;
+    const sect = el('div', 'sect');
+    sect.appendChild(el('div', 'sect-h', '调用记录'));
+
+    const bar = el('div', 'log-bar');
+    bar.appendChild(el('span', 'log-n', n
+      ? `最近 ${n} 次 · 本次会话 ${mine} 次`
+      : '还没有调用'));
+    if (n) {
+      const clear = el('button', 'btn sm ghost', '清空');
+      clear.onclick = () => {
+        S.toolLog = [];
+        toolLogSave();
+        buildDrawer();
+      };
+      bar.appendChild(clear);
+    }
+    sect.appendChild(bar);
+
+    if (!n) {
+      sect.appendChild(el('div', 'empty', '她用工具的时候（读文件、跑命令、搜内容），这里会一条条记下来。'));
+    }
+    for (const rec of S.toolLog.slice().reverse()) {
+      const row = el('div', 'tool-log-row');
+      const when = el('div', 'tl-when');
+      when.textContent = fmtStamp((rec.ts || 0) / 1000) +
+        (rec.session && S.session && rec.session !== S.session ? ' · 别的会话' : '');
+      row.appendChild(when);
+      row.appendChild(toolCard(rec).det);
+      sect.appendChild(row);
+    }
+    body.appendChild(sect);
+    const tip = el('div', 'tip',
+      '记录只留最近 300 条，存在这台机器上（localStorage）。'
+      + '点开每一条能看到参数和输出；历史正文里不带工具痕迹，所以要回看只能在这里。');
+    tip.style.cssText = 'font-size:11px;color:var(--faint);line-height:1.7';
+    body.appendChild(tip);
+  });
+}
+
+/* ---------------- 侧边栏收纳 ----------------
+   收起后 rail 只剩一条 22px 的窄边（把手箭头反转），状态记在 localStorage。 */
+const RAIL_KEY = 'agent.rail.off';
+
+function applyRailState() {
+  const off = localStorage.getItem(RAIL_KEY) === '1';
+  $('#app').classList.toggle('rail-off', off);
+  const b = $('#btn-rail');
+  if (b) b.title = off ? '展开侧边栏' : '收起侧边栏';
+}
+function toggleRail() {
+  const off = !$('#app').classList.contains('rail-off');
+  localStorage.setItem(RAIL_KEY, off ? '1' : '0');
+  applyRailState();
+}
+
+/* ---------------- 思考强度（输入栏里的胶囊） ----------------
+   五档，点一下在按钮上方弹出选择。档位存在后端（think.set），所以刷新、
+   换设备都跟着走；按钮本身只是它的显示。 */
+let THINK_MENU = null;
+
+function closeThinkMenu() {
+  if (!THINK_MENU) return;
+  THINK_MENU.remove();
+  THINK_MENU = null;
+  document.removeEventListener('pointerdown', thinkMenuOutside, true);
+}
+function thinkMenuOutside(e) {
+  if (!THINK_MENU) return;
+  if (THINK_MENU.contains(e.target) || e.target === $('#btn-think') || $('#btn-think').contains(e.target)) return;
+  closeThinkMenu();
+}
+
+function openThinkMenu() {
+  if (THINK_MENU) { closeThinkMenu(); return; }
+  const anchor = $('#btn-think');
+  const menu = el('div', 'think-menu');
+  menu.appendChild(el('div', 'think-hd', '思考强度'));
+  THINK_ZH.forEach((label, i) => {
+    const b = el('button', 'think-opt' + (i === S.thinking ? ' on' : ''), label);
+    b.onclick = async () => {
+      closeThinkMenu();
+      if (i === S.thinking) return;
+      try {
+        await cmd('think.set', { level: i });
+        await refreshState();
+      } catch (e) { toast(e.message, 'err'); }
+    };
+    menu.appendChild(b);
+  });
+  document.body.appendChild(menu);
+  const r = anchor.getBoundingClientRect();
+  menu.style.left = Math.round(r.left - 6) + 'px';
+  menu.style.bottom = Math.round(window.innerHeight - r.top + 8) + 'px';
+  THINK_MENU = menu;
+  // 捕获阶段：点面板外先关掉，别让它顺手触发别的按钮
+  setTimeout(() => document.addEventListener('pointerdown', thinkMenuOutside, true), 0);
+}
+
+function paintThink() {
+  const b = $('#btn-think');
+  if (!b) return;
+  const lv = THINK_ZH[S.thinking] || '关';
+  b.classList.toggle('on', (S.thinking || 0) > 0);
+  $('#think-lv').textContent = lv;
+  b.title = `思考强度：${lv}${S.thinking ? '（关掉更快，开高更慢）' : '（点一下调）'}`;
 }
 
 /* ---------------- 全局按钮 ---------------- */
 function wireGlobal() {
   $('#btn-send').onclick = () => (S.busy ? stopTurn() : sendCurrent());
   $('#btn-mic').onclick = toggleMic;
+  $('#btn-think').onclick = openThinkMenu;
+  $('#btn-rail').onclick = toggleRail;
+  $('#btn-tools').onclick = openToolLog;
   $('#btn-voice').onclick = async () => {
     try {
       const r = await cmd('ui.pref', { voice_reply: !S.voice_reply });

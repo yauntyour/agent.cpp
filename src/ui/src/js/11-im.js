@@ -113,6 +113,8 @@ function imChannelRow(c) {
     bits.push('角色 ' + (p ? (p.name || p.id) : c.persona));
   }
   bits.push(`收 ${c['in'] || 0} · 发 ${c.out || 0}`);
+  if (c.queued) bits.push(`队列 ${c.queued}`);
+  if (c.dropped) bits.push(`丢弃 ${c.dropped}`);
   bits.push(imPolicyText(c));
   left.appendChild(el('div', 'mod-sub', bits.join(' · ')));
   row.append(left, el('span', 'mod-go', '›'));
@@ -151,7 +153,10 @@ function imDetail(c) {
   const stateText = !live ? '未启用' : (c.state === 'error' ? '出错' : (c.state === 'running' ? '运行中' : '已停止'));
   top.appendChild(el('span', 'badge' + (live && c.state !== 'error' ? ' ok' : (live ? ' warn' : '')), stateText));
   head.appendChild(top);
-  head.appendChild(el('div', 'card-sub', `收 ${c['in'] || 0} · 发 ${c.out || 0}`));
+  const paceText = `间隔 ${c.send_delay_ms == null ? 600 : c.send_delay_ms}ms`
+    + ` · 队列 ${c.queued || 0}/${c.queue_limit == null ? 64 : c.queue_limit}`
+    + (c.dropped ? ` · 丢弃 ${c.dropped}` : '');
+  head.appendChild(el('div', 'card-sub', `收 ${c['in'] || 0} · 发 ${c.out || 0} · ${paceText}`));
   if (c.last_error) head.appendChild(el('div', 'tip', c.last_error));
   box.appendChild(head);
 
@@ -267,6 +272,7 @@ function imForm(initial, submitLabel, onSave) {
   // 空 = 私聊开放 + 群聊关闭；非空 = 私聊白名单 + 群里白名单用户 @ 才回。
   const state = Object.assign({
     allow: [], limit: 0, enabled: true, proxy: '', persona: '',
+    send_delay_ms: 600, queue_limit: 64,
     private_mode: 'open', private_allow: [], group_mode: 'off', group_allow: [], group_ids: [],
   }, initial);
   if (state.persona == null) state.persona = '';
@@ -375,6 +381,17 @@ function imForm(initial, submitLabel, onSave) {
       policy.appendChild(field('每条上限', mk('limit', '0 = 平台默认', 'number'),
         '超长回复按句末自动分条，最多四条。'));
       fields.appendChild(policy);
+
+      // 发送节奏：平台对同一会话的速率限制是硬的，撞上去就是 429 / 风控。
+      const pace = el('div', 'im-policy');
+      pace.appendChild(el('div', 'sect-h', '发送节奏'));
+      pace.appendChild(field('发送间隔（毫秒）', mk('send_delay_ms', '600', 'number'),
+        '两条消息之间的最小间隔，0 = 不限速。被平台限流时调大：Telegram 建议 ≥1000，'
+        + 'QQ（NapCat）与企业微信 600~1200 都稳。一次长回复被切成几条时，这几条也算。'));
+      pace.appendChild(field('队列上限', mk('queue_limit', '64', 'number'),
+        '出站消息先排队、再按间隔发。积压超过上限就丢最旧的（新的更该送到），'
+        + '详情页会显示「队列 N · 丢弃 M」。'));
+      fields.appendChild(pace);
     }
     const tip = el('div', 'tip', IM_HELP[k] || '选一种接法。凭据加密保存在 .agent/.crypt 里，不进 agent.json。');
     tip.style.lineHeight = '1.7';

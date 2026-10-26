@@ -6,6 +6,7 @@
 const LIVE = {
   node: null, body: null, raw: '', reasoning: '', rnode: null, rbody: null, rsum: null,
   started: false, streaming: false, pendingAct: '', reasonTouched: false,
+  toolPending: [],
 };
 let pinned = true;  // 视口是否贴着底部
 let autoScroll = 0; // >0：这一次滚动是我们自己做的，别当成「用户翻走了」
@@ -158,6 +159,136 @@ function paintHistory() {
   stick(true);
 }
 
+/* ---------------- 工具调用记录 ----------------
+   两条通道，同一份数据：
+   - 回合内联：每调一次就在正文边上落一条窄条（点开看参数和输出）；
+   - 记录面板：S.toolLog 累积本次运行的所有调用，按会话存 localStorage，
+     刷新之后还翻得到（历史正文里没有工具痕迹，所以只能靠这份日志）。 */
+const TOOL_LOG_KEY = 'agent.tool.log';
+const TOOL_LOG_MAX = 300;
+
+function toolLogLoad() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(TOOL_LOG_KEY) || '[]');
+    if (Array.isArray(raw)) S.toolLog = raw.filter(x => x && x.name);
+  } catch { }
+}
+function toolLogSave() {
+  try { localStorage.setItem(TOOL_LOG_KEY, JSON.stringify(S.toolLog)); } catch { }
+}
+function toolLogPush(rec) {
+  S.toolLog.push(rec);
+  if (S.toolLog.length > TOOL_LOG_MAX) S.toolLog.splice(0, S.toolLog.length - TOOL_LOG_MAX);
+  toolLogSave();
+}
+
+/* 参数里挑最有信息量的那一个当标题，没有就摊平前几个键 */
+function toolArgBrief(args) {
+  let a = args;
+  if (typeof a === 'string') {
+    try { a = JSON.parse(a); } catch { return String(a).slice(0, 90); }
+  }
+  if (!a || typeof a !== 'object') return '';
+  for (const k of ['path', 'cmd', 'command', 'pattern', 'query', 'url', 'text', 'name', 'mode']) {
+    if (typeof a[k] === 'string' && a[k]) return a[k].slice(0, 96);
+  }
+  return Object.keys(a).slice(0, 3).map(k => k + '=' + String(a[k]).slice(0, 28)).join(' ');
+}
+function toolStatusText(rec) {
+  if (rec.status === 'running') return '执行中';
+  if (rec.status === 'ok') return rec.sec ? rec.sec.toFixed(2) + 's' : '完成';
+  return ({ failed: '失败', blocked: '被拒', unknown: '未知', exception: '异常' }[rec.status]) || '失败';
+}
+
+/* 一条工具调用：details 展开看参数 + 输出 */
+function toolCard(rec, live) {
+  const det = el('details', 'tool-call');
+  const sum = el('summary');
+  const status = el('span', 'tc-status ' + (rec.status === 'running' ? 'run' : (rec.status === 'ok' ? 'ok' : 'fail')));
+  sum.appendChild(el('span', 'tc-name', rec.name || 'tool'));
+  sum.appendChild(el('span', 'tc-arg', rec.brief || ''));
+  sum.appendChild(el('span', 'tc-meta', ''));
+  sum.appendChild(status);
+  const body = el('div', 'tc-body');
+  det.append(sum, body);
+  const view = { det, sum, body, status, meta: sum.querySelector('.tc-meta'), rec };
+  toolCardPaint(view);
+  if (live) det.open = false;
+  return view;
+}
+function toolCardPaint(view) {
+  const rec = view.rec;
+  view.status.className = 'tc-status ' + (rec.status === 'running' ? 'run' : (rec.status === 'ok' ? 'ok' : 'fail'));
+  view.status.textContent = toolStatusText(rec);
+  view.meta.textContent = rec.chars ? rec.chars + ' 字' : '';
+  const bits = [];
+  if (rec.args) bits.push('参数：' + rec.args);
+  if (rec.output) bits.push('输出：' + rec.output);
+  view.body.textContent = bits.join('\n\n') || '（没有输出）';
+}
+/* 记录面板开着时实时跟着更新，但别把滚动位置弄丢 */
+function toolPanelRedraw() {
+  if (typeof paintDrawer !== 'function' || DRAWER.current !== 'tools') return;
+  const body = $('#drawer-body');
+  const top = body ? body.scrollTop : 0;
+  paintDrawer();
+  if (body) body.scrollTop = top;
+}
+
+/* 工具开始：日志里落一条 running，正文边上落一张卡片 */
+function toolBegin(m) {
+  const rec = {
+    id: 't' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6),
+    ts: Date.now(),
+    session: S.session || '',
+    name: m.name || 'tool',
+    args: String(m.args || '').slice(0, 400),
+    brief: toolArgBrief(m.args),
+    status: 'running',
+    sec: 0, chars: 0, output: '',
+  };
+  toolLogPush(rec);
+  if (!LIVE.node) ensureLiveNode();
+  const host = LIVE.node && LIVE.node.querySelector('.body');
+  if (host) {
+    const view = toolCard(rec, true);
+    host.appendChild(view.det);
+    LIVE.toolPending.push(view);
+  }
+  stick();
+  toolPanelRedraw();
+}
+
+/* 工具结束：认领最近一个同名的 running 卡片（seq 每轮从 1 数起，不能当唯一键） */
+function toolEnd(m) {
+  const name = m.name || 'tool';
+  let idx = -1;
+  for (let i = LIVE.toolPending.length - 1; i >= 0; i--) {
+    if (LIVE.toolPending[i].rec.name === name) { idx = i; break; }
+  }
+  if (idx < 0 && LIVE.toolPending.length) idx = LIVE.toolPending.length - 1;
+  let rec;
+  if (idx >= 0) {
+    const view = LIVE.toolPending.splice(idx, 1)[0];
+    rec = view.rec;
+    rec.status = m.status || 'unknown';
+    rec.sec = m.sec || 0;
+    rec.chars = m.chars || 0;
+    rec.output = String(m.output || '').slice(0, 800);
+    toolCardPaint(view);
+  } else {
+    // 没收到 begin（中途刷新之类）：补一条收尾记录，记录面板里不至于丢掉
+    rec = {
+      id: 't' + Date.now().toString(36), ts: Date.now(), session: S.session || '',
+      name, args: '', brief: toolArgBrief(m.args), status: m.status || 'unknown',
+      sec: m.sec || 0, chars: m.chars || 0, output: String(m.output || '').slice(0, 800),
+    };
+    toolLogPush(rec);
+  }
+  toolLogSave(); // begin 时 push 的就是这个对象，改完就地落盘
+  toolPanelRedraw();
+}
+
 /* ---------------- 流式 ---------------- */
 function ensureLiveNode() {
   if (LIVE.node) return;
@@ -180,6 +311,7 @@ function ensureLiveNode() {
   LIVE.rsum = null;
   LIVE.reasonTouched = false;
   LIVE.started = false;
+  LIVE.toolPending = [];
   pinned = true;
   stick(true);
 }
@@ -329,6 +461,12 @@ onEvent((m) => {
     case 'progress':
       if (!LIVE.node) showTyping('正在想');
       break;
+    case 'tool_begin':
+      toolBegin(m);
+      break;
+    case 'tool_end':
+      toolEnd(m);
+      break;
     case 'status':
       if (m.d && /compact|summar/i.test(m.d)) showTyping('整理记忆');
       break;
@@ -461,14 +599,17 @@ function paintComposer() {
     ? '先创建一个角色…'
     : (S.busy ? '正在回应… 点右边停止' : '说点什么…（Enter 发送，Shift+Enter 换行）');
   $('#btn-mic').disabled = !S.asr.enabled || none;
-  $('#btn-mic').title = S.asr.enabled ? '点击开始 / 结束录音' : '还没有配置语音识别服务';
+  $('#btn-mic').title = S.asr.enabled
+    ? `点击开始 / 结束录音${S.mic_hotkey ? `；按住 ${S.mic_hotkey} 说话` : ''}`
+    : '还没有配置语音识别服务';
   $('#btn-mic').classList.toggle('rec', S.recording);
+  if (typeof paintThink === 'function') paintThink();
   // 发送键：回合中它永远是「停止」；平时文字与附件都空才置灰
   const hasText = !!input.value.trim();
   btn.disabled = !S.busy && (none || (!hasText && !ATTACH.items.length));
   const hint = $('#composer-hint');
   if (S.recording) {
-    hint.textContent = '正在听…再点一次结束，随后自动转写';
+    hint.textContent = `正在听…${S.mic_hotkey ? `松开 ${S.mic_hotkey}` : '再点一次'}结束，随后自动转写`;
     hint.classList.add('rec');
   } else if (ATTACH.items.length) {
     hint.textContent = '已选 ' + ATTACH.items.length + ' / ' + ATTACH.max + ' 个附件 · Enter 发送';
