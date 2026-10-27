@@ -3992,6 +3992,7 @@ namespace app
                 return true;
             }
             std::vector<std::string> voice_paths;
+            std::vector<std::string> transcribed_paths; // 转写成功的语音：正文就是它，不再算附件
             bool voice_lost = false;
             for (auto &ref : m.media)
             {
@@ -4067,6 +4068,9 @@ namespace app
                 std::string ts, err;
                 if (voice::asr(asr, path, ts, err) && !cell::text::trim(ts).empty())
                 {
+                    log.info("im", std::format("asr ok chan={} chars={} file={}",
+                                               ch.id, ts.size(), path));
+                    transcribed_paths.push_back(path);
                     std::string line = "（语音转写：" + cell::text::trim(ts) + "）";
                     std::string cur = cell::text::trim(m.text);
                     m.text = cur.empty() ? line : cur + "\n" + line;
@@ -4081,6 +4085,16 @@ namespace app
                                                   err.empty() ? "没听清" : clip_utf8(err, 60)));
                 }
             }
+            // 已经转写成正文的语音不再是附件：上下文里只留那句话，桌面历史也只显示它。
+            // 否则模型会为了“看看附件里是什么”再花一轮 read —— 本地小模型在工具回合
+            // 之后容易只输出思考、正文为空，回合就哑了。音频文件本身仍留在 uploads/ 存档。
+            if (!transcribed_paths.empty())
+                std::erase_if(m.media, [&](const im::media_ref &r)
+                              {
+                                  return r.kind == "audio" && !r.local.empty() &&
+                                         std::find(transcribed_paths.begin(), transcribed_paths.end(),
+                                                   r.local) != transcribed_paths.end();
+                              });
             return true;
         }
         // 正文里自带的 [attach:…] 清单行 → 真正的附件（图片 / 语音 / 视频 / 文件都行）。
@@ -4517,13 +4531,22 @@ namespace app
             if (!items.empty())
             {
                 tagged += media::manifest(items);
-                tagged += media::manifest_hint(items.size());
-                tagged += "\n";
-                bool has_audio = false;
+                // 已经转写过的语音不要再劝模型去 read 音频：那句提示会把它带偏
+                // （读 .amr 失败后这条回复就哑了）。纯音频 + 已有转写 = 不用提示；
+                // 混着图片 / 文件时还是得提示，那些确实要自己读。
+                bool has_audio = false, all_audio = true;
                 for (auto &it : items)
+                {
                     if (it.kind == "audio")
                         has_audio = true;
-                if (has_audio && m.text.find("语音转写：") == std::string::npos)
+                    else
+                        all_audio = false;
+                }
+                const bool transcribed = m.text.find("语音转写：") != std::string::npos;
+                if (!(transcribed && all_audio))
+                    tagged += media::manifest_hint(items.size());
+                tagged += "\n";
+                if (has_audio && !transcribed)
                     tagged += "（语音可能要先转写：可以用 read 打开音频，或在设置里配置语音识别。）\n";
             }
             c->last_active = std::chrono::steady_clock::now();
@@ -5121,6 +5144,24 @@ namespace app
             }
             return arr;
         }
+        // 历史展示用：剥掉 IM 来源标记「From 平台@[私聊 / 群聊：群名]-用户：」，
+        // 只留正文。模型上下文和落盘记录不动，那两处还要靠标记知道「谁、从哪来」。
+        // 群名里可能自带全角冒号，所以先找「@[」再找「]-」，最后才取分隔冒号。
+        static std::string strip_im_origin(const std::string &text)
+        {
+            if (text.rfind("From ", 0) != 0)
+                return text;
+            size_t at = text.find("@[");
+            if (at == std::string::npos || at > 64) // 平台名只有几个字：这里只是防误伤
+                return text;
+            size_t dash = text.find("]-", at + 2);
+            if (dash == std::string::npos)
+                return text;
+            size_t c = text.find("：", dash);
+            if (c == std::string::npos)
+                return text;
+            return cell::text::trim(text.substr(c + 3)); // 全角冒号占 3 字节
+        }
         nlohmann::json history_json(persona_ctx &c, size_t cap = 60)
         {
             nlohmann::json out = nlohmann::json::array();
@@ -5142,6 +5183,9 @@ namespace app
                         text = strip_markers(text);
                     auto items = media::parse_manifest(text);
                     text = media::strip_manifest(text);
+                    // 用户行是 IM 来的还带着来源标记：展示时只留正文
+                    if (role == "user")
+                        text = strip_im_origin(text);
                     nlohmann::json atts = attachments_json(c.p.id, items);
                     if (text.empty() && atts.empty())
                         return;
@@ -5240,12 +5284,7 @@ namespace app
                 out = cell::text::trim(out);
                 // IM 来的消息带来源标记（From 平台@[群聊：群名]-用户：正文），
                 // 列表里只看正文；剥完如果什么都不剩，就翻下一条
-                if (out.rfind("From ", 0) == 0)
-                {
-                    size_t c = out.find("：");
-                    if (c != std::string::npos && c < 96)
-                        out = cell::text::trim(out.substr(c + 3)); // 全角冒号占 3 字节
-                }
+                out = strip_im_origin(out);
                 if (out.empty())
                     continue;
                 if (out.size() > cap)

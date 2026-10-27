@@ -311,8 +311,9 @@ namespace app::media
             bool drop = manifest_prefix(line);
             if (!drop && line.rfind("（对方发来了 ", 0) == 0 && line.find("个附件") != std::string_view::npos)
                 drop = true;
-            // 语音转写的提示同样是给模型看的元信息，历史里不展示
-            if (!drop && line.rfind("（语音", 0) == 0)
+            // 「（语音可能要先转写：…）」是给模型看的元信息，历史里不展示；
+            // 「（语音转写：…）」是这条消息真正的正文，必须留着
+            if (!drop && line.rfind("（语音可能要先转写", 0) == 0)
                 drop = true;
             if (!drop)
             {
