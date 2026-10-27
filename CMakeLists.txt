@@ -77,6 +77,22 @@ endif()
 
 add_executable(agent src/agent.cpp)
 
+# ---- 两条已知的编译器噪音 ----------------------------------------------------
+# 1) clang 在 C++26 模式下仍把 #embed 当作 C23 扩展来报（-Wc23-extensions），
+#    agent-live2d.hpp 里 18 个 #embed 每个报一条。那里是**故意**用 #embed 的：
+#    拿不到就整块退化成 kAssetCount = 0（见 build_live2d.py），所以只在 clang 下
+#    关这一条，别动别的扩展告警。
+# 2) GCC 14 在 -O3 下对 qr.hpp 的 vector 下标误报 -Wstringop-overflow
+#    （"writing 1 byte into a region of size 0"，offset [-10, -3]）：VRP 推不出
+#    运行期算出来的 size 的下界，属 GCC 已知的假阳性，本机 GCC 16 已不复现。
+#    qr.hpp 的正确性由 _scratch/qr_selftest 与 Python qrcode 库逐位对照过，
+#    所以这里只关这一条，不关别的 stringop 检查。
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(agent PRIVATE -Wno-c23-extensions)
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(agent PRIVATE -Wno-stringop-overflow)
+endif()
+
 target_include_directories(agent PRIVATE
     "${CMAKE_SOURCE_DIR}/src"                  # agent-core.hpp, agent-voice.hpp, agent-ui.hpp
     "${CMAKE_SOURCE_DIR}/third_party/include"  # webview/, servic.hpp, router/
