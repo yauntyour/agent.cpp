@@ -250,6 +250,7 @@ jobs:
   # ---------------------------------------------------------------- Release ---
   # 只有手动触发且勾了 publish 才发版：push 里写 release 只负责「构建」，
   # 版本号/tag 得人来定，别让一条 commit 消息自动占掉 tag。
+  # 附件只有三个可执行文件（不打包、不发校验和文件），发行说明由下面那步生成。
   release:
     name: Release
     if: ${{ inputs.publish && needs.gate.outputs.build == 'true' }}
@@ -272,25 +273,78 @@ jobs:
         with:
           path: dist
 
-      - name: Package
+      # 只发可执行文件：三个平台各一个，不再打 zip/tar。GitHub 会自动附上
+      # "Source code (zip / tar.gz)"，那两个去不掉，也不该由我们负责。
+      - name: Collect the binaries
+        env:
+          TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          cd dist
-          for d in agent-*/; do
-            d=${d%/}
-            case "$d" in
-              agent-windows-*) (cd "$d" && zip -q -r "../$d.zip" .) ;;
-              *)               tar -czf "$d.tar.gz" -C "$d" . ;;
-            esac
-            rm -rf "$d"
-          done
-          sha256sum ./* > SHA256SUMS.txt
-          ls -lh
+          mkdir -p out
+          cp dist/agent-windows-x64/agent.exe "out/agent-${TAG}-windows-x64.exe"
+          cp dist/agent-linux-x64/agent       "out/agent-${TAG}-linux-x64"
+          cp dist/agent-macos-arm64/agent     "out/agent-${TAG}-macos-arm64"
+          chmod +x out/agent-*-linux-x64 out/agent-*-macos-arm64
+          ls -lh out
+
+      # 发行说明自己写：构建时间（本地时区 + UTC）、提交、流水线链接，
+      # 每个文件的大小与 SHA-256，以及一句用法。校验和放在正文里，不额外发文件。
+      - name: Write the release notes
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          bj="$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')"
+          utc="$(date -u '+%Y-%m-%d %H:%M:%S')"
+          sha="$(printf '%s' "${GITHUB_SHA}" | cut -c1-7)"
+          commit_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          row() { # row <文件> <平台>
+            [ -f "$1" ] || { echo "::error::缺少 $1（构建产物没下载到）" >&2; exit 1; }
+            printf '| %s | `%s` | %s | `%s` |\n' \
+              "$2" "$(basename "$1")" \
+              "$(du -h "$1" | cut -f1 | tr -d ' ')" \
+              "$(sha256sum "$1" | cut -d' ' -f1)"
+          }
+
+          {
+            echo "## agent.cpp \`${TAG}\`"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| 构建时间 | ${bj}（北京时间） · ${utc} UTC |"
+            echo "| 提交 | [\`${sha}\`](${commit_url}) |"
+            echo "| 分支 | \`${GITHUB_REF_NAME}\` |"
+            echo "| 流水线 | [#${GITHUB_RUN_NUMBER}](${run_url}) |"
+            echo
+            echo "### 下载"
+            echo
+            echo "| 平台 | 文件 | 大小 | SHA-256 |"
+            echo "|---|---|---|---|"
+            row "out/agent-${TAG}-windows-x64.exe" "Windows x64"
+            row "out/agent-${TAG}-linux-x64" "Linux x64"
+            row "out/agent-${TAG}-macos-arm64" "macOS arm64"
+            echo
+            echo "### 用法"
+            echo
+            echo '```sh'
+            echo "chmod +x agent-${TAG}-linux-x64   && ./agent-${TAG}-linux-x64"
+            echo "chmod +x agent-${TAG}-macos-arm64 && ./agent-${TAG}-macos-arm64"
+            echo '```'
+            echo
+            echo "Windows 直接运行 \`agent-${TAG}-windows-x64.exe\`。"
+            echo
+            echo "> Linux 侧需要 GTK3 + WebKitGTK；macOS 的二进制未签名、未公证，"
+            echo "> 首次运行可能要在「系统设置 → 隐私与安全性」里放行。"
+          } > release-notes.md
+          cat release-notes.md
 
       - uses: softprops/action-gh-release@v2
         with:
+          name: agent.cpp ${{ inputs.tag }}
           tag_name: ${{ inputs.tag }}
-          files: dist/*
+          body_path: release-notes.md
+          files: out/*
           prerelease: ${{ contains(inputs.tag, 'nightly') }}
-          generate_release_notes: true
           fail_on_unmatched_files: true

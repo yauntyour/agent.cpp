@@ -163,13 +163,15 @@ CMake 选项：
 `.github/workflows/build.yml`：三个平台各编一次，产物挂在 Actions 的 artifact 上。触发条件只有两个：
 
 - **push 到 `main` / `master`，且这次 push 的最新一条 commit 消息里含 `release`** —— 不区分大小写、只看首行（`release` / `release: v0.2` / `Release 0.2` 都算）。不含就整条流水线跳过，只留一个 `gate` job 记一行日志。
-- **手动 workflow_dispatch** —— 勾 `publish` 并填 `tag` 时，构建完顺便把三份产物打包发 Release（不勾就只构建）。
+- **手动 workflow_dispatch** —— 勾 `publish` 并填 `tag` 时，构建完顺便发 Release（不勾就只构建）。
 
-| job | 环境 | 产物 |
-| --- | --- | --- |
-| windows | MSYS2 UCRT64（gcc / ninja / 静态 curl + libsodium） | `agent-windows-x64.zip`（单文件 exe） |
-| linux | ubuntu-24.04 + g++-14 + GTK3 / WebKitGTK | `agent-linux-x64.tar.gz` |
-| macos | macos-latest（arm64，切最新 Xcode）| `agent-macos-arm64.tar.gz` |
+| job | 环境 | Actions artifact | Release 附件 |
+| --- | --- | --- | --- |
+| windows | MSYS2 UCRT64（gcc / ninja / 静态 curl + libsodium） | `agent-windows-x64`（单文件 exe） | `agent-<tag>-windows-x64.exe` |
+| linux | ubuntu-24.04 + g++-14 + GTK3 / WebKitGTK | `agent-linux-x64` | `agent-<tag>-linux-x64` |
+| macos | macos-latest（arm64，Apple clang + `third_party/compat`） | `agent-macos-arm64` | `agent-<tag>-macos-arm64` |
+
+Release **只挂可执行文件**，不打 zip/tar、不发校验和文件；发行说明由 workflow 生成，包含构建时间（北京时间 + UTC）、提交、分支、流水线链接、每个文件的体积与 SHA-256、以及用法。（GitHub 自动附的 "Source code" 两个包去不掉，也不该由我们负责。）
 
 工具链下限由 `cell.cpp` 决定：它无条件 `#include <generator>` / `<expected>`，还用 `std::move_only_function`。
 
