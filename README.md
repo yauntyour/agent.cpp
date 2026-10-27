@@ -171,18 +171,18 @@ CMake 选项：
 | linux | ubuntu-24.04 + g++-14 + GTK3 / WebKitGTK | `agent-linux-x64.tar.gz` |
 | macos | macos-latest（arm64，切最新 Xcode）| `agent-macos-arm64.tar.gz` |
 
-工具链下限由 `cell.cpp` 决定：它无条件 `#include <generator>` / `<expected>`，所以要有 libstdc++ ≥ 14（GCC 14）或 libc++ ≥ 19。每个 job 先用 `#include <generator>` 探一次，探不到立刻报错（别等编三分钟）。
+工具链下限由 `cell.cpp` 决定：它无条件 `#include <generator>` / `<expected>`，还用 `std::move_only_function`。
 
-macOS 这块有坑，实测过两轮：镜像里 Xcode 26.6（Apple clang 21）直接报 `'generator' file not found`，换 `brew install llvm` 也是同一句。原因是 **homebrew 的 llvm 只装 libc++ 的库（`lib/c++`、`lib/unwind`），不装头文件** —— 它自己的测试也是拿系统 SDK 的 `usr/include/c++/v1` 当头用（见 `llvm.rb` 里 "These tests should ignore the usual SDK includes" 那段）。所以光换编译器、甚至再加 `-nostdinc++` 指一个不存在的 `include/c++/v1`，只会把头文件全掐掉、报错一模一样。
+**libc++ 缺 C++23 的两块**：既没有 `<generator>`（P2502R2），也没有 `std::move_only_function`（P0288R9）—— 系统那份和 Homebrew LLVM 那份都没有（查到 LLVM 23）；libstdc++ 从 GCC 14/12 起就有，MSVC 从 19.43/19.32 起就有。所以「libc++ ≥ 19 / Xcode ≥ 16.3」这个说法是错的，macOS 上 Xcode 26.6（Apple clang 21）直接报 `'generator' file not found`。
 
-真正的办法是先搞清**机器上哪份 libc++ 真的带 `<generator>`**，这段逻辑在 `.github/scripts/pick-macos-cxx.sh` 里，按顺序试：
+补法沿用 cell-app 的既有约定，`third_party/compat/` 三个文件与那边**逐字一致**：
 
-1. Xcode 的 clang++ 默认路径；
-2. Xcode 的 clang++ + 本机任意一份含 `generator` 的 libc++ 头目录（`-nostdinc++ -isystem <dir>`，扫描 Xcode 工具链 / SDK / CLT / brew 前缀）；
-3. `brew install llvm` 的 clang++（头目录仍在上面那批里找；如果头目录来自 brew 前缀，才配 `-L lib/c++ -L lib/unwind -lunwind` 和 `-D_LIBCPP_DISABLE_AVAILABILITY`）；
-4. `brew install gcc` 的 `g++-NN`（libstdc++ 从 14 起就有 `<generator>`，完全不碰 libc++）。
+- `compat/generator` —— `__has_include_next(<generator>)` 成立就 `#include_next` 转发，否则给出兜底实现；
+- `compat/functional` + `compat/move_only_function.hpp` —— 转发真的 `<functional>`，只在 `__cpp_lib_move_only_function` 缺席时把替身 alias 进 `namespace std`。
 
-全都失败时脚本会把 `xcode-select -p`、`--show-sdk-path`、各关键头目录是否存在/是否含 `generator`、以及默认 clang 的头搜索列表全打出来再 `::error::`，不用再猜。选中的 `cxx / cxxflags / ldflags` 经 step outputs 传给 `CMAKE_CXX_COMPILER / CMAKE_CXX_FLAGS / CMAKE_EXE_LINKER_FLAGS`。
+**判定在 CMake 里，不在 CI 里**（`CMakeLists.txt` 的 `check_include_file_cxx` / `check_cxx_source_compiles`）：标准库给不出时才把 `third_party/compat` 以 `SYSTEM BEFORE` 挂上 include 路径。所以本机 `cmake` 和 CI 得到同样的结果，CI 脚本只负责挑一个能编 C++26 的 clang（`xcrun -f clang++` 就够，brew llvm 只是兜底）。
+
+因为 `compat/` 里的头自己用 `#include_next` 转发，**有真实现就一定让位**：`g++ -H` 的头部树能看到 `. compat/generator` → `.. <stdlib>/generator` 这一层。等 macOS 的 libc++ 补上这两个特性，两个 check 都不再命中，`compat/` 与 CMake 那段一起删掉即可 —— 它就是个过渡件。
 
 `#embed` 是另一回事：要 GCC ≥ 15 / Clang ≥ 19。拿不到时 `build_live2d.py` 把 `kAssetCount` 置 0，exe 里不自带默认 Live2D 模型，其余功能不变。
 

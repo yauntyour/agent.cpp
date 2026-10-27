@@ -1,0 +1,43 @@
+// <functional> compatibility header -------------------------------------------
+// -----------------------------------------------------------------------------
+// libc++ does not implement C++23's std::move_only_function (P0288R9): the
+// upstream status page still lists the paper as in progress (checked up to
+// LLVM 23), while libstdc++ ships it since GCC 12 and MSVC since 19.32.
+// cell.cpp needs it, so when the standard library cannot provide the C++23
+// pieces — the same CheckCXXSourceCompiles / CheckIncludeFileCXX probe that
+// brings in the neighbouring generator/ shim — CMakeLists.txt puts this
+// directory on the include path and this file extends the real <functional>
+// with the missing template.
+//
+// Unlike generator/, a real <functional> always exists, so this file must
+// never shadow it: include_next hands out the library's own header first and
+// only then, when __cpp_lib_move_only_function is absent (every libc++ to
+// date), is the stand-in from move_only_function.hpp aliased into namespace
+// std — the alias, not a redefinition, keeps the addition as small as it can
+// be.
+//
+// Forwarding needs #include_next, which clang and GCC both support; those are
+// the compilers the shim is ever selected for (see the CMakeLists.txt check).
+// A standard library that lacks the type but whose compiler cannot
+// include_next is not addressed here.
+//
+// Introducing std::move_only_function is formally UB (the standard reserves
+// the namespace); generator/ documents the same trade-off at length.
+// -----------------------------------------------------------------------------
+
+#pragma once
+
+#if defined(__has_include_next) && __has_include_next(<functional>)
+#include_next <functional>
+#else
+#error "third_party/compat/functional needs #include_next to extend the real <functional>"
+#endif
+
+#if !defined(__cpp_lib_move_only_function)
+#include "move_only_function.hpp"
+
+namespace std
+{
+    using ::cell::compat::move_only_function;
+} // namespace std
+#endif

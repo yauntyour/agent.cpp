@@ -82,6 +82,42 @@ target_include_directories(agent PRIVATE
     "${CMAKE_SOURCE_DIR}/third_party/include"  # webview/, servic.hpp, router/
     "${CMAKE_SOURCE_DIR}")                     # "cell.cpp/cell.cpp"
 
+# ---- C++23 compatibility shims ----------------------------------------------
+# 过渡性补丁，只为 Apple 的 libc++：它既没有 C++23 的 std::generator（P2502R2）
+# 也没有 std::move_only_function（P0288R9）—— 系统那份和 Homebrew LLVM 那份都没有
+# （查到 LLVM 23）；libstdc++ 从 GCC 14/12 起就有，MSVC 从 19.43/19.32 起就有。
+# cell.cpp 两样都要用，所以在标准库给不出的时候把 third_party/compat 挂到 include
+# 路径上（和 cell-app 同一套做法、同一份文件）。
+#
+# 为什么不用 CI 里塞 -isystem：判定应该跟着构建走，不该跟着某个 job 的脚本走 ——
+# 本机 cmake 也能得到同样的结果。而且 compat/ 里的头自己会用 #include_next 转发，
+# **有真实现就自动让位**，所以这里只决定「目录要不要挂」，不决定「用不用」。
+#
+# 等 macOS 的 libc++ 补上这两个特性，下面两个 check 都不再命中，这段就自动失效，
+# 届时连同 third_party/compat 一起删掉即可。
+include(CheckIncludeFileCXX)
+include(CheckCXXSourceCompiles)
+if(NOT MSVC)
+    # 老 CMake 不会把 CMAKE_CXX_STANDARD 带进这些 check，得显式给
+    set(_agent_compat_check_flag "-std=c++${AGENT_CXX_STANDARD}")
+endif()
+check_include_file_cxx("generator" AGENT_HAS_STD_GENERATOR ${_agent_compat_check_flag})
+set(CMAKE_REQUIRED_FLAGS "${_agent_compat_check_flag}")
+check_cxx_source_compiles("
+#include <functional>
+int main()
+{
+    std::move_only_function<void()> probe = [] {};
+    probe();
+    return probe ? 0 : 1;
+}" AGENT_HAS_STD_MOVE_ONLY_FUNCTION)
+unset(CMAKE_REQUIRED_FLAGS)
+if(NOT AGENT_HAS_STD_GENERATOR OR NOT AGENT_HAS_STD_MOVE_ONLY_FUNCTION)
+    message(STATUS "agent: standard library lacks <generator> / std::move_only_function — using third_party/compat")
+    target_include_directories(agent SYSTEM BEFORE PRIVATE
+        "${CMAKE_SOURCE_DIR}/third_party/compat")
+endif()
+
 # ---- platform wiring --------------------------------------------------------
 
 if(NOT WIN32)

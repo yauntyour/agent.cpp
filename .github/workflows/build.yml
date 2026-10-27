@@ -12,9 +12,9 @@ name: build
 # 所以工具链的下限是 libstdc++ >= 14（GCC 14）或 libc++ >= 19（Xcode >= 16.3）。
 # 这不是「-std=c++23 就能退」的事 —— 老 libc++ 根本没有这个头文件。每个 job 都
 # 先用 `#include <generator>` 探一次，探不到直接报错，别等到编了三分钟才炸。
-# 注意 macOS：光换编译器没用 —— 镜像里 Xcode 26.6 的 clang 21 就没有 <generator>，
-# 而 brew 的 llvm 只装 libc++ 的库、不装头文件。选编译器由
-# .github/scripts/pick-macos-cxx.sh 负责（找得到带 generator 的头就用，找不到退 gcc）。
+# 注意 macOS：libc++（含 Apple 那份）没有 <generator> / std::move_only_function，
+# 由 CMakeLists.txt 的 check_include_file_cxx 挂上 third_party/compat 补（过渡性，
+# 等 macOS 官方支持后这段自动失效）。CI 只负责挑一个能编 C++26 的 clang。
 # 另外 CMakeLists 默认 AGENT_CXX_STANDARD=26，而 #embed 要 GCC >= 15 / Clang >= 19，
 # 拿不到 #embed 时 build_live2d.py 会把 kAssetCount 置 0（exe 不带默认 Live2D 模型）。
 
@@ -214,11 +214,11 @@ jobs:
       - name: Install dependencies
         run: brew install ninja libsodium boost nlohmann-json
 
-      # 换编译器不够：镜像里 Xcode 26.6 的 clang 21 直接报 `'generator' file not found`，
-      # 而 `brew install llvm` **不装 libc++ 头文件**（只有 lib/c++ 下的库），所以它照样
-      # 读系统那份、照样失败。选编译器交给脚本：先在机器上找哪份 libc++ 真的带
-      # generator，一个都没有才退到 brew gcc（libstdc++ 从 14 起就有）。
-      - name: Pick a compiler that has <generator>
+      # <generator> / std::move_only_function 不在这里管：libc++ 两个都没有，由
+      # CMakeLists.txt 的 check_include_file_cxx 挂上 third_party/compat（compat 里的
+      # 头用 #include_next 转发，有真实现就自动让位）。这里只负责挑一个能编 C++26 的
+      # clang —— 镜像里的 Xcode 26.6（clang 21）就够，brew llvm 只是兜底。
+      - name: Pick a C++26 compiler
         id: cc
         run: bash .github/scripts/pick-macos-cxx.sh
 
@@ -227,8 +227,6 @@ jobs:
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CXX_COMPILER="${{ steps.cc.outputs.cxx }}" \
-            -DCMAKE_CXX_FLAGS="${{ steps.cc.outputs.cxxflags }}" \
-            -DCMAKE_EXE_LINKER_FLAGS="${{ steps.cc.outputs.ldflags }}" \
             -DAGENT_CXX_STANDARD=26
 
       - name: Build

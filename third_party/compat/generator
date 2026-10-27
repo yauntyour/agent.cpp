@@ -1,0 +1,158 @@
+// <generator> compatibility header ---------------------------------------------
+// -----------------------------------------------------------------------------
+// libc++ does not implement C++23's std::generator: neither the macOS system
+// libc++ nor the one shipped with Homebrew LLVM has a <generator> header
+// (checked up to LLVM 23), while libstdc++ ships one since GCC 14 and MSVC
+// since 19.43. cell.cpp needs std::generator, so CMakeLists.txt puts this
+// directory on the include path when — and only when — the standard library
+// cannot provide the header (see the CheckIncludeFileCXX block).
+//
+// If a real <generator> exists further down the search path, forward to it:
+// this file must never shadow a standard implementation.
+//
+// The fallback implements the subset cell.cpp relies on:
+//   * range-for over the yielded values (`for (auto x : gen)`), framed
+//     structured bindings included,
+//   * single-pass iteration; `break` (or any early destruction) destroys the
+//     suspended coroutine, so the walker's stack unwinds cleanly,
+//   * exceptions thrown in the coroutine body are rethrown at the point that
+//     resumes it (begin() or ++).
+// It is move-only and intentionally omits std::generator's nesting API
+// (`std::ranges::elements_of`); extend this file if cell.cpp starts using it.
+//
+// Defining std::generator here is formally UB (the standard reserves the
+// namespace), but it is the same trade-off every C++23 backport makes: the
+// alternative would be an #if scattered over cell.cpp, whose code must stay
+// standard-clean for GCC/MSVC. Upstreaming a __has_include guard into cell.cpp
+// is worth a thought, too.
+// -----------------------------------------------------------------------------
+
+#pragma once
+
+#if defined(__has_include_next) && __has_include_next(<generator>)
+#include_next <generator>
+#else
+
+#include <coroutine>
+#include <cstddef>
+#include <exception>
+#include <iterator>
+#include <optional>
+#include <type_traits>
+#include <utility>
+
+namespace std
+{
+    template <class T>
+    class generator
+    {
+    public:
+        struct promise_type
+        {
+            std::optional<T> value;
+            std::exception_ptr error;
+
+            generator get_return_object() noexcept
+            {
+                return generator{std::coroutine_handle<promise_type>::from_promise(*this)};
+            }
+            std::suspend_always initial_suspend() const noexcept { return {}; }
+            std::suspend_always final_suspend() const noexcept { return {}; }
+            template <class U>
+            std::suspend_always yield_value(U &&u)
+            {
+                value.emplace(std::forward<U>(u));
+                return {};
+            }
+            void return_void() const noexcept {}
+            void unhandled_exception() noexcept { error = std::current_exception(); }
+        };
+
+        struct sentinel
+        {
+        };
+
+        class iterator
+        {
+        public:
+            using iterator_concept = std::input_iterator_tag;
+            using value_type = std::remove_cv_t<T>;
+            using reference = const T &;
+            using difference_type = std::ptrdiff_t;
+
+            iterator() noexcept = default;
+            explicit iterator(std::coroutine_handle<promise_type> h) noexcept : handle_(h) {}
+
+            const T &operator*() const noexcept { return *handle_.promise().value; }
+            const T *operator->() const noexcept { return &*handle_.promise().value; }
+
+            iterator &operator++()
+            {
+                resume();
+                return *this;
+            }
+            void operator++(int) { resume(); }
+
+            friend bool operator==(const iterator &it, sentinel) noexcept
+            {
+                return !it.handle_ || it.handle_.done();
+            }
+            friend bool operator!=(const iterator &it, sentinel s) noexcept { return !(it == s); }
+
+        private:
+            void resume()
+            {
+                if (!handle_)
+                    return;
+                handle_.resume();
+                if (handle_.promise().error)
+                    std::rethrow_exception(handle_.promise().error);
+            }
+
+            std::coroutine_handle<promise_type> handle_{};
+        };
+
+        generator() noexcept = default;
+        generator(generator &&other) noexcept
+            : handle_(std::exchange(other.handle_, {})) {}
+        generator &operator=(generator &&other) noexcept
+        {
+            if (this != &other)
+            {
+                if (handle_)
+                    handle_.destroy();
+                handle_ = std::exchange(other.handle_, {});
+            }
+            return *this;
+        }
+        generator(const generator &) = delete;
+        generator &operator=(const generator &) = delete;
+        ~generator()
+        {
+            // destroys the frame wherever it is suspended — at a co_yield, at
+            // the initial suspend (never started) or at the final suspend
+            if (handle_)
+                handle_.destroy();
+        }
+
+        iterator begin()
+        {
+            if (!handle_ || handle_.done())
+                return {};
+            handle_.resume();
+            if (handle_.promise().error)
+                std::rethrow_exception(handle_.promise().error);
+            if (handle_.done())
+                return {};
+            return iterator{handle_};
+        }
+        sentinel end() const noexcept { return {}; }
+
+    private:
+        explicit generator(std::coroutine_handle<promise_type> h) noexcept : handle_(h) {}
+
+        std::coroutine_handle<promise_type> handle_{};
+    };
+} // namespace std
+
+#endif
