@@ -171,16 +171,18 @@ CMake 选项：
 | linux | ubuntu-24.04 + g++-14 + GTK3 / WebKitGTK | `agent-linux-x64.tar.gz` |
 | macos | macos-latest（arm64，切最新 Xcode）| `agent-macos-arm64.tar.gz` |
 
-工具链下限由 `cell.cpp` 决定：它无条件 `#include <generator>` / `<expected>`，所以要有 libstdc++ ≥ 14（GCC 14）或 libc++ ≥ 19（Xcode ≥ 16.3）—— 这不是「退回 `-std=c++23` 就能过」的事，老 libc++ 根本没有这个头文件。每个 job 先用 `#include <generator>` 探一次，探不到立刻报错（别等编三分钟）；macOS 上会先切到镜像里最新的 Xcode，还不够新就退到 brew 的 llvm。
+工具链下限由 `cell.cpp` 决定：它无条件 `#include <generator>` / `<expected>`，所以要有 libstdc++ ≥ 14（GCC 14）或 libc++ ≥ 19。每个 job 先用 `#include <generator>` 探一次，探不到立刻报错（别等编三分钟）。
 
-macOS 退到 brew llvm 时有个坑：`brew install llvm` 的 clang++ **默认不用它自己那份 libc++**。llvm 是 keg-only，libc++ 头文件在 `$(brew --prefix llvm)/include/c++/v1`、库在 `lib/c++`，都不在 clang 的默认搜索路径里，所以它照样去读 macOS SDK 那份 —— 探针会以同样的方式再失败一次。必须显式：
+macOS 这块有坑，实测过两轮：镜像里 Xcode 26.6（Apple clang 21）直接报 `'generator' file not found`，换 `brew install llvm` 也是同一句。原因是 **homebrew 的 llvm 只装 libc++ 的库（`lib/c++`、`lib/unwind`），不装头文件** —— 它自己的测试也是拿系统 SDK 的 `usr/include/c++/v1` 当头用（见 `llvm.rb` 里 "These tests should ignore the usual SDK includes" 那段）。所以光换编译器、甚至再加 `-nostdinc++` 指一个不存在的 `include/c++/v1`，只会把头文件全掐掉、报错一模一样。
 
-```
-CXXFLAGS="-nostdinc++ -isystem $(brew --prefix llvm)/include/c++/v1 -D_LIBCPP_DISABLE_AVAILABILITY"
-LDFLAGS="-L$(brew --prefix llvm)/lib/c++ -L$(brew --prefix llvm)/lib/unwind -lunwind"
-```
+真正的办法是先搞清**机器上哪份 libc++ 真的带 `<generator>`**，这段逻辑在 `.github/scripts/pick-macos-cxx.sh` 里，按顺序试：
 
-（`_LIBCPP_DISABLE_AVAILABILITY` 是 brew 自己在 caveats 里给的：不然新 libc++ 里比系统版本新的 API 会被 availability 标注挡掉。）这样编出来的二进制会链 `/opt/homebrew/opt/llvm/lib/c++/libc++.1.dylib`，和已经硬链的 brew libsodium 一样，是台机器上的产物，不是可分发产物。
+1. Xcode 的 clang++ 默认路径；
+2. Xcode 的 clang++ + 本机任意一份含 `generator` 的 libc++ 头目录（`-nostdinc++ -isystem <dir>`，扫描 Xcode 工具链 / SDK / CLT / brew 前缀）；
+3. `brew install llvm` 的 clang++（头目录仍在上面那批里找；如果头目录来自 brew 前缀，才配 `-L lib/c++ -L lib/unwind -lunwind` 和 `-D_LIBCPP_DISABLE_AVAILABILITY`）；
+4. `brew install gcc` 的 `g++-NN`（libstdc++ 从 14 起就有 `<generator>`，完全不碰 libc++）。
+
+全都失败时脚本会把 `xcode-select -p`、`--show-sdk-path`、各关键头目录是否存在/是否含 `generator`、以及默认 clang 的头搜索列表全打出来再 `::error::`，不用再猜。选中的 `cxx / cxxflags / ldflags` 经 step outputs 传给 `CMAKE_CXX_COMPILER / CMAKE_CXX_FLAGS / CMAKE_EXE_LINKER_FLAGS`。
 
 `#embed` 是另一回事：要 GCC ≥ 15 / Clang ≥ 19。拿不到时 `build_live2d.py` 把 `kAssetCount` 置 0，exe 里不自带默认 Live2D 模型，其余功能不变。
 
