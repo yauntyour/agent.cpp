@@ -17,7 +17,9 @@ const IM_KINDS = [
 ];
 
 /* 渠道媒体能力的统一说明；真正的解析/下载/发送在服务端（agent-im）做 */
-const IM_MEDIA_NOTE = '支持图片 / 语音 / 视频 / 文件 / 表情包收发（由服务端处理）。';
+const IM_MEDIA_NOTE = '图片 / 语音 / 视频 / 文件 / 表情包都能收发（由服务端处理）：对方发来的落成附件，'
+  + '回复里带的附件与语音条也会作为对应消息类型发出。语音消息会自动转写成人话再进对话 —— '
+  + '「设置 → 语音识别」没配好时，她会直接回一句「听不了语音」，而不是瞎猜。';
 
 const IM_HELP = {
   wechat: '腾讯官方个人号 Bot API（iLink / ClawBot，2026-03 开放）。保存后点上面的二维码，'
@@ -272,7 +274,7 @@ function imForm(initial, submitLabel, onSave) {
   // 空 = 私聊开放 + 群聊关闭；非空 = 私聊白名单 + 群里白名单用户 @ 才回。
   const state = Object.assign({
     allow: [], limit: 0, enabled: true, proxy: '', persona: '',
-    send_delay_ms: 600, queue_limit: 64,
+    send_delay_ms: 600, queue_limit: 64, voice_reply: false,
     private_mode: 'open', private_allow: [], group_mode: 'off', group_allow: [], group_ids: [],
   }, initial);
   if (state.persona == null) state.persona = '';
@@ -379,8 +381,17 @@ function imForm(initial, submitLabel, onSave) {
           '最外层的门：填了就只在这些群里响应，不管上面的群聊模式。'));
       }
       policy.appendChild(field('每条上限', mk('limit', '0 = 平台默认', 'number'),
-        '超长回复按句末自动分条，最多四条。'));
+        '超长回复会按句子的终止符号（。？！ / . ! ?）一句一条地发，最多 6 条；'
+        + '逗号、分号、换行都不算断句。'));
       fields.appendChild(policy);
+
+      // 回复形态：允许她发语音（TTS 服务配好了才生效），发语音还是打字她自己定
+      const shape = el('div', 'im-policy');
+      shape.appendChild(el('div', 'sect-h', '回复形态'));
+      shape.appendChild(switchRow('允许语音', 'TTS 服务配好了才生效：允许之后她的回复默认是语音（不再发文字），'
+        + '她自己可以按 voice 工具把某一条改成打字（代码、链接、要复制的数字）。TTS 失败时自动退回文字。',
+        !!state.voice_reply, async (on) => { state.voice_reply = on; }));
+      fields.appendChild(shape);
 
       // 发送节奏：平台对同一会话的速率限制是硬的，撞上去就是 429 / 风控。
       const pace = el('div', 'im-policy');

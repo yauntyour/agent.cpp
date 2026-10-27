@@ -55,6 +55,10 @@
 }
 .field .tip { margin-top: 5px; font-size: 11px; color: var(--faint); line-height: 1.6; }
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+/* 输入框 + 紧跟一个动作按钮（工作区输入框旁边的「打开」） */
+.field-row { display: flex; align-items: stretch; gap: 8px; }
+.field-row > input { flex: 1; min-width: 0; }
+.field-row > .btn { flex: 0 0 auto; }
 
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;

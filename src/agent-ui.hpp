@@ -963,6 +963,10 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 }
 .field .tip { margin-top: 5px; font-size: 11px; color: var(--faint); line-height: 1.6; }
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+/* 输入框 + 紧跟一个动作按钮（工作区输入框旁边的「打开」） */
+.field-row { display: flex; align-items: stretch; gap: 8px; }
+.field-row > input { flex: 1; min-width: 0; }
+.field-row > .btn { flex: 0 0 auto; }
 
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
@@ -1757,6 +1761,10 @@ const S = {
   sessions: [],
   session: '',
   cwd: '',
+  // 当前角色自己的数据位置（服务端 state 的新字段，见「数据目录」契约）：
+  // workspace = 她干活的工作区；files = 角色目录 / Agent.md / 会话 / 记忆 / 附件等绝对路径
+  workspace: '',
+  files: {},
   sandbox: '',
   port: 0,
   root: '',
@@ -1938,6 +1946,8 @@ function applyState(st, rebuild) {
   if (st.free_think !== undefined) S.free_think = !!st.free_think;
   if (st.session !== undefined) S.session = st.session;
   if (st.cwd !== undefined) S.cwd = st.cwd;
+  if (st.workspace !== undefined) S.workspace = String(st.workspace || '');
+  if (st.files && typeof st.files === 'object') S.files = st.files;
   applyAccent(S.persona && S.persona.accent);
   if (rebuild) paintAll();
 }
@@ -3380,7 +3390,8 @@ function openClearContext() {
     text: said
       ? `这次对话里你说了 ${said} 句话。清空之后，她就不再记得这次聊过什么。`
       : '这次对话还是空的；清空只是让上下文从头开始。',
-    note: said ? '「保存记忆并确认」会先让她把值得记住的事写进长期记忆，再清空上下文。' : '',
+    note: said ? '「保存记忆并确认」会先让她把值得记住的事写进长期记忆，再清空。'
+      + '清空只清这条会话（不会另开一条），这条的历史也会一起清掉 —— 想留档先导出。' : '只清这条会话的内容，不会新开一条。',
   }, [
     { label: '取消', value: null, cls: 'ghost' },
     { label: '确认', value: 'plain', cls: 'danger' },
@@ -3494,7 +3505,7 @@ function openMemory() {
 
 /* ---------------- 角色编辑 ---------------- */
 function openPersonaEditor(creating) {
-  const p = creating ? { name: '', subtitle: '', greeting: '', user_name: '', prompt: '', accent: '#8b7cff', voice: '', proactive: false, idle_minutes: 30 } : (S.persona || {});
+  const p = creating ? { name: '', subtitle: '', greeting: '', user_name: '', prompt: '', accent: '#8b7cff', voice: '', proactive: false, idle_minutes: 30, workspace: '' } : (S.persona || {});
   // 新建时的默认模型要扫描一次资源清单（空角色启动时舞台还没拿过）；
   // 等扫描回来再开抽屉，表单里才填得上模型路径
   const open = () => openDrawer(creating ? '新建角色' : '角色设定', 'persona', (body) => {
@@ -3536,13 +3547,27 @@ function openPersonaEditor(creating) {
       swatches.appendChild(s);
     }
     const idle = textInput(p.idle_minutes || 30, '30', 'number');
+    // 工作区：同一个角色可以在不同工作区里干活，会话按「角色 + 工作区」分组。
+    const ws = textInput(p.workspace, '留空 = 默认工作区（程序旁边的 workspaces/<角色>）');
+    const wsOpen = actionBtn('打开', async () => {
+      await cmd('persona.open_dir', { id: p.id, which: 'workspace' });
+    }, 'btn sm ghost');
+    if (creating) wsOpen.disabled = true; // 还没有 id，没有目录可开
+    const wsRow = el('div', 'field-row');
+    wsRow.append(ws, wsOpen);
     const models = (L2D.scan && L2D.scan.models) || [];
     form.append(
       field('名字', name),
       field('副标题', sub),
       field('开场白', hello, '只在空会话里由界面展示，不会占用上下文。'),
       field('她怎么称呼你', user),
-      field('人设', prompt, '写清楚性格、语气、边界。演出协议由程序自动追加。'),
+      field('人设', prompt,
+        '写清楚性格、语气、边界，存进 Agent.md；演出协议由程序自动追加。'
+        + '她的文件工具对角色目录只读，这段话只能由她用自己的 settings 工具改写。'),
+      field('工作区（cwd）', wsRow,
+        '她干活的地方。同一个角色可以配不同的工作区，会话按「角色 + 工作区」分组；'
+        + '留空 = 默认工作区（程序旁边的 workspaces/<角色>）。.agent/ 整棵树都不能当工作区 —— '
+        + '数据根对她只有读权限，工作区必须是她能写的地方。'),
       field('音色（可选）', voice, '对应语音服务里的 voice 参数；例如 alloy / zh-CN-XiaoxiaoNeural。'),
       field('主题色', swatches),
     );
@@ -3569,6 +3594,7 @@ function openPersonaEditor(creating) {
         greeting: hello.value.trim(),
         user_name: user.value.trim(),
         prompt: prompt.value,
+        workspace: ws.value.trim(),
         voice: voice.value.trim(),
         accent,
         proactive,
@@ -3590,7 +3616,7 @@ function openPersonaEditor(creating) {
 
     if (!creating) {
       const del = actionBtn('删除这个角色', async () => {
-        if (!confirm(`删除「${p.name}」以及她的会话与记忆？`)) return;
+        if (!confirm(`删除「${p.name}」？她的数据目录 characters/${p.id}/（角色卡 / 会话 / 记忆 / 附件）会一起删掉。`)) return;
         await cmd('persona.delete', { id: p.id });
         await refreshState();
         closeDrawer();
@@ -3622,7 +3648,12 @@ async function openSessions() {
   } catch (e) { toast(e.message, 'err'); }
   openDrawer('会话记录', 'sessions', (body) => {
     const sect = el('div', 'sect');
-    sect.appendChild(el('div', 'sect-h', '这个角色的会话'));
+    sect.appendChild(el('div', 'sect-h', '这个工作区的会话'));
+    // 会话是按「角色 + 工作区」分组的：换工作区就是换一组记录，这里显式说一声
+    const wsTip = el('div', 'tip', '工作区：' + (S.workspace || S.cwd || '—')
+      + '（同一个角色在不同工作区各有各的会话）');
+    wsTip.style.cssText = 'font-size:11px;color:var(--faint);line-height:1.7;margin:0 0 8px;word-break:break-all';
+    sect.appendChild(wsTip);
     if (!S.sessions.length) sect.appendChild(el('div', 'empty', '还没有记录'));
     // 顺序由服务端给：当前会话 → 有内容的（新到旧）→ 空壳
     for (const s of S.sessions) {
@@ -4211,6 +4242,28 @@ function prefSection() {
     '默认 Alt。单独按 Alt 在部分浏览器里会被菜单栏吃掉 —— 按住没反应就换成 Alt+M / F2 这类组合。'
     + '录音时要一直按着，松开即结束并开始转写。'));
 
+  // 沙箱档位：决定 exec / write / edit 能不能用。改完立刻同步给所有角色。
+  const sbSel = document.createElement('select');
+  for (const [v, t] of [['read-only', '只读：只能看，不能写、不能跑命令'],
+                        ['edit-only', '可编辑：能读写文件，仍然不能跑命令'],
+                        ['full-access', '完全访问（默认）：读写 + 跑命令']]) {
+    const o = document.createElement('option');
+    o.value = v; o.textContent = t;
+    if ((S.sandbox || 'full-access') === v) o.selected = true;
+    sbSel.appendChild(o);
+  }
+  sbSel.onchange = async () => {
+    try {
+      const r = await cmd('ui.pref', { sandbox: sbSel.value });
+      S.sandbox = r.sandbox || sbSel.value;
+      sbSel.value = S.sandbox;
+      toast('沙箱已切换为「' + (SANDBOX_ZH[S.sandbox] || S.sandbox) + '」，下一句话就按新档位跑', 'ok');
+    } catch (e) { toast(e.message, 'err'); sbSel.value = S.sandbox || 'full-access'; }
+  };
+  sect.appendChild(field('沙箱模式（exec 的权限）', sbSel,
+    '只读：ls / read / rg / find 可用，写文件和跑命令都被拦；可编辑：多一个 write / edit；'
+    + '完全访问：默认，读写与 exec 都不拦。改完立刻生效，不用重启。'));
+
   sect.appendChild(switchRow('允许工具自动执行（autoallow）',
     '开启后，她调用工具（读写文件、跑命令、查资料）不需要你逐次点确认；'
     + '关掉则每次都要批准，更安全但更打断。',
@@ -4242,22 +4295,37 @@ function prefSection() {
     sect.appendChild(toolTip);
   }
 
+  // 每个角色的数据都在自己的目录里；这几个按钮直接把她自己的目录打开
   const row = el('div', 'btn-row');
   row.appendChild(actionBtn('打开数据目录', async () => { await cmd('open.data_dir'); }, 'btn sm'));
+  if (S.active) {
+    const pid = S.active;
+    const openWhich = (label, which) => actionBtn(label, async () => {
+      await cmd('persona.open_dir', { id: pid, which });
+    }, 'btn sm');
+    row.appendChild(openWhich('打开角色目录', 'card'));
+    row.appendChild(openWhich('打开记忆目录', 'memorys'));
+    row.appendChild(openWhich('打开工作区', 'workspace'));
+  }
   row.appendChild(actionBtn('刷新状态', async () => { await refreshState(); }, 'btn sm ghost'));
   sect.appendChild(row);
 
   const tip = el('div', 'tip');
   tip.style.cssText = 'margin-top:14px;font-size:11px;color:var(--faint);line-height:1.7';
-  tip.innerHTML = '数据都在 <code>.agent/</code>：<br>'
-    + 'personas/ 角色卡与记忆 · sessions/ 会话 · audio/ 语音成品<br>'
-    + 'config.json 模型与密钥 · agent.json 服务与界面偏好';
+  tip.innerHTML = '数据都在 <code>.agent/</code>，每个角色一个目录：<br>'
+    + '<code>characters/&lt;角色&gt;/</code> Agent.md 角色卡 · prompt.json 提示词覆盖 · memorys/ 记忆<br>'
+    + '角色目录里还有 sessions/ 会话（按工作区分组） · uploads/ 附件 · audio/ 语音成品 · stickers/ 表情包<br>'
+    + 'config.json 模型 · .crypt 密钥 · agent.json 界面偏好<br>'
+    + '默认工作区在<strong>程序旁边</strong>：<code>workspaces/&lt;角色&gt;/</code>（不在 .agent 里 —— '
+    + '数据根对她只读，工作区必须能写）<br>'
+    + '她的文件工具对角色目录只读（能看不能改）；要改角色卡 / 提示词 / 记忆，走她的 '
+    + '<code>settings</code> 工具，由宿主代写。';
   sect.appendChild(tip);
   return sect;
 }
 
 /* ---------------- 表情包管理 ----------------
-   文件在 .agent/personas/<pid>/stickers/（优先）与 .agent/stickers/（全局）；
+   文件在 .agent/characters/<pid>/stickers/（每个角色自己一份，没有全局目录了）；
    名字 = 文件名去扩展名。这里只管上传 / 删除 / 打开目录，发不发由模型决定。 */
 function stickerSection() {
   const sect = el('div', 'sect');
@@ -4318,15 +4386,17 @@ function stickerSection() {
 
   const row = el('div', 'btn-row');
   row.appendChild(actionBtn('上传表情包', pickSticker, 'btn primary sm'));
-  row.appendChild(actionBtn('打开表情包目录', async () => { await cmd('open.stickers_dir'); }, 'btn sm ghost'));
+  row.appendChild(actionBtn('打开表情包目录', async () => {
+    await cmd('persona.open_dir', { id: S.active, which: 'stickers' });
+  }, 'btn sm ghost'));
   row.appendChild(actionBtn('刷新', async () => { await refreshState(); }, 'btn sm ghost'));
   sect.appendChild(row);
 
   const tip = el('div', 'tip');
   tip.style.cssText = 'margin-top:12px;font-size:11px;color:var(--faint);line-height:1.7';
   tip.innerHTML = '支持 png / jpg / gif / webp，单个不超过 ' + fmtSize(STICKER_MAX_BYTES) + '；名字就是文件名。'
-    + '<br>当前角色的在 <code>.agent/personas/&lt;角色&gt;/stickers/</code>，'
-    + '全局的 <code>.agent/stickers/</code> 对所有角色可见。';
+    + '<br>存在角色自己的目录 <code>.agent/characters/&lt;角色&gt;/stickers/</code>，'
+    + '跟着角色走（删角色就一起删掉），不再有全局表情包目录。';
   sect.appendChild(tip);
   return sect;
 }
@@ -4585,7 +4655,9 @@ function statusSection() {
   const s3 = el('div', 'sect');
   s3.appendChild(el('div', 'sect-h', '运行时'));
   s3.appendChild(statusKV('数据根', S.root, true));
-  s3.appendChild(statusKV('工作目录', S.cwd, true));
+  s3.appendChild(statusKV('工作区', S.workspace || S.cwd, true));
+  s3.appendChild(statusKV('角色目录', (S.files || {}).character_dir, true));
+  s3.appendChild(statusKV('角色卡', (S.files || {}).agent_md, true));
   s3.appendChild(statusKV('当前会话', S.session, true));
   s3.appendChild(statusKV('端口', S.port ? 'http://127.0.0.1:' + S.port + '/' : '—', true));
   s3.appendChild(statusKV('舞台', L2D.status === 'ready'
@@ -4676,6 +4748,8 @@ function mockState() {
     model: 'demo:companion', providers: [], thinking: 0, voice_reply: false, asr_auto_send: true,
     tts: { kind: 'off' }, asr: { kind: 'off' }, voice: { tts: false, asr: false, recording: false },
     attach: { max_files: 8, max_bytes: 48 * 1024 * 1024 },
+    // 演示模式没有真数据目录：工作区与角色数据的绝对路径都留空
+    workspace: '', files: {},
     autoallow: true, compact_auto: true, tools: true }, DEMO);
 }
 
@@ -4718,6 +4792,7 @@ async function mockCmd(name, args) {
   if (name === 'ui.pref') return Object.assign({ ok: true }, args);
   // 演示模式没有后端，提示词面板给一份空壳，别让抽屉卡在「正在读取…」
   if (name === 'prompt.get') return { ok: true, layers: [], relation: '', system: '（演示模式没有真后端）', chars: 0 };
+  if (name === 'persona.open_dir') return { ok: true, path: '' };
   if (name === 'session.export') return { ok: true, path: '(演示模式没有导出)', messages: 0 };
   return { ok: true };
 }
@@ -5262,7 +5337,7 @@ function l2dUseCdn(on) {
 /* =====================================================================
    08-triggers —— 触发器：事件 → 动作序列
    =====================================================================
-   一条规则长这样（存在角色卡 persona.json 的 triggers 数组里）：
+   一条规则长这样（存在 Agent.md 的 front matter（triggers 数组）里）：
 
      { "id": "poke-head", "on": "click", "when": { "zone": "head" },
        "do": [ {"a":"motion","group":"TapHead"}, {"a":"say","text":"别摸头…"} ],
@@ -6530,7 +6605,9 @@ const IM_KINDS = [
 ];
 
 /* 渠道媒体能力的统一说明；真正的解析/下载/发送在服务端（agent-im）做 */
-const IM_MEDIA_NOTE = '支持图片 / 语音 / 视频 / 文件 / 表情包收发（由服务端处理）。';
+const IM_MEDIA_NOTE = '图片 / 语音 / 视频 / 文件 / 表情包都能收发（由服务端处理）：对方发来的落成附件，'
+  + '回复里带的附件与语音条也会作为对应消息类型发出。语音消息会自动转写成人话再进对话 —— '
+  + '「设置 → 语音识别」没配好时，她会直接回一句「听不了语音」，而不是瞎猜。';
 
 const IM_HELP = {
   wechat: '腾讯官方个人号 Bot API（iLink / ClawBot，2026-03 开放）。保存后点上面的二维码，'
@@ -6785,7 +6862,7 @@ function imForm(initial, submitLabel, onSave) {
   // 空 = 私聊开放 + 群聊关闭；非空 = 私聊白名单 + 群里白名单用户 @ 才回。
   const state = Object.assign({
     allow: [], limit: 0, enabled: true, proxy: '', persona: '',
-    send_delay_ms: 600, queue_limit: 64,
+    send_delay_ms: 600, queue_limit: 64, voice_reply: false,
     private_mode: 'open', private_allow: [], group_mode: 'off', group_allow: [], group_ids: [],
   }, initial);
   if (state.persona == null) state.persona = '';
@@ -6892,8 +6969,17 @@ function imForm(initial, submitLabel, onSave) {
           '最外层的门：填了就只在这些群里响应，不管上面的群聊模式。'));
       }
       policy.appendChild(field('每条上限', mk('limit', '0 = 平台默认', 'number'),
-        '超长回复按句末自动分条，最多四条。'));
+        '超长回复会按句子的终止符号（。？！ / . ! ?）一句一条地发，最多 6 条；'
+        + '逗号、分号、换行都不算断句。'));
       fields.appendChild(policy);
+
+      // 回复形态：允许她发语音（TTS 服务配好了才生效），发语音还是打字她自己定
+      const shape = el('div', 'im-policy');
+      shape.appendChild(el('div', 'sect-h', '回复形态'));
+      shape.appendChild(switchRow('允许语音', 'TTS 服务配好了才生效：允许之后她的回复默认是语音（不再发文字），'
+        + '她自己可以按 voice 工具把某一条改成打字（代码、链接、要复制的数字）。TTS 失败时自动退回文字。',
+        !!state.voice_reply, async (on) => { state.voice_reply = on; }));
+      fields.appendChild(shape);
 
       // 发送节奏：平台对同一会话的速率限制是硬的，撞上去就是 429 / 风控。
       const pace = el('div', 'im-policy');

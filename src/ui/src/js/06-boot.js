@@ -32,6 +32,8 @@ function mockState() {
     model: 'demo:companion', providers: [], thinking: 0, voice_reply: false, asr_auto_send: true,
     tts: { kind: 'off' }, asr: { kind: 'off' }, voice: { tts: false, asr: false, recording: false },
     attach: { max_files: 8, max_bytes: 48 * 1024 * 1024 },
+    // 演示模式没有真数据目录：工作区与角色数据的绝对路径都留空
+    workspace: '', files: {},
     autoallow: true, compact_auto: true, tools: true }, DEMO);
 }
 
@@ -74,6 +76,7 @@ async function mockCmd(name, args) {
   if (name === 'ui.pref') return Object.assign({ ok: true }, args);
   // 演示模式没有后端，提示词面板给一份空壳，别让抽屉卡在「正在读取…」
   if (name === 'prompt.get') return { ok: true, layers: [], relation: '', system: '（演示模式没有真后端）', chars: 0 };
+  if (name === 'persona.open_dir') return { ok: true, path: '' };
   if (name === 'session.export') return { ok: true, path: '(演示模式没有导出)', messages: 0 };
   return { ok: true };
 }

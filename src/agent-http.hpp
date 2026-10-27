@@ -7,11 +7,15 @@
 //   POST /api/cmd/<name>    命令总线（JSON 进，JSON 出）
 //   GET  /api/state         状态快照
 //   GET  /api/events        SSE：一条 data: {...} 一行
-//   GET  /api/audio/<name>  TTS 产出的音频
-//   GET  /api/avatar/<id>   角色头像
+//   GET  /api/audio/<pid>/<name>     TTS 产出的音频（每个角色一个 audio/ 目录）
+//   GET  /api/avatar/<id>            角色头像
 //   GET  /api/uploads/<pid>/<file>   聊天附件（图片 / 语音 / 视频 / 文件）
 //   GET  /api/stickers/<pid>/<name>  表情包
-//   GET  /api/live2d/<…>    舞台资源：运行时库与模型文件（.agent/live2d/ 下）
+//   GET  /api/live2d/<…>             舞台资源：运行时库与模型文件（.agent/live2d/ 下）
+//
+// 静态资源都落在角色自己的目录里（<root>/characters/<角色>/ 下的 avatar.*、
+// uploads/、stickers/、audio/），路径一律「白名单 + weakly_canonical 校验」：
+// 只发这一层里的普通文件，不做任意文件读取。
 //
 // 安全模型：服务是一个「能记事、能说话」的本机控制面，绝不能被网页或局域网
 // 碰到。只绑 127.0.0.1；每个请求必须带 loopback Host、同源 Origin（或没有
@@ -19,6 +23,7 @@
 #pragma once
 
 #include "servic.hpp"
+#include "agent-paths.hpp" // 每个角色自己的数据目录（characters/<角色>/…）
 #include "agent-media.hpp" // 附件 / 贴纸的落盘路径与 MIME（路由要用）
 
 #include <boost/asio.hpp>
@@ -281,23 +286,24 @@ namespace app
                 out = http_json(core.exec_command("state", nlohmann::json::object()));
                 return rt::FLAG_DONE; });
 
-            // GET /api/audio/<name>
-            ros.on("api/audio/:name", [this](std::string &req, std::string &out, const std::map<std::string, std::string> &params) -> int
+            // GET /api/audio/<pid>/<name> —— TTS 成品（按角色分目录）
+            ros.on("api/audio/:pid/:name", [this](std::string &req, std::string &out, const std::map<std::string, std::string> &params) -> int
                    {
                 if (std::string bad = check_request(req, "GET"); !bad.empty())
                 {
                     out = std::move(bad);
                     return rt::FLAG_DONE;
                 }
+                std::string pid = params.count("pid") ? params.at("pid") : "";
                 std::string name = params.count("name") ? params.at("name") : "";
-                if (!plain_name_ok(name))
+                if (!persona_id_ok(pid) || !plain_name_ok(name))
                 {
-                    out = text_response("400 Bad Request", "bad audio name");
+                    out = text_response("400 Bad Request", "bad audio path");
                     return rt::FLAG_DONE;
                 }
                 std::error_code ec;
-                auto base = std::filesystem::weakly_canonical(audio_dir(), ec);
-                auto file = std::filesystem::weakly_canonical(audio_dir() / name, ec);
+                auto base = std::filesystem::weakly_canonical(paths::audio_dir(pid), ec);
+                auto file = std::filesystem::weakly_canonical(paths::audio_dir(pid) / name, ec);
                 if (!ec && file.parent_path() == base && std::filesystem::is_regular_file(file, ec))
                 {
                     std::string body = read_file(file);
@@ -326,7 +332,7 @@ namespace app
                     return rt::FLAG_DONE;
                 }
                 std::error_code ec;
-                auto dir = std::filesystem::weakly_canonical(persona_dir(id), ec);
+                auto dir = std::filesystem::weakly_canonical(paths::character_dir(id), ec);
                 if (!ec && std::filesystem::is_directory(dir, ec))
                     for (auto &e : std::filesystem::directory_iterator(dir, ec))
                     {
@@ -363,8 +369,8 @@ namespace app
                     return rt::FLAG_DONE;
                 }
                 std::error_code ec;
-                auto base = std::filesystem::weakly_canonical(media::uploads_dir(pid), ec);
-                auto file = std::filesystem::weakly_canonical(media::uploads_dir(pid) / name, ec);
+                auto base = std::filesystem::weakly_canonical(paths::uploads_dir(pid), ec);
+                auto file = std::filesystem::weakly_canonical(paths::uploads_dir(pid) / name, ec);
                 if (!ec && file.parent_path() == base && std::filesystem::is_regular_file(file, ec))
                 {
                     out = http_response("200 OK", media::mime_of(file.string()), read_file(file),

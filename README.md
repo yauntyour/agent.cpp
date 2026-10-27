@@ -23,7 +23,7 @@
 由此带来的四个设计约束，贯穿整份代码：
 
 1. **演出优先**。模型输出不是最终产物，是「剧本」：情绪标记驱动表情与语音音色，星号里的动作只演不念，正文按句切给 TTS。接了 Live2D 之后，`[[motion:]]` / `[[expr:]]` 还能直接指挥身体。
-2. **一切输入先落盘**。桌面粘贴 / 拖入的文件、IM 收到的图片语音视频，先变成 `.agent/uploads/` 里的一份文件和一行 `[attach:…]` 清单。上下文里只有路径，模型要用 `read` 打开 —— 会话 JSONL 不会被 base64 撑爆，换模型供应商也不会因为别家的 `image_url` 块报错。
+2. **一切输入先落盘**。桌面粘贴 / 拖入的文件、IM 收到的图片语音视频，先变成角色自己的 `.agent/characters/<角色>/uploads/` 里的一份文件和一行 `[attach:…]` 清单。上下文里只有路径，模型要用 `read` 打开 —— 会话 JSONL 不会被 base64 撑爆，换模型供应商也不会因为别家的 `image_url` 块报错。
 3. **服务可插拔**。TTS / ASR / IM 都是可选服务，默认关闭（`off`），配了才生效；各是一份配置（TTS·ASR：`openai` / `http` / `command` / `off`，IM：`wechat` / `onebot` / `telegram` / `wecom` / `bridge`），界面里改完即时生效，不重新编译。
 4. **传输层无特权**。桌面窗口和浏览器打开的是同一个页面、同一条 HTTP + SSE 通道，没有「只有窗口能调」的私有接口。
 
@@ -34,7 +34,8 @@
 ```
 cell.cpp/cell.cpp        单文件智能体内核（main 改名后整份编进来）
         │
-src/agent-core.hpp       角色内核：角色卡 / 回合管线 / 长期记忆 / 命令总线 / 事件总线
+src/agent-core.hpp       角色内核：角色卡（Agent.md）/ 工作区 / 回合管线 / 长期记忆 / 命令总线
+src/agent-paths.hpp      角色数据 + 工作区：characters/<角色>/…、程序旁的 workspaces/<角色>/（纯头文件）
 src/agent-media.hpp      附件层：落盘、清单、历史解析、表情包目录
 src/agent-voice.hpp      服务层：TTS、ASR、宿主侧录音（MCI，浏览器采集失败时的兜底）
 src/agent-im.hpp         接入层：微信(iLink) / QQ(OneBot) / Telegram / 企业微信 / HTTP 桥（全媒体收发）
@@ -49,6 +50,7 @@ src/ui/src/**            页面源码（css / js 分层，按文件名顺序拼�
 | --- | --- | --- |
 | `src/agent.cpp` | 进程外壳 | WebView2 窗口、托盘、单实例互斥、`--serve/--headless/--ui/--smoke` |
 | `src/agent-core.hpp` | 角色内核 | `persona` / `persona_ctx` / `turn_pipeline` / `app_core` |
+| `src/agent-paths.hpp` | 数据目录与工作区 | `characters/<角色>/`（数据根内）、`workspaces/<角色>/`（程序目录）的路径常量 |
 | `src/agent-media.hpp` | 附件与表情包 | `media::save` 落盘、`[attach:…]` 清单、历史反解、贴纸目录 |
 | `src/agent-voice.hpp` | 语音服务 | 四种 `kind`，全部走 libcurl + `cell::net::ca_bundle()`；宿主录音是兜底 |
 | `src/agent-im.hpp` | IM 接入 | 五种 `kind`；协议层负责全媒体解析 / 下载 / 发送，回合仍走 `persona_ctx` |
@@ -84,9 +86,9 @@ run_turn ──► cell::engine::runner::run_turn
         │        ▼
         │   sentence_splitter  按 。！？…；切句，洗掉 Markdown 与星号
         │        ▼
-        │   TTS 队列 ──► 语音工作线程 ──► voice::tts ──► /api/audio/<file>
+        │   TTS 队列 ──► 语音工作线程 ──► voice::tts ──► /api/audio/<pid>/<name>
         ▼
-    on_turn_end ──► 记忆落盘（memory.jsonl）+ 正文改写（标记不进入下一轮上下文）
+    on_turn_end ──► 记忆落盘（memorys/memory.jsonl）+ 正文改写（标记不进入下一轮上下文）
 ```
 
 **线程模型**：HTTP 工作线程负责命令（`cmd_mx` 串行化）；每个角色一条回合线程；一条 TTS 线程；一条主动关怀的 ticker。事件走 `event_bus`，每个 SSE 订阅者各自排队，慢客户端不会阻塞引擎。
@@ -189,7 +191,7 @@ agent.exe --debug            开发模式：空数据根时自动生成一个测
 
 **默认是空角色**：第一次打开没有角色卡，欢迎页上有一个「创建第一个角色」，
 建角色时自动挂上自带的模型。`--debug`（以及两个冒烟模式）会在空数据根里生成一个
-测试角色（不主动开口，附带两个示例触发器），免得每次调界面都要先建卡。
+测试角色 `characters/debug/Agent.md`（不主动开口，附带两个示例触发器），免得每次调界面都要先建卡。
 
 回合进行中，输入框右边的发送键会变成红色的「停止」（Esc 同效），点一下打断她。
 语音合成与语音识别默认关闭，界面里不会出现报错刷屏；接上之后才会自动朗读、才会亮起麦克风。
@@ -201,9 +203,14 @@ agent.exe --debug            开发模式：空数据根时自动生成一个测
 选完立刻生效；语音输入除了点麦克风，还可以**按住 Alt 说话、松开结束**（默认键，位置在
 **设置 → 偏好 → 麦克风快捷键** —— 点键位重新录，纯修饰键也支持，清空即取消绑定）；
 **会话记录**里每条右边有垃圾桶和下载箭头 —— 箭头把那条会话导出成一份自包含 HTML
-（和 cell.cpp 的 `/export` 同一个渲染器，不切过去也能导）；
+（和 cell.cpp 的 `/export` 同一个渲染器，不切过去也能导）。会话按「角色 + 工作区」分组，一个角色在一个工作区里默认只有**一条**会话：
+重启、切角色、桌面与 IM 混着聊都是同一条（角色设定里换工作区，就是换一组记录）；**清空上下文**只是把这条会话的消息清掉（不另开一条），
+只有点「开一条新会话」才会多出一条（旧的那条留在记录里，点一下就切回去）。
+**角色设定**里有「工作区（cwd）」输入框和旁边的「打开」按钮（会话就是按它分组的）；
+同一页的「人设」存进角色卡 Agent.md，她自己也能用 `settings` 工具改写（角色目录对她只读，
+只能走这条路）；**设置 → 偏好**里还有「打开角色目录 / 打开记忆目录 / 打开工作区」。
 设置里的**运行状态**把服务（模型 / TTS / ASR / IM 渠道）、工具暴露清单、沙箱模式、
-数据根与端口摊在一屏，排查「为什么她不动」时先看这里；**设置 → 提示词**是 system
+数据根、工作区、角色目录与角色卡摊在一屏，排查「为什么她不动」时先看这里；**设置 → 提示词**是 system
 prompt 的分层编辑器（见下文）。
 
 **换头像**：角色设定里点「换头像」选图之后，会先弹一个截取窗——正方形视口、
@@ -217,26 +224,61 @@ build/agent.exe --headless 8787 --ui src/ui/index.html
 # 浏览器打开 http://127.0.0.1:8787/ ，改 css/js，刷新即可
 ```
 
-数据根固定在 **exe 同级的 `.agent/`**（`--smoke` 时用临时目录，互不污染）：
+数据根固定在 **exe 同级的 `.agent/`**（`--smoke` 时用临时目录，互不污染）。**每个角色拥有自己的一整份数据**：
 
 ```text
 .agent/
-├── personas/<id>/
-│   ├── persona.json      角色卡：名字、副标题、开场白、人设、称呼、音色、主题色
-│   ├── memory.jsonl      长期记忆，一行一条 {t,text}
-│   └── avatar.png        头像（没有就用界面生成的渐变脸）
-├── sessions/             cell.cpp 的会话存储（每个角色一个 cwd key）
-├── uploads/<owner>/      聊天附件：桌面拖入/粘贴的、IM 收到的（owner = 角色 id 或 im-<渠道 id>）
-├── stickers/             全局表情包（也可以放在 personas/<id>/stickers/，角色自己的优先）
-├── audio/                TTS 成品（保留两天）
+├── characters/
+│   └── <角色>/                   角色 id = 目录名（[A-Za-z0-9_-]{1,40}）
+│       ├── Agent.md              角色卡：front matter（名字 / 副标题 / 主题色 / 头像 / 开场白 /
+│       │                         称呼 / 音色 / 主动关怀 / 工作区 / live2d / triggers）+ 人设正文
+│       ├── avatar.png            头像（没有就用界面生成的渐变脸）
+│       ├── prompt.json           提示词分层覆盖 + 关系记录（她自己能写）
+│       ├── state.json            内部状态：每个工作区上次停在哪条会话
+│       ├── sessions/
+│       │   ├── sessions.json     工作区索引 {cwd-key: 工作区绝对路径}
+│       │   └── <cwd-key>/<会话 id>/…  cell.cpp 的会话存储（messages.jsonl、saved/…）
+│       ├── memorys/memory.jsonl  长期记忆，一行一条 {t,text}
+│       ├── uploads/              聊天附件：桌面拖入 / 粘贴的、IM 收到的
+│       ├── audio/                TTS 成品（保留两天）
+│       └── stickers/             表情包（没有全局目录了）
 ├── live2d/
-│   ├── runtime/          运行时库（点「下载运行时」取回，不随 exe 分发）
-│   └── models/<任意>/     模型（自带一份默认的，第一次运行自动解出来）
-├── config.json           模型供应商与当前模型（cell.cpp 的配置）
-├── agent.json            语音服务、IM 渠道、界面偏好、上次会话
-├── .crypt / .key         加密库：所有 API Key 只在这里
+│   ├── runtime/                  运行时库（点「下载运行时」取回，不随 exe 分发）
+│   └── models/<任意>/            模型（自带一份默认的，第一次运行自动解出来）
+├── config.json                   cell.cpp 的配置：模型供应商与当前模型
+├── agent.json                    应用设置：语音服务、IM 渠道、界面偏好（不再存角色会话表）
+├── .crypt / .key                 加密库：所有 API Key 只在这里
 └── logs/cell.log
 ```
+
+> 默认工作区**不在数据根里**：它在**程序目录**（exe 旁边）的 `workspaces/<角色>/` ——
+> `.agent/` 整棵树对她是只读的，而工作区是她写代码 / 放文件的地方，必须能写。
+
+**`Agent.md` 就是角色卡**：front matter 是可容忍的 YAML 子集（`key: value` 一行一条，
+值能当 JSON 解析就按 JSON 解析，否则按原文），正文就是人设 prompt（逐字保存）。手改坏了也不会
+崩：front matter 解析失败就把整份文件当 prompt。
+
+| front matter 键 | 作用 |
+| --- | --- |
+| `name` `subtitle` `accent` | 名字、一句话介绍、主题色 |
+| `avatar` | 头像文件名（在角色目录里，扫 `avatar.*`） |
+| `greeting` `user_name` | 开场白、她怎么称呼你 |
+| `voice` `proactive` `idle_minutes` | 音色、主动关怀、静默多少分钟后开口 |
+| `workspace` | 工作区绝对路径；留空 = 默认工作区 `workspaces/<角色>/`（程序目录，不在数据根里） |
+| `live2d` `triggers` | 舞台模型 / 情绪映射 / 触发器规则（见「舞台」一节） |
+
+**工作区（cwd）**：角色设定里可以给角色填一个工作区（绝对路径），留空就用
+**程序目录**（exe 同级）的 `workspaces/<角色>/`。同一个角色可以在不同工作区里干活，会话按
+「角色 + 工作区」分组 —— 切工作区就是换一组会话，会话抽屉只列当前工作区。工作区不能落在
+`.agent/` **整棵树**里面：数据根对她只有读权限（见下面的沙箱规则），工作区必须是她能写的目录。
+`resolve_workspace` 会拒绝任何解析到数据根内部的路径。
+
+**从旧版本升级是一次性迁移**：启动时发现 `.agent/personas/` 就尽力搬进新布局 ——
+旧角色卡（`persona.json` + `prompt.json` + `memory.jsonl` + 头像 + 表情包）合并成
+`characters/<id>/Agent.md` 与同目录的其他文件；旧 `sessions/<key>` 连同 `agent.json` 里记的
+「上次会话」搬到角色的 `sessions/`，并把那段旧会话挂到默认工作区；`uploads/`、`audio/`、
+`stickers/` 各归各位；最后删掉空的旧目录并从 `agent.json` 抹掉 `sessions` 键。
+全程 best-effort：出错只记一行日志，不拦启动。
 
 ---
 
@@ -253,18 +295,20 @@ build/agent.exe --headless 8787 --ui src/ui/index.html
 服务端不把文件塞进上下文，而是：
 
 ```text
-.agent/uploads/<角色 id>/<时间-随机-原名>.<ext>
-[attach:image] 截图.png | D:\...\.agent\uploads\debug\173000-3f2a-截图.png
+.agent/characters/<角色 id>/uploads/<时间-随机-原名>.<ext>
+[attach:image] 截图.png | D:\...\.agent\characters\debug\uploads\173000-3f2a-截图.png
 ```
 
 正文后面跟一行清单 + 一句提示。模型要看内容时调用 `read`，`read_multimodal` 会把图片 / 音频
 变成多模态块（视频 / PDF 返回元数据）；不想看就不看，不会白白占用上下文。
 历史接口把清单反解成 `attachments[]`，页面据此画附件；IM 进来的媒体走同一条路。
 
-表情包也是附件的一种：`.agent/personas/<id>/stickers/`（优先）或 `.agent/stickers/` 里放
-png / jpg / gif / webp，文件名（去扩展名）就是名字。提示词里会列出可用名字，模型在回复里写
+表情包也是附件的一种：角色自己的 `.agent/characters/<id>/stickers/` 里放
+png / jpg / gif / webp，文件名（去扩展名）就是名字（没有全局表情包目录了，换角色 = 换一套表情包）。
+提示词里会列出可用名字，模型在回复里写
 `[[sticker:名字]]` 就能发（一次最多两个）；桌面画在消息流里，IM 作为图片发回原会话。
-**设置 → 表情包** 可以上传 / 删除 / 打开目录。`msg` 工具也支持 `sticker` 参数，用来发到别的会话。
+**设置 → 表情包** 可以上传 / 删除 / 打开目录。`msg` 工具也支持 `sticker` 参数，用来发到别的会话；
+`files` 参数收一组本地绝对路径，图片 / 语音 / 视频 / 其它文件按扩展名认类型（只带附件时可以发回本会话）。
 
 ## 工具、审批与上下文压缩
 
@@ -278,11 +322,19 @@ png / jpg / gif / webp，文件名（去扩展名）就是名字。提示词里�
 | `tw` `notice` | cell.cpp 的 Teamwork 子代理与消息总线（多个子 agent 并行干活） |
 | `msg` | 往别的 IM 渠道 / 会话说一句（支持贴纸） |
 | `act` | 舞台演出：动作组 / 表情 / 台词 / 参数 / 效果（`Phase::Deferred`，按顺序播） |
-| `settings` | 改**她自己**的设定：提示词分层、主人与关系记录（见「系统提示词」一节）。只管这些——密钥 / 服务 / 模型是用户的，工具碰不到 |
+| `settings` | 改**她自己**的设定：Agent.md 里的角色卡字段与人设正文、提示词分层、主人与关系记录、长期记忆（见「系统提示词」一节）。这是她改角色目录的**唯一**途径（沙箱对 `characters/` 只读）；密钥 / 服务 / 模型 / 工作区是用户的，工具碰不到 |
 
 默认设置：
 
-- **沙箱 `full-access`**：工具能读写整个工作目录并执行命令。
+- **沙箱 `full-access`（默认）**：工具能读写整个工作目录并执行命令（`characters/` 除外，见下一条）。**设置 → 偏好 → 沙箱模式**
+  里可以换成 `read-only`（只读：`ls / read / rg / find` 可用，写文件和命令都被拦）或
+  `edit-only`（多一个 `write / edit`，仍然不能跑命令）。改完立刻同步给所有角色，下一句话就按新档位跑，
+  选择存在 `agent.json` 里，重启也在。
+- **角色目录只读**：`characters/<角色>/` 是宿主的自留地 —— 她的 `read` / `ls` / `rg` 能看
+  自己的角色卡、记忆、会话、附件，但 `write` / `edit` 往里写会被沙箱拒绝（`full-access` 也一样），
+  `exec` 里引用这个绝对路径同样过不去。要改自己的设定（`Agent.md`、提示词分层、关系记录、
+  长期记忆）只能用宿主工具 `settings`，由宿主代写。整块 `characters/` 是启动时注入给
+  cell.cpp 的「受保护写入根」，读放行、写与命令拦截。
 - **`autoallow` 开**：`exec` / `tw run` 不再逐条弹审批，而是先让一次独立的 LLM 安全检查判断
   这条动作是否安全；其余写操作直接放行。日志里会留一行 `[autoallow]`。
 - **`compact` 自动压缩开**：长回合（三次以上工具调用 / 上下文过大）结束后自动把前文压成摘要，
@@ -301,8 +353,9 @@ png / jpg / gif / webp，文件名（去扩展名）就是名字。提示词里�
 则在下一回合开头对齐（`worker_loop` 每回合会比对一次，内容没变什么都不做）。
 
 > 这是一个「把电脑交给她」级别的开关。默认开启是用户明确要求的；不放心就先去偏好里关掉。
-> 工具的默认 cwd 是角色自己的目录（`.agent/personas/<id>/`），但 full-access 下 `exec` 可以访问
-> 绝对路径；沙箱仍会挡敏感路径（`.agent/.crypt`、密钥）和 `..` 穿越。
+> 工具的默认 cwd 是角色的**工作区**（程序目录的 `workspaces/<角色>/`，或角色设定里填的目录），
+> full-access 下 `exec` 可以访问绝对路径；沙箱仍会挡敏感路径（`.agent/.crypt`、密钥）、
+> 对 `characters/` 的写入（只放行读）和 `..` 穿越。
 
 ---
 
@@ -410,9 +463,22 @@ WebView2 就是 Chromium，`http://127.0.0.1:8899` 属于可信来源（`isSecur
 - 每条进来的消息就是一次普通回合：进的是 `persona_ctx::queue_turn`，跑的是同一个
   `cell::engine::runner::run_turn`（多轮、工具调用、打断、上下文压缩照旧），回复通过这次回合的回调送回原会话 —— 没有第二条管线。
 - **文字之外的输入也接住了**：图片、语音、视频、文件、表情包都会下载 / 解密 / 落盘到
-  `.agent/uploads/im-<渠道 id>/`，上下文里出现 `[attach:…]` 清单，模型用 `read` 打开看内容。
-  语音如果平台给了转写就直用；没给且配了 ASR，会 best-effort 转写一段。
-- 回复可以带 `[[sticker:名字]]`：表情包作为图片发回原会话；文字先到、贴纸后到。
+  **角色自己的** `.agent/characters/<角色>/uploads/`（渠道绑了角色就用它，没绑就跟随桌面当前角色；
+  一个角色都没有时跳过落盘并记日志），上下文里出现 `[attach:…]` 清单，模型用 `read` 打开看内容。
+  平台自带转写（iLink 的 `voice_item.text`）就直接用；否则一律本地 ASR 转写后再进回合。
+  没配 ASR、识别失败、或音频根本没下载下来时，她会**直接回一句「听不了语音」**，不把一条
+  空消息丢给模型（带文字说明的混合消息不拦，文字够用）。
+- 回复可以带 `[[sticker:名字]]`：表情包作为图片发回原会话（和正文/语音是分开的两条消息）。
+- **出站也是全消息类型**：回复正文里另起一行写 `[attach:image] 名字 | 绝对路径`
+  （`image` / `audio` / `video` / `file`），或者用 `msg` 工具的 `files` 参数，
+  图片 / 语音 / 视频 / 文件就作为对应类型的消息发出去；`.zip`、`.pdf` 之类一律按文件发。
+- **像人一样分条**：一句一条 —— 断点只认三种句末标点（中文 `。！？`、英文 `. ! ?`），
+  逗号 / 分号 / 省略号 / 换行都不算；URL 和小数不会被误拆（`a.com`、`3.14` 后面不是空白就不算句末）。
+  最多 6 条，多出来的并进最后一条，不丢字；``` 代码块整块不拆。几条之间按发送间隔发。
+- **语音还是文字，她自己定**：渠道里打开「允许语音」后，回复默认只发语音、不再发文字
+  （一句话一条语音；总共只念前 300 字节，约 100 个汉字 —— 平台对时长有硬上限，TTS 也按字计费）。
+  遇到代码、链接、要复制的数字这种说不清的内容，她会调用 `voice` 工具把**这一条**改成打字
+  (`voice(mode=text)`)，下一条照旧是语音。TTS 没配好或合成失败时自动退回文字。
 - 渠道可以**绑定角色**：不同渠道绑不同角色时各自跑自己的 engine 线程（多角色并行）；留空则跟随桌面上当前选中的角色。
 - 私聊 / 群聊是两套独立策略（开放 / 仅白名单；群里关闭 / 任何人 @ / 白名单 @ / 白名单任意消息），见下面「谁能跟她说话」。
 
@@ -451,7 +517,7 @@ WebView2 就是 Chromium，`http://127.0.0.1:8899` 属于可信来源（`isSecur
 
 ```text
 From 微信@[私聊]-o9cq80…：你看这张
-[attach:image] photo.jpg | D:\...\.agent\uploads\im-wx\173000-3f2a-photo.jpg
+[attach:image] photo.jpg | D:\...\.agent\characters\xier\uploads\173000-3f2a-photo.jpg
 （对方发来了 1 个附件。图片 / 音频可以用 read 工具打开对应路径看清内容…）
 ```
 
@@ -463,7 +529,8 @@ From 微信@[私聊]-o9cq80…：你看这张
 3. 保存。私聊直接说话；群里要 @ 它，或者回复它的消息。
 4. 媒体：入站走 `getFile` + `/file/bot<token>/<path>` 下载；出站按类型用
    `sendPhoto` / `sendSticker` / `sendVoice` / `sendAudio` / `sendVideo` / `sendDocument`，
-   自己拼 multipart，不依赖第三方库。
+   自己拼 multipart，不依赖第三方库。语音条（`kind=voice`）走 `sendVoice`，
+   格式得是 ogg/opus、mp3 或 m4a —— TTS 配成 wav/flac 时自动退回 `sendAudio`。
 
 ### QQ（OneBot v11）
 
@@ -556,7 +623,8 @@ curl -s --noproxy '*' http://127.0.0.1:3000/get_login_info   # 应返回昵称�
 （企业微信要求 5 秒内应答），真正的回答走 `message/send` 主动推送，长回合不会被 5 秒卡死。
 
 媒体：入站 `image` / `voice` / `video` / `file`（PicUrl 优先，否则 `media/get`）；
-出站先 multipart 上传 `media/upload` 拿 `media_id`，再按 msgtype 发。
+出站先 multipart 上传 `media/upload` 拿 `media_id`，再按 msgtype 发。语音条只认 amr/silk，
+所以「允许语音」在这里会把 TTS 产出的 mp3 按文件发（不是转码器）。
 语音要 amr，非 amr 会由服务端 errcode 报错；42001 / 40014 会自动清 token 缓存重取。
 
 ### 个人微信兜底：通用桥
@@ -671,7 +739,8 @@ QQ 渠道（绑角色 A） ──┐
 ### 发送队列与节流（避免撞平台限流）
 
 回复不是「来一条发一条」，而是先进入渠道自己的出站队列，由发送线程按间隔取。
-两个字段都在渠道子页的「发送节奏」里：
+两个字段都在渠道子页的「发送节奏」里（同一页的「回复形态 → 允许语音」就是
+`voice_reply`：TTS 可用时回复默认发语音，她能逐条用 `voice` 工具改成文字，没配好就退回文字）：
 
 | 字段 | 默认 | 作用 |
 | --- | --- | --- |
@@ -723,8 +792,9 @@ Host 到这里已经是公网域名。鉴权因此下沉到渠道自己：
 这样每份拷贝也跟着锁内存、跟着清零。拼 URL / 请求头这类一次性明文用完立刻 `wipe`
 （Telegram 的 token 在 URL 里、企业微信的 `corpsecret` 在 query 里，都是协议强制的）。
 
-进来媒体的落盘位置是 `.agent/uploads/im-<渠道 id>/`，页面通过
-`GET /api/uploads/<owner>/<file>` 取（路径白名单 + `weakly_canonical` 校验，防目录穿越）。
+进来媒体的落盘位置是**绑定角色（没绑就跟随桌面当前角色）**的
+`.agent/characters/<角色>/uploads/`，页面通过 `GET /api/uploads/<角色>/<file>` 取
+（路径白名单 + `weakly_canonical` 校验，防目录穿越）。
 
 ### 还没做
 
@@ -742,7 +812,7 @@ Host 到这里已经是公网域名。鉴权因此下沉到渠道自己：
 | 分组 | 命令 |
 | --- | --- |
 | 状态 | `state` |
-| 角色 | `personas.list` `persona.select` `persona.save` `persona.delete` `persona.avatar` |
+| 角色 | `personas.list` `persona.select` `persona.save` `persona.delete` `persona.avatar` `persona.open_dir`（`{id?, which}`，which = `card` / `workspace` / `sessions` / `memorys` / `uploads` / `audio` / `stickers` / `root`，用系统文件管理器打开对应目录） |
 | 对话 | `send`（可带 `attachments`） `stop` |
 | 会话 | `session.new` `sessions.list` `session.select` `session.delete` `session.export`（导出为自包含 HTML：`{id?, path?, open?}`，不切换当前会话也能导出历史） `context.clear`（`{"remember":true}` 先把这段对话整理成长期记忆再清空） `context.compact`（立即压缩一次上下文） |
 | 记忆 | `memory.list` `memory.add` `memory.forget` `memory.clear` |
@@ -753,7 +823,11 @@ Host 到这里已经是公网域名。鉴权因此下沉到渠道自己：
 | 表情包 | `sticker.list` `sticker.add`（`{data_b64,ext,name?}`） `sticker.del` `open.stickers_dir` |
 | 模型 | `providers.add` `providers.rm` `providers.select` `provider.set_key` `models.fetch` `model.set` `think.set` |
 | 提示词 | `prompt.get`（每层定义 + 当前值 + 合成全文） `prompt.set`（`{id, on?, text?, reset?}` 或 `{relation}`） `prompt.reset`（清空自定义，回默认） |
-| 杂项 | `ui.pref`（`voice_reply` / `asr_auto_send` / `autoallow` / `compact_auto` / `free_think`） `open.data_dir` `app.quit` |
+| 杂项 | `ui.pref`（`voice_reply` / `asr_auto_send` / `autoallow` / `compact_auto` / `free_think` / `sandbox`） `open.data_dir` `app.quit` |
+
+`persona.save` 的 `patch` 可以带 `workspace`：会按 `resolve_workspace` 校验（目录不存在就建、
+不能是相对路径、不能落在 `.agent/` 数据根里面），工作区真的变了就关掉旧上下文按新工作区重开
+（回合进行中会拒绝）。
 
 ```bash
 # 用脚本跟她说话（host 头必须是回环地址，服务只认自己）
@@ -768,9 +842,9 @@ curl -sN http://127.0.0.1:8899/api/events    # SSE：一条事件一行 data:
 | `GET /` | 页面（内嵌，或 `--ui` 指定的磁盘文件） |
 | `GET /api/state` | 状态快照（角色、历史、记忆、服务、模型） |
 | `GET /api/events` | SSE 事件流 |
-| `GET /api/audio/<file>` | TTS 成品（文件名白名单，防目录穿越） |
-| `GET /api/avatar/<id>` | 角色头像 |
-| `GET /api/uploads/<owner>/<file>` | 聊天附件（图片 / 语音 / 视频 / 文件；UTF-8 文件名白名单 + 规范化校验） |
+| `GET /api/audio/<pid>/<name>` | TTS 成品（取自 `characters/<pid>/audio/`；pid 按角色 id 校验、文件名白名单） |
+| `GET /api/avatar/<id>` | 角色头像（`characters/<id>/avatar.*`） |
+| `GET /api/uploads/<角色>/<file>` | 聊天附件（图片 / 语音 / 视频 / 文件；UTF-8 文件名白名单 + 规范化校验） |
 | `GET /api/stickers/<pid>/<name>` | 表情包图片（名字来自 stickers 目录） |
 | `GET /api/live2d/<…>` | 舞台资源（运行时库 + 模型文件，逐段白名单） |
 | `GET\|POST /api/im/<id>` | IM 平台回调（唯一不做 loopback 校验的路由，见「IM 接入」） |
@@ -780,30 +854,31 @@ curl -sN http://127.0.0.1:8899/api/events    # SSE：一条事件一行 data:
 
 - `sticker`：`{"name":"happy","url":"/api/stickers/<pid>/happy"}` —— 桌面回合里模型写了 `[[sticker:名字]]`；IM 回合则作为媒体发回来源会话。
 - `tool_begin` / `tool_end`：一次工具调用。开始时只有 `name` / `args` / `policy`，结束时补上 `status`（`ok` / `failed` / `blocked` / …）、`sec`、`chars`、`output`（截断）。页面在正文边上落一张可展开的窄条，同时收进顶栏的「工具调用」面板（最近 300 条，存在 localStorage）。
-- `hello` / `state` 新增 `stickers` `attach`（`max_files` / `max_bytes`）`tools` `autoallow` `compact_auto` `free_think`（允许她胡思乱想）`sandbox` `serve_port` `root` `toolset`（工具清单，状态面板用）。
+- `hello` / `state` 新增 `stickers` `attach`（`max_files` / `max_bytes`）`tools` `autoallow` `compact_auto` `free_think`（允许她胡思乱想）`sandbox` `serve_port` `root` `toolset`（工具清单，状态面板用）；以及 `workspace`（当前工作区绝对路径）与 `files`（`character_dir` / `agent_md` / `prompt` / `state` / `sessions` / `memorys` / `memory_file` / `uploads` / `audio` / `stickers` 十个绝对路径）。
 - `sessions.list` 的每一行带 `title`（第一条用户消息的正文，IM 来源标记会剥掉）与 `current`；空会话没有标题，排在最后。
 
 ---
 
 ## 系统提示词：分层注入
 
-system prompt 不是一段硬编码文本，而是按**来源**分成 11 层，按顺序合成**一条**
+system prompt 不是一段硬编码文本，而是按**来源**分成 12 层，按顺序合成**一条**
 消息放在 `msg[0]`（不是好几条 system）。每层能单独关掉、单独改写文案，改动写
-`personas/<id>/prompt.json`，下一回合生效。
+`characters/<id>/prompt.json`（身份层的前半段来自 `Agent.md` 正文），下一回合生效。
 
 | # | 层 | 来源 | 能改什么 |
 | --- | --- | --- | --- |
 | 1 | `core` | cell.cpp 的 `cfg.system`（`config.json` 的 `system`） | 文案（留空 = 用原文） |
-| 2 | `identity` | 角色卡的 `prompt` + 「你称呼对方为…」 | 去角色设定里改 |
-| 3 | `relation` | 主人与关系记录 —— **她自己能写** | 文案（`settings` 工具也行） |
-| 4 | `memory` | `memory.jsonl` 的碎片事实（最近 40 条 / 3000 字） | 只管开关 |
-| 5 | `source` | IM 消息来源标记的说明 | 文案 |
-| 6 | `tools` | 有哪些工具、什么时候用 | 文案 |
-| 7 | `attachments` | `[attach:…]` 清单行怎么处理 | 文案 |
-| 8 | `stickers` | 表情包名字（有存货才出现） | 只管开关 |
-| 9 | `free` | 胡思乱想的自由（还受「设置 → 偏好」总开关） | 文案 |
-| 10 | `protocol` | 演出协议（emo / 星号 / remember / idle） | 文案 |
-| 11 | `stage` | 舞台（装了 Live2D 才有；动作组 / 表情名自动追加在后面） | 文案 |
+| 2 | `identity` | `Agent.md` 正文 + 「你称呼对方为…」 | 去角色设定里改 |
+| 3 | `self` | 她自己的数据在哪（角色目录 / Agent.md / 记忆 / 会话 / 附件 / 工作区的绝对路径）、文件工具对角色目录只读、改设定要走 `settings` | 文案 |
+| 4 | `relation` | 主人与关系记录 —— **她自己能写** | 文案（`settings` 工具也行） |
+| 5 | `memory` | `memorys/memory.jsonl` 的碎片事实（最近 40 条 / 3000 字） | 只管开关 |
+| 6 | `source` | IM 消息来源标记的说明 | 文案 |
+| 7 | `tools` | 有哪些工具、什么时候用 | 文案 |
+| 8 | `attachments` | `[attach:…]` 清单行怎么处理 | 文案 |
+| 9 | `stickers` | 表情包名字（有存货才出现） | 只管开关 |
+| 10 | `free` | 胡思乱想的自由（还受「设置 → 偏好」总开关） | 文案 |
+| 11 | `protocol` | 演出协议（emo / 星号 / remember / idle） | 文案 |
+| 12 | `stage` | 舞台（装了 Live2D 才有；动作组 / 表情名自动追加在后面） | 文案 |
 
 **设置 → 提示词** 就是这张表的界面：合成字数、全文预览、逐层开关、改写文案、
 关系记录的编辑框。`prompt.get` 返回的每层还带一个 `note`（例如「总开关关着，
@@ -812,17 +887,25 @@ system prompt 不是一段硬编码文本，而是按**来源**分成 11 层，�
 **她也能改自己的设定。** 宿主工具 `settings`：
 
 ```text
-settings {action:"get"}                                   # 每层状态 + 关系记录
-settings {action:"set", key:"relation", value:"…"}         # 写主人与关系
-settings {action:"set", key:"layer.stage.text", value:"…"} # 改写舞台那一段
-settings {action:"set", key:"layer.free.on", value:false}  # 关掉某层
+settings {action:"get"}                                    # 每层状态 + 关系 + 角色卡字段 + 路径 + 记忆条数
+settings {action:"set", key:"relation", value:"…"}          # 写主人与关系
+settings {action:"set", key:"layer.stage.text", value:"…"}  # 改写舞台那一段
+settings {action:"set", key:"layer.free.on", value:false}   # 关掉某层
+settings {action:"set", key:"agent.greeting", value:"…"}    # 改开场白（写回 Agent.md）
+settings {action:"set", key:"agent.prompt", value:"…"}      # 改人设正文（Agent.md body）
+settings {action:"memory", op:"add", text:"…"}              # 记一件事
+settings {action:"memory", op:"forget", text:"…"}           # 忘掉一条
+settings {action:"memory", op:"list"}                       # 最近记住了什么
 ```
 
-改完落盘 `prompt.json`，**下一回合开头**生效 —— 回合进行中不动 `msgs[0]`，否则会和
+`agent.*` 能改 `name` / `subtitle` / `greeting` / `user_name` / `prompt` 五个字段，写入走
+`save_persona` 重写 `Agent.md`（front matter 稳定、幂等，手写格式不会被弄乱）；提示词分层与
+关系记录仍写 `prompt.json`。改完**下一回合开头**生效 —— 回合进行中不动 `msgs[0]`，否则会和
 流式追加抢同一个位置。`worker_loop` 每回合开头调一次 `apply_prompt`，内容没变时它
 什么都不做（不会白改写 transcript，也不打断 prefix cache）。
 
-刻意不给她的东西：API Key、服务配置、模型选择。那些改坏了这层外壳就起不来，
+她写不了角色目录（沙箱只读），这些落盘都由宿主**代写** —— `settings` 是唯一入口，也是刻意留的
+唯一入口。刻意不给她碰的东西：API Key、服务配置、模型选择、工作区。那些改坏了这层外壳就起不来，
 也不属于「她自己」。
 
 ---
@@ -837,7 +920,7 @@ settings {action:"set", key:"layer.free.on", value:false}  # 关掉某层
 | `[[motion:TapBody]]` | 模型动作组（装了 Live2D 才有） | 画布 |
 | `[[expr:f01]]` | 模型表情（装了 Live2D 才有） | 画布 |
 | `*轻轻抱住你*` | 动作 / 神态 | 舞台字幕，**不朗读** |
-| `[[remember]]一句话事实[[/remember]]` | 值得长期记住的事 | `memory.jsonl`，下一轮进入 system prompt |
+| `[[remember]]一句话事实[[/remember]]` | 值得长期记住的事 | `memorys/memory.jsonl`，下一轮进入 system prompt |
 | `[[sticker:名字]]` | 发表情包（一次最多两个） | 桌面：贴着正文画一张；IM：作为图片发回原会话 |
 | `[[idle]]`（用户侧注入） | 主动开口的时刻 | 触发一次「她先说话」 |
 
@@ -875,12 +958,12 @@ settings {action:"set", key:"layer.free.on", value:false}  # 关掉某层
         └── motions/*.motion3.json
 ```
 
-- 换模型：旋钮图标 →「扫描资源」→ 选一个 → 底部「保存并生效」。模型加载完会把动作组 / 表情名写回角色卡（`live2d.groups` / `live2d.expressions`），拼提示词时会列出来，模型才知道自己有哪些动作可用。
-- 缩放 / 偏移改了即时预览，点「保存并生效」才写进角色卡；面板顶部那条一直贴底的保存条会告诉你「有未保存的改动」。
+- 换模型：旋钮图标 →「扫描资源」→ 选一个 → 底部「保存并生效」。模型加载完会把动作组 / 表情名写回 `Agent.md` 的 `live2d`（`groups` / `expressions`），拼提示词时会列出来，模型才知道自己有哪些动作可用。
+- 缩放 / 偏移改了即时预览，点「保存并生效」才写进 `Agent.md`；面板顶部那条一直贴底的保存条会告诉你「有未保存的改动」。
 - **自定义动作模组**：`motion3.json` 放进模型目录，在 `model3.json` 的 `FileReferences.Motions` 里给它一个组名（Cubism 的标准做法）。组名就是面板里能选、触发器里能挂、提示词里能写的那个名字 —— 换一套动作不需要改一行代码。
 - 资源走 `GET /api/live2d/<…>`，逐段白名单 + 规范化路径校验，只认 `.agent/live2d/` 里面的文件。
 
-角色卡里的字段：
+`Agent.md` front matter 里跟舞台有关的字段（都挂在 `live2d` 对象下）：
 
 | 字段 | 作用 |
 | --- | --- |
@@ -910,7 +993,7 @@ act({ "motion": "TapHead",        // 动作组，播一次
 `param` / `fx` 几条事件推给页面，和标记法走同一个广播。名字写错不会静默失败 ——
 返回的是「这个模型有哪些」，模型可以自己改。
 
-旧的标记法仍然有效（旧角色卡还在用）：
+旧的标记法仍然有效（从旧布局迁移过来的角色卡还在用）：
 
 | 标记 | 含义 | 去向 |
 | --- | --- | --- |
@@ -944,7 +1027,7 @@ u->eng = std::make_unique<cell::engine::runner>(u->pcfg, vault, u->h, false,
 
 ### 触发器：事件 → 动作
 
-一条规则（存在角色卡 `triggers` 数组里）：
+一条规则（存在 `Agent.md` front matter 的 `triggers` 数组里）：
 
 ```jsonc
 {
@@ -990,8 +1073,8 @@ AI 回复 ──[[emo:]] / [[act:]] / [[motion:]]──► SSE ──► 触发�
 你戳一下 ──► 画布命中区域 ──► 触发器 ──► send ──► /api/cmd/send ──► 她回你一句
 ```
 
-- 触发器跑在页面里，因为点击、口型、冷却本来就是界面状态；规则存在角色卡里，**换角色 = 换一套演出**。
-- 角色卡里还没有触发器时用内置默认（摸头会躲、戳手臂会回话、开心换姿势、安静久了动一下、说到晚安就困）。改任意一条就会写进角色卡；面板里可以「恢复内置默认」。
+- 触发器跑在页面里，因为点击、口型、冷却本来就是界面状态；规则存在 `Agent.md` 里，**换角色 = 换一套演出**。
+- `Agent.md` 里还没有触发器时用内置默认（摸头会躲、戳手臂会回话、开心换姿势、安静久了动一下、说到晚安就困）。改任意一条就会写进 `Agent.md`；面板里可以「恢复内置默认」。
 - 同一次触发里最多只放行一个 `send` / `idle`，避免一条规则组把好几轮对话同时点着。
 - 面板的规则编辑器是表单式的（事件 → 条件 → 动作列表），右上角「JSON 编辑」是逃生舱口：整份数组直接改，保存前做语法检查。
 
@@ -1015,9 +1098,13 @@ build/agent.exe --smoke-engine   # 期望输出 SMOKE_UI_OK (probing engine) + S
 - **录音在页面里做**（`getUserMedia` + `MediaRecorder`），三个平台一条路；宿主的 MCI 录音只是 Windows 上的兜底，正常流程不会走到它。
 - **工具默认全开，这是把电脑交给她**。cell.cpp 的十个基础工具（含 `exec` / `tw`）都在模型视野里，
   沙箱 `full-access`、`autoallow` 默认开。不喜欢就去 **设置 → 偏好** 关掉 autoallow（关掉后需要审批的
-  工具会被直接拒绝）；工具以角色目录为默认 cwd，但 full-access 下 `exec` 能访问绝对路径。
-- **附件与贴纸都是磁盘上的一等公民**：`.agent/uploads/` 与 `.agent/stickers/` 由服务端按白名单读取，
-  页面走 `/api/uploads`、`/api/stickers`；不认识的路径一律 404，不做任意文件读取。
+  工具会被直接拒绝）；工具以角色的**工作区**为默认 cwd，但 full-access 下 `exec` 能访问绝对路径。
+- **角色目录只读**：`characters/<角色>/` 能读不能写（`write` / `edit` / `exec` 都被沙箱拦），
+  改自己的角色卡 / 提示词 / 记忆只能通过 `settings` 宿主工具 —— 宿主代写，不受沙箱限制。
+- **角色数据完全属于角色**：删角色 = 删 `characters/<id>/`，会话 / 记忆 / 附件 / 音频 / 表情包
+  一起走；`agent.json` 只存应用设置，不再有角色会话表。
+- **附件与贴纸都是磁盘上的一等公民**：`characters/<角色>/uploads/` 与 `…/stickers/` 由服务端
+  按白名单读取，页面走 `/api/uploads`、`/api/stickers`；不认识的路径一律 404，不做任意文件读取。
 - **服务密钥只在本机加密库里**，`agent.json` 永远只有 `has_key`。
 - **服务只绑 127.0.0.1**，并校验 `Host` / `Origin` / `Sec-Fetch-Site`。想从别的机器访问，请自己套一层反向代理并加上认证 —— 默认配置下它不是网络服务。
 

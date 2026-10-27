@@ -30,6 +30,7 @@
 #include <fstream>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <thread>
 #include <vector>
@@ -106,6 +107,9 @@ namespace app
         std::string voice;              // 覆盖 TTS 服务的音色
         bool proactive = false;         // 主动关怀
         int idle_minutes = 30;          // 静默多久后主动开口
+        // 工作区（cwd）的绝对路径。同一个角色可以换工作区，会话按工作区分组；
+        // 空 = 还没定，第一次打开时落成 <程序目录>/workspaces/<id>（见 resolve_workspace）。
+        std::string workspace;
         // 舞台：模型路径、缩放、情绪→表情/动作映射（字段说明见 README「舞台」一节）
         nlohmann::json live2d = nlohmann::json::object();
         // 触发器：事件 → 动作序列，由页面侧的触发器引擎执行
@@ -121,6 +125,7 @@ namespace app
                     {"greeting", greeting}, {"prompt", prompt},
                     {"user_name", user_name}, {"voice", voice},
                     {"proactive", proactive}, {"idle_minutes", idle_minutes},
+                    {"workspace", workspace},
                     {"live2d", live2d}, {"triggers", triggers}};
         }
         static persona from_json(const std::string &id, const nlohmann::json &j)
@@ -141,6 +146,7 @@ namespace app
             s("prompt", p.prompt);
             s("user_name", p.user_name);
             s("voice", p.voice);
+            s("workspace", p.workspace);
             auto b = j.find("proactive");
             if (b != j.end() && b->is_boolean())
                 p.proactive = b->get<bool>();
@@ -167,9 +173,209 @@ namespace app
         return true;
     }
 
-    inline fs::path personas_dir() { return cell::root / "personas"; }
-    inline fs::path persona_dir(const std::string &id) { return personas_dir() / id; }
-    inline fs::path audio_dir() { return cell::root / "audio"; }
+    // =====================================================================
+    //  Agent.md — 角色卡
+    // =========================================================================
+    // 角色卡是「一个文件」：--- 包住的 YAML 子集（front matter）+ 人设正文。
+    // 这样她能自己读、用户能拿编辑器改，也不再把 prompt / 头像 / 舞台配置散在
+    // 一堆 json 里。旧版的 persona.json 由迁移一次性转过来。
+    //
+    // front matter 是「宽容的 YAML 子集」：一行一个 key: value；值以 { [ " 开头
+    // （或本身就是 JSON 数字 / true / false / null）就按 JSON 解析，否则原样当
+    // 字符串。缺的键落回 persona 的默认值；手改坏了也不能崩 —— 整份文件当人设。
+    // =====================================================================
+    // 写出去时什么时候加引号：空串、含换行 / 控制字符、首字符是 YAML 指示符、
+    // 含 ": " 或 " #"、首尾有空白 —— 这些裸写会被解析器读歪，一律写成 JSON 串。
+    inline bool agent_md_plain_ok(const std::string &s)
+    {
+        if (s.empty() || s != cell::text::trim(s))
+            return false;
+        static const std::string kIndicators = "-?:,[]{}#&*!|>'\"%@`";
+        if (kIndicators.find(s.front()) != std::string::npos)
+            return false;
+        if (s.back() == ':')
+            return false;
+        // 这些裸写会被解析成 JSON 的布尔 / null / 数字：得加引号才是字符串
+        if (s == "true" || s == "false" || s == "null")
+            return false;
+        bool numeric = true;
+        for (char c : s)
+            if (!(std::isdigit((unsigned char)c) || c == '+' || c == '-' || c == '.' || c == 'e' || c == 'E'))
+            {
+                numeric = false;
+                break;
+            }
+        if (numeric)
+            return false;
+        for (size_t i = 0; i < s.size(); i++)
+        {
+            unsigned char c = (unsigned char)s[i];
+            if (c < 0x20 || c == 0x7f)
+                return false;
+            if (c == ':' && i + 1 < s.size() && s[i + 1] == ' ')
+                return false;
+            if (c == ' ' && i + 1 < s.size() && s[i + 1] == '#')
+                return false;
+        }
+        return true;
+    }
+    inline std::string agent_md_scalar(const std::string &s)
+    {
+        return agent_md_plain_ok(s) ? s : nlohmann::json(s).dump();
+    }
+    // 一个值：JSON 串 / 数字 / 布尔 / null 按 JSON 读，其它原样当字符串
+    inline nlohmann::json agent_md_value(const std::string &raw)
+    {
+        std::string v = cell::text::trim(raw);
+        if (v.empty())
+            return nlohmann::json();
+        const char c = v.front();
+        const bool maybe_json = c == '{' || c == '[' || c == '"' ||
+                                c == '-' || (c >= '0' && c <= '9') ||
+                                v == "true" || v == "false" || v == "null";
+        if (maybe_json)
+        {
+            auto j = nlohmann::json::parse(v, nullptr, false);
+            if (!j.is_discarded())
+                return j;
+        }
+        return nlohmann::json(v);
+    }
+    // 写卡片：顺序固定、内容幂等（同一份 persona 反复写出来一模一样）。
+    // live2d / triggers 是对象 / 数组，按一行紧凑 JSON 写。
+    inline std::string agent_md_render(const persona &p)
+    {
+        std::string out = "---\n";
+        auto str = [&](const char *k, const std::string &v)
+        {
+            out += k;
+            out += ": ";
+            out += agent_md_scalar(v);
+            out += '\n';
+        };
+        str("name", p.name);
+        str("subtitle", p.subtitle);
+        str("accent", p.accent);
+        str("avatar", p.avatar);
+        str("greeting", p.greeting);
+        str("user_name", p.user_name);
+        str("voice", p.voice);
+        out += std::format("proactive: {}\n", p.proactive ? "true" : "false");
+        out += std::format("idle_minutes: {}\n", p.idle_minutes);
+        str("workspace", p.workspace);
+        out += "live2d: " + (p.live2d.is_object() ? p.live2d : nlohmann::json::object()).dump() + "\n";
+        out += "triggers: " + (p.triggers.is_array() ? p.triggers : nlohmann::json::array()).dump() + "\n";
+        out += "---\n\n";
+        std::string body = cell::text::trim(p.prompt);
+        if (!body.empty())
+            out += body + '\n';
+        return out;
+    }
+    // 读卡片。解析不出来（没有 front matter / 没闭合）就整份当人设正文。
+    inline persona agent_md_parse(const std::string &id, const std::string &text)
+    {
+        persona p;
+        p.id = id;
+        p.prompt = cell::text::trim(text);
+        std::string_view s(text);
+        if (s.size() >= 3 && (unsigned char)s[0] == 0xEF && (unsigned char)s[1] == 0xBB &&
+            (unsigned char)s[2] == 0xBF)
+            s.remove_prefix(3); // BOM
+        if (s.rfind("---", 0) != 0)
+            return p;
+        size_t first_nl = s.find('\n');
+        if (first_nl == std::string_view::npos)
+            return p;
+        if (cell::text::trim(s.substr(0, first_nl)) != "---")
+            return p;
+        size_t body_at = std::string_view::npos;
+        size_t pos = first_nl + 1;
+        while (pos <= s.size())
+        {
+            size_t nl = s.find('\n', pos);
+            std::string_view line = s.substr(pos, (nl == std::string_view::npos ? s.size() : nl) - pos);
+            if (!line.empty() && line.back() == '\r')
+                line.remove_suffix(1);
+            if (cell::text::trim(line) == "---")
+            {
+                body_at = (nl == std::string_view::npos) ? s.size() : nl + 1;
+                break;
+            }
+            size_t colon = line.find(':');
+            if (colon != std::string_view::npos)
+            {
+                std::string key = cell::text::trim(line.substr(0, colon));
+                nlohmann::json v = agent_md_value(std::string(line.substr(colon + 1)));
+                auto str = [&](const char *k, std::string &dst)
+                {
+                    if (key == k && v.is_string())
+                        dst = v.get<std::string>();
+                };
+                str("name", p.name);
+                str("subtitle", p.subtitle);
+                str("accent", p.accent);
+                str("avatar", p.avatar);
+                str("greeting", p.greeting);
+                str("user_name", p.user_name);
+                str("voice", p.voice);
+                str("workspace", p.workspace);
+                if (key == "proactive" && v.is_boolean())
+                    p.proactive = v.get<bool>();
+                if (key == "idle_minutes" && v.is_number_integer())
+                    p.idle_minutes = std::clamp<int>((int)v.get<long long>(), 1, 24 * 60);
+                if (key == "live2d" && v.is_object())
+                    p.live2d = std::move(v);
+                if (key == "triggers" && v.is_array())
+                    p.triggers = std::move(v);
+            }
+            if (nl == std::string_view::npos)
+                break;
+            pos = nl + 1;
+        }
+        if (body_at == std::string_view::npos)
+            return p; // front matter 没闭合：整份文件当正文
+        p.prompt = cell::text::trim(s.substr(body_at));
+        return p;
+    }
+
+    // 规范化路径（Windows 大小写不敏感），用来比较「是不是同一个工作区」
+    inline std::string path_key(const fs::path &p)
+    {
+        std::error_code ec;
+        fs::path n = fs::weakly_canonical(p, ec);
+        if (ec || n.empty())
+            n = p.lexically_normal();
+        std::string s = n.string();
+        while (s.size() > n.root_path().string().size() && (s.back() == '/' || s.back() == '\\'))
+            s.pop_back();
+#ifdef _WIN32
+        cell::lower_ascii(s);
+#endif
+        // 统一分隔符：path_inside() 用 '/' 做边界判断，Windows 的 '\\' 必须先
+        // 折成 '/'，否则 "d:\\x\\.agent" 永远不以 "d:\\x\\.agent/" 开头。
+        for (char &c : s)
+            if (c == '\\')
+                c = '/';
+        return s;
+    }
+    inline bool same_path_ci(const std::string &a, const std::string &b)
+    {
+        return !a.empty() && !b.empty() && path_key(fs::path(a)) == path_key(fs::path(b));
+    }
+    // a 是否在 b 里面（含相等）。用来判断工作区有没有落进角色数据目录。
+    inline bool path_inside(const fs::path &a, const fs::path &b)
+    {
+        std::string ka = path_key(a), kb = path_key(b);
+        if (ka.empty() || kb.empty())
+            return false;
+        if (ka == kb)
+            return true;
+        if (kb.back() != '/' && kb.back() != '\\')
+            kb.push_back('/');
+        return ka.rfind(kb, 0) == 0;
+    }
+
+    // 旧版留下的录音目录（只在 housekeeping 里清理一次，不再写入）
     inline fs::path mic_dir() { return cell::root / "mic"; }
     // 语音输入是一次性的：录音只为了让 ASR 读一遍，所以落在系统临时目录，
     // 转写完立刻删 —— 数据根里不留下任何「说过什么」的音频。
@@ -271,13 +477,14 @@ namespace app
     //
     //    core         cell.cpp 的 cfg.system（这层外壳的基础约定）
     //    identity     角色身份（persona.prompt + 怎么称呼对方）
+    //    self         她自己的数据在哪、能读不能写、怎么改自己
     //    relation     主人与关系记录 —— 模型可以通过 settings 工具自己写
     //    memory       长期记忆碎片（自动生成，只可开关）
     //    source / tools / attachments / stickers / free / protocol / stage
     //                 这层外壳的演出约定（文案可改，stickers 是自动列表）
     //
     //  每层能单独关掉、单独改文案（text 留空 = 用内置默认），最后按顺序合成
-    //  **一条** system 消息放在 msg[0]。改完写 persona 目录下的 prompt.json。
+    //  **一条** system 消息放在 msg[0]。改完写角色目录下的 prompt.json。
     // =====================================================================
     struct prompt_layer
     {
@@ -297,12 +504,13 @@ namespace app
         }
     };
 
-    inline fs::path prompt_file(const std::string &pid) { return persona_dir(pid) / "prompt.json"; }
+    // 提示词覆盖 + 关系记录在角色目录的 prompt.json（AI 通过 settings 工具改）
+    inline fs::path prompt_file(const std::string &pid) { return paths::prompt_json(pid); }
 
-    inline prompt_cfg prompt_load(const std::string &pid)
+    inline prompt_cfg prompt_load_at(const fs::path &file)
     {
         prompt_cfg pc;
-        std::ifstream f(prompt_file(pid), std::ios::binary);
+        std::ifstream f(file, std::ios::binary);
         if (!f)
             return pc;
         auto j = nlohmann::json::parse(f, nullptr, false);
@@ -324,15 +532,20 @@ namespace app
         return pc;
     }
 
-    inline void prompt_save(const std::string &pid, const prompt_cfg &pc)
+    inline void prompt_save_at(const fs::path &file, const prompt_cfg &pc)
     {
         nlohmann::json ls = nlohmann::json::object();
         for (auto &[k, v] : pc.layers)
             ls[k] = {{"on", v.on}, {"text", v.text}};
         nlohmann::json j = {{"layers", std::move(ls)}, {"relation", pc.relation}};
         std::error_code ec;
-        fs::create_directories(persona_dir(pid), ec);
-        cell::plat::write_file_atomic(prompt_file(pid), j.dump(2));
+        fs::create_directories(file.parent_path(), ec);
+        cell::plat::write_file_atomic(file, j.dump(2));
+    }
+    inline prompt_cfg prompt_load(const std::string &pid) { return prompt_load_at(prompt_file(pid)); }
+    inline void prompt_save(const std::string &pid, const prompt_cfg &pc)
+    {
+        prompt_save_at(prompt_file(pid), pc);
     }
 
     // 层的展示信息。kind 决定界面上给什么样的编辑控件：
@@ -354,6 +567,7 @@ namespace app
         static const std::vector<prompt_layer_def> v = {
             {"core", "核心约定", "core", "cell.cpp 自己的 system（config.json 的 system 字段）。留空则用它的原文。"},
             {"identity", "角色身份", "identity", "角色卡里的人设正文，加上怎么称呼对方。去「角色设定」里改。"},
+            {"self", "角色目录", "text", "她自己这份数据放在哪：能读不能写，想改角色卡 / 记忆要用 settings 工具。"},
             {"relation", "主人与关系", "relation", "你们之间的事：对方是谁、你们怎么相处。她会自己往这里写。"},
             {"memory", "长期记忆", "auto", "对话里 [[remember]] 攒下的碎片事实，按时间追加。"},
             {"source", "消息来源", "text", "解释 IM 消息开头的来源标记。"},
@@ -378,16 +592,21 @@ namespace app
                    "才调用 msg 工具（channel / chat 留空 = 原会话）。";
         if (id == "tools")
             return "## 工具（你有一双手）\n"
-                   "你可以用全部基础工具：ls / read / write / edit / rg / exec / find / tw / notice / msg。"
+                   "你可以用全部基础工具：ls / read / write / edit / rg / exec / find / tw / notice / msg / voice。"
                    "需要读写文件、跑命令、查资料、找东西时直接用，不必先征求同意；"
                    "遇到看不懂的图片或听不清的语音，也可以先用 read 打开对应路径 —— "
                    "read 会把图片 / 音频变成你直接看得见听得到的内容。"
-                   "msg 只用来把话发到别的会话或别的 IM 渠道，不要用它重复回复当前会话。";
+                   "msg 只用来把话发到别的会话或别的 IM 渠道，不要用它重复回复当前会话。"
+                   "voice 决定这条回复发语音还是打字：渠道开着语音时默认是语音，"
+                   "遇到代码、链接、要复制的数字这种说不清的内容，用 voice(text) 改成打字。";
         if (id == "attachments")
             return "## 附件\n"
                    "上下文里形如 `[attach:image] 名字 | 绝对路径` 的行，是对方发给你的文件"
                    "（图片 / 语音 / 视频 / 文件 / 表情包）。想知道里面是什么就用 read 打开那个路径；"
-                   "不要凭空猜附件内容，也不要假装看过 —— 真读过再回答。";
+                   "不要凭空猜附件内容，也不要假装看过 —— 真读过再回答。\n"
+                   "反过来你也可以发东西给对方：在回复末尾另起一行写 `[attach:image] 名字 | 绝对路径`"
+                   "（kind 按类型写 image / audio / video / file），那一行不会被念出来，"
+                   "文件会作为附件跟着回复一起发出去。";
         if (id == "free")
             return "## 胡思乱想（对方允许你这么做）\n"
                    "对方把这个开关打开了：你可以走神、联想、说些没有用的话。"
@@ -417,6 +636,32 @@ namespace app
                    "9. 一次回复最多调一次 `act`；没有合适的动作就不要硬套，宁可只写情绪和星号。\n"
                    "10. `[[motion:…]]` / `[[expr:…]]` 这两个标记仍然有效（旧角色卡在用），但优先用 `act`。";
         return "";
+    }
+
+    // 「你自己」这一层：路径是每个角色不一样的，所以默认文案要 p 和 workspace。
+    // 重点三件事：东西在哪（给绝对路径）、文件工具只能读、想改自己要用 settings。
+    inline std::string prompt_self_text(const persona &p)
+    {
+        const std::string ws = !p.workspace.empty() ? p.workspace
+                                                     : paths::default_workspace(p.id).string();
+        return std::format(
+            "## 你自己（关于你这份数据）\n"
+            "你的角色卡：{}\n"
+            "长期记忆：{}\n"
+            "会话记录：{}\n"
+            "附件：{}\n"
+            "你现在的工作区（cwd，在这里干活）：{}\n"
+            "以上文件你的 read / ls / rg 都能读 —— 它们就是「你自己」。\n"
+            "但这些都是保护目录：write / edit / exec 改不了它们（会被沙箱拒绝）。"
+            "要改你自己的名字、称呼、人设、说话方式或长期记忆，用 settings 工具：\n"
+            "  - settings get —— 看现在的角色卡、提示词分层、路径和记忆\n"
+            "  - settings set agent.name / agent.subtitle / agent.greeting / agent.user_name / "
+            "agent.prompt —— 改角色卡（prompt 是 Agent.md 的人设正文）\n"
+            "  - settings set relation / layer.<层>.text / layer.<层>.on —— 改提示词分层\n"
+            "  - settings action=memory op=add|forget|list —— 加 / 删 / 看长期记忆\n"
+            "不要用 write / edit 去改这些文件，它们只读。工作区是可以随便写的。",
+            paths::agent_md(p.id).string(), paths::memory_file(p.id).string(),
+            paths::sessions_dir(p.id).string(), paths::uploads_dir(p.id).string(), ws);
     }
 
     // =====================================================================
@@ -748,8 +993,12 @@ namespace app
         // 按住说话的键。空 = 不绑定；默认 Alt（按住说、松开停）。
         // 存的是页面那边规范化的组合名："Alt" / "Ctrl+Shift+M" / "F2"。
         std::string mic_hotkey = "Alt";
+        // exec 的沙箱档位：read-only / edit-only / full-access（默认）。进程启动时生效，
+        // 改完当场同步给所有角色，下一回合就按新档位跑。
+        std::string sandbox = "full-access";
         int idle_minutes = 30;     // 全局默认的主动关怀间隔
-        std::map<std::string, std::string> sessions; // persona id -> 上次会话 id
+        // 注意：这里没有「上次会话」了。那是每个角色、每个工作区各一份的内部状态，
+        // 存在 characters/<角色>/state.json 里，见 app_core::last_session。
 
         static fs::path file() { return cell::root / "agent.json"; }
         static std::string im_key(const std::string &id) { return "im:" + id; }
@@ -798,13 +1047,10 @@ namespace app
             b("compact_auto", compact_auto);
             b("free_think", free_think);
             s("mic_hotkey", mic_hotkey);
+            s("sandbox", sandbox);
             auto im = j.find("idle_minutes");
             if (im != j.end() && im->is_number_integer())
                 idle_minutes = std::clamp<int>((int)im->get<long long>(), 1, 24 * 60);
-            if (j.contains("sessions") && j["sessions"].is_object())
-                for (auto &[k, v] : j["sessions"].items())
-                    if (v.is_string())
-                        sessions[k] = v.get<std::string>();
         }
         void save() const
         {
@@ -822,8 +1068,8 @@ namespace app
             j["compact_auto"] = compact_auto;
             j["free_think"] = free_think;
             j["mic_hotkey"] = mic_hotkey;
+            j["sandbox"] = sandbox;
             j["idle_minutes"] = idle_minutes;
-            j["sessions"] = sessions;
             std::error_code ec;
             fs::create_directories(cell::root, ec);
             cell::plat::write_file_atomic(file(), j.dump(2));
@@ -838,7 +1084,8 @@ namespace app
         long long t = 0;
         std::string text;
     };
-    inline fs::path memory_file(const std::string &pid) { return persona_dir(pid) / "memory.jsonl"; }
+    // 长期记忆在角色目录的 memorys/memory.jsonl，一行一条 {"t":unix,"text":"..."}
+    inline fs::path memory_file(const std::string &pid) { return paths::memory_file(pid); }
 
     inline std::vector<memory_entry> memory_load(const std::string &pid, size_t cap = 200)
     {
@@ -882,13 +1129,36 @@ namespace app
             if (e.text == text)
                 return false; // 已经记过
         std::error_code ec;
-        fs::create_directories(persona_dir(pid), ec);
+        fs::create_directories(paths::memorys_dir(pid), ec);
         nlohmann::json j{{"t", (long long)std::time(nullptr)}, {"text", text}};
         std::ofstream f(memory_file(pid), std::ios::binary | std::ios::app);
         if (!f)
             return false;
         f << j.dump() << '\n';
         return true;
+    }
+    // 删掉一条记忆（文本完全一致才删），返回删掉了几条
+    inline size_t memory_forget(const std::string &pid, const std::string &text)
+    {
+        if (text.empty())
+            return 0;
+        auto rows = memory_load(pid, 100000);
+        std::error_code ec;
+        fs::create_directories(paths::memorys_dir(pid), ec);
+        std::ofstream f(memory_file(pid), std::ios::binary | std::ios::trunc);
+        if (!f)
+            return 0;
+        size_t removed = 0;
+        for (auto &e : rows)
+        {
+            if (e.text == text)
+            {
+                removed++;
+                continue;
+            }
+            f << nlohmann::json{{"t", e.t}, {"text", e.text}}.dump() << '\n';
+        }
+        return removed;
     }
 
     // =====================================================================
@@ -901,8 +1171,8 @@ namespace app
         cell::box::context box;
         cell::config::settings pcfg; // 每角色一份：system_prompt 是人设
         std::unique_ptr<cell::engine::runner> eng;
-        std::string cwd; // = persona 目录
-        // 提示词分层配置（persona 目录下的 prompt.json）。只有回合工作线程会改它
+        std::string cwd; // = 工作区（workspace）绝对路径。同一个角色可以换工作区
+        // 提示词分层配置（角色目录下的 prompt.json）。只有回合工作线程会改它
         // （settings 工具），命令线程改完后 apply_prompt 才读 —— 两边都只碰自己的那份。
         prompt_cfg pc;
 
@@ -928,10 +1198,16 @@ namespace app
 
         std::string emotion = "neutral";
         std::atomic<long long> voice_gen{0};
+        // 这条回复她想要语音还是文字：0 = 没表态（跟渠道默认），1 = 语音，2 = 文字。
+        // 回合开头清零，voice 工具在回合中写，done 在结尾读。
+        std::atomic<int> voice_choice{0};
         std::chrono::steady_clock::time_point last_active = std::chrono::steady_clock::now();
         std::chrono::steady_clock::time_point last_proactive = std::chrono::steady_clock::now();
 
-        explicit persona_ctx(persona pp) : p(std::move(pp)), h(persona_dir(p.id)), box(), cwd(persona_dir(p.id).string())
+        // 会话根是「这个角色的」sessions/：不同角色的会话永远不会撞在一起，
+        // 里面的分组名还是工作区的 cwd key（同一个角色换工作区 = 换一组会话）。
+        explicit persona_ctx(persona pp, std::filesystem::path workspace)
+            : p(std::move(pp)), h(workspace, paths::sessions_dir(p.id)), box(), cwd(workspace.string())
         {
             h.set_box_context(&box);
         }
@@ -976,11 +1252,22 @@ namespace app
         // 判断页面是否已经启动）
         std::function<void(const std::string &)> on_command;
 
+        // ---- 出站消息：一条队列项按「文字在前、媒体在后」顺序发 -------------
+        struct im_out
+        {
+            std::string chat, text;
+            bool group = false;
+            std::vector<im::media_ref> media; // 已落盘的贴纸/图片：文字发完再按顺序发
+        };
         // ---- TTS 队列 -----------------------------------------------------
         struct tts_job
         {
             std::string pid, text, voice, emo;
             long long gen = 0;
+            // IM 语音回复：text 是「要念的话」。合成成功就只发语音（正文丢掉 —— 有语音
+            // 就不再发文字），失败则把 im 里那条原样发出去兜底。空 = 桌面朗读。
+            std::string im_chan, im_kind;
+            std::optional<im_out> im;
         };
         std::deque<tts_job> tts_q;
         std::mutex tts_mx;
@@ -988,6 +1275,10 @@ namespace app
         std::thread tts_thread;
         bool tts_quit = false;
         std::chrono::steady_clock::time_point last_voice_error{};
+        // IM 语音条：一句话一条，最多几条；总长度另有上限 —— clip_utf8 按字节算，
+        // 300 字节大约 100 个汉字（半分钟），再长就撞企微 60 秒的硬限制，TTS 也按字数收费。
+        static constexpr size_t kImVoiceMaxN = 6;
+        static constexpr size_t kImVoiceBytes = 300;
 
         std::thread ticker;
         bool ticker_quit = false;
@@ -998,12 +1289,6 @@ namespace app
         // 反代、限流的 bot、断线的 OneBot）不会拖住别的渠道。
         // 线程只拿自己的配置快照，从不碰 cmd_mx —— 改配置时要 join 它们，
         // 谁要是等 cmd_mx 就会自锁。
-        struct im_out
-        {
-            std::string chat, text;
-            bool group = false;
-            std::vector<im::media_ref> media; // 已落盘的贴纸/图片：文字发完再按顺序发
-        };
         struct im_stat
         {
             long long in = 0, out = 0, dropped = 0;
@@ -1052,8 +1337,8 @@ namespace app
         // -----------------------------------------------------------------
         void start()
         {
-            fs::create_directories(personas_dir());
-            fs::create_directories(audio_dir());
+            // 角色数据根：每个角色一棵树，全是按需创建的（第一次建角色时才落地）
+            fs::create_directories(paths::characters_dir());
             fs::create_directories(voice_tmp_dir());
             ac.load();
             // 服务密钥只进加密库，不落 agent.json
@@ -1071,11 +1356,18 @@ namespace app
             // 用户的偏好决定工具/沙箱的进程级初值（agent.cpp 给的只是默认值）：
             // 全量工具常开、full-access、autoallow / compact_auto 按 agent.json。
             cfg.tools = true;
-            cfg.sandbox_mode = "full-access";
-            cell::box::sandbox_mode() = cell::box::SandboxMode::FullAccess;
+            // 沙箱档位来自用户设置（默认 full-access）：exec 能不能写文件、能不能跑都在这一档
+            {
+                auto sm = cell::box::parse_mode(ac.sandbox).value_or(cell::box::SandboxMode::FullAccess);
+                cell::box::sandbox_mode() = sm;
+                cfg.sandbox_mode = cell::box::mode_name(sm);
+            }
             cell::box::autoallow_enabled() = ac.autoallow;
             cfg.autoallow = ac.autoallow;
             cfg.compact_auto = ac.compact_auto;
+            // 旧版 personas/ + 全局 sessions/uploads/audio/stickers 一次性搬家。
+            // 必须在任何角色扫描（persona_ids）之前跑完，之后读到的就是新布局。
+            migrate_legacy_layout();
             stage_seed_assets();
             seed_personas();
             adopt_default_stage();
@@ -1146,6 +1438,9 @@ namespace app
                     c->worker.join();
             for (auto *c : all)
             {
+                // 退出前把「这个工作区上次开的是哪条会话」记下来，下次打开接着聊
+                if (!c->cwd.empty())
+                    set_last_session(c->p.id, cell::cwd_id_of(fs::path(c->cwd)), c->h.now().id());
                 c->h.now().unload();
             }
             cell::async_io::flush();
@@ -1154,37 +1449,50 @@ namespace app
         // -----------------------------------------------------------------
         //  角色目录
         // -----------------------------------------------------------------
+        // 一个角色 = characters/<id>/Agent.md 存在。头像 / 记忆 / 会话都在这棵树里。
         std::vector<std::string> persona_ids()
         {
             std::vector<std::string> out;
             std::error_code ec;
-            if (!fs::is_directory(personas_dir(), ec))
+            if (!fs::is_directory(paths::characters_dir(), ec))
                 return out;
-            for (auto &e : fs::directory_iterator(personas_dir(), ec))
+            for (auto &e : fs::directory_iterator(paths::characters_dir(), ec))
             {
                 if (ec || !e.is_directory(ec))
                     continue;
                 std::string id = e.path().filename().string();
-                if (persona_id_ok(id) && fs::is_regular_file(e.path() / "persona.json", ec))
+                if (persona_id_ok(id) && fs::is_regular_file(paths::agent_md(id), ec))
                     out.push_back(id);
             }
             std::sort(out.begin(), out.end());
             return out;
         }
 
+        // 每个角色都有的子目录（内容按需写，但目录一开始就建好）
+        static void ensure_character_dirs(const std::string &id)
+        {
+            if (!persona_id_ok(id))
+                return;
+            std::error_code ec;
+            for (const auto &d : {paths::sessions_dir(id), paths::memorys_dir(id), paths::uploads_dir(id),
+                                  paths::audio_dir(id), paths::stickers_dir(id)})
+                fs::create_directories(d, ec);
+        }
+
         static persona load_persona(const std::string &id)
         {
-            std::ifstream f(persona_dir(id) / "persona.json", std::ios::binary);
-            auto j = nlohmann::json::parse(f, nullptr, false);
-            if (!j.is_object())
+            std::ifstream f(paths::agent_md(id), std::ios::binary);
+            if (!f)
             {
                 persona p;
                 p.id = id;
                 p.name = id;
                 return p;
             }
-            return persona::from_json(id, j);
+            std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+            return agent_md_parse(id, text);
         }
+        // 写卡片：原子替换 Agent.md（先写临时文件再 rename，断电不会留下半个文件）
         static bool save_persona(const persona &p, std::string *err = nullptr)
         {
             if (!persona_id_ok(p.id))
@@ -1194,14 +1502,462 @@ namespace app
                 return false;
             }
             std::error_code ec;
-            fs::create_directories(persona_dir(p.id), ec);
+            fs::create_directories(paths::character_dir(p.id), ec);
             if (ec)
             {
                 if (err)
                     *err = "无法创建角色目录：" + ec.message();
                 return false;
             }
-            return cell::plat::write_file_atomic(persona_dir(p.id) / "persona.json", p.to_json().dump(2));
+            // 角色目录下该有的子目录一次到位：界面上的「打开目录」按钮、
+            // settings 工具报的路径、以及用户自己翻目录时都能看到一致的布局。
+            ensure_character_dirs(p.id);
+            return cell::plat::write_file_atomic(paths::agent_md(p.id), agent_md_render(p));
+        }
+
+        // ---- 工作区（cwd）--------------------------------------------------
+        // 角色在哪干活。空 = 默认工作区 <程序目录>/workspaces/<id>（数据根旁边）。
+        // 规则：必须是绝对路径；不存在就创建（目录）；已存在但不是目录 -> 报错；
+        // 不能落在数据根（.agent/）里 —— 那棵树对文件工具是敏感区（characters/
+        // 只读、其余是宿主内部数据），工作区要能随便读写。
+        static std::string resolve_workspace(const persona &p, std::string *err = nullptr)
+        {
+            auto fail = [&](std::string why)
+            {
+                if (err)
+                    *err = std::move(why);
+                return std::string();
+            };
+            fs::path ws = p.workspace.empty() ? paths::default_workspace(p.id) : fs::path(p.workspace);
+            if (!ws.is_absolute())
+                return fail("工作区要填绝对路径：" + ws.string());
+            ws = ws.lexically_normal();
+            if (path_inside(ws, paths::characters_dir()))
+                return fail("工作区不能放在角色数据目录（characters/）里 —— 那棵树对她只读");
+            if (path_inside(ws, cell::root))
+                return fail("工作区不能放在数据根（.agent/）里 —— 数据根对文件工具是只读/敏感区；"
+                            "默认工作区在程序旁边的 workspaces/<角色>/");
+            std::error_code ec;
+            if (fs::exists(ws, ec))
+            {
+                if (!fs::is_directory(ws, ec))
+                    return fail("工作区不是目录：" + ws.string());
+            }
+            else
+            {
+                fs::create_directories(ws, ec);
+                if (ec || !fs::is_directory(ws, ec))
+                    return fail("无法创建工作区：" + ws.string() + "（" + ec.message() + "）");
+            }
+            return ws.string();
+        }
+
+        // ---- 每个角色的内部状态 --------------------------------------------
+        // characters/<id>/state.json：{"last_sessions":{"<cwd-key>":"<会话 id>"}}
+        // 同一个角色在不同工作区各记各的上次会话，所以键是工作区的 cwd key。
+        static nlohmann::json state_load(const std::string &pid)
+        {
+            nlohmann::json j;
+            std::ifstream f(paths::state_json(pid), std::ios::binary);
+            if (f)
+                j = nlohmann::json::parse(f, nullptr, false);
+            if (!j.is_object())
+                j = nlohmann::json::object();
+            if (!j.contains("last_sessions") || !j["last_sessions"].is_object())
+                j["last_sessions"] = nlohmann::json::object();
+            return j;
+        }
+        static void state_save(const std::string &pid, const nlohmann::json &j)
+        {
+            if (pid.empty())
+                return;
+            std::error_code ec;
+            fs::create_directories(paths::character_dir(pid), ec);
+            cell::plat::write_file_atomic(paths::state_json(pid), j.dump(2));
+        }
+        static std::string last_session(const std::string &pid, const std::string &cwd_key)
+        {
+            if (pid.empty() || cwd_key.empty())
+                return {};
+            const nlohmann::json j = state_load(pid);
+            auto it = j["last_sessions"].find(cwd_key);
+            return (it != j["last_sessions"].end() && it->is_string())
+                       ? it->get<std::string>() : std::string();
+        }
+        static void set_last_session(const std::string &pid, const std::string &cwd_key,
+                                     const std::string &sid)
+        {
+            if (pid.empty() || cwd_key.empty())
+                return;
+            nlohmann::json j = state_load(pid);
+            if (sid.empty())
+                j["last_sessions"].erase(cwd_key);
+            else
+                j["last_sessions"][cwd_key] = sid;
+            state_save(pid, j);
+        }
+
+        // ---- 角色会话索引 --------------------------------------------------
+        // cell.cpp 在 characters/<id>/sessions/sessions.json 里维护
+        // {cwd-key: 工作区绝对路径}。这里直接读文件，不碰 cell.cpp 的进程级缓存
+        //（那份缓存按数据根记，多个角色的索引不能共用）。
+        static nlohmann::json char_sessions_index(const std::string &pid)
+        {
+            std::ifstream f(paths::sessions_index(pid), std::ios::binary);
+            if (!f)
+                return nlohmann::json::object();
+            auto j = nlohmann::json::parse(f, nullptr, false);
+            return j.is_object() ? j : nlohmann::json::object();
+        }
+        static std::string char_workspace_for_key(const std::string &pid, const std::string &key)
+        {
+            auto j = char_sessions_index(pid);
+            auto it = j.find(key);
+            return (it != j.end() && it->is_string()) ? it->get<std::string>() : std::string();
+        }
+        // 会话必须：id 合法、目录真实存在、所属分组的工作区就是当前工作区。
+        // 这样在别的工作区里看不到、也删不掉这条会话。
+        static bool session_owned_by(const persona_ctx &c, const std::string &sid)
+        {
+            if (!cell::is_valid_session_id(sid))
+                return false;
+            const std::string key = cell::session_prefix(sid);
+            std::string ws = char_workspace_for_key(c.p.id, key);
+            if (ws.empty())
+            {
+                // 索引里没有（比如索引文件丢过一次）：只有当前工作区的分组才认
+                if (key != cell::cwd_id_of(fs::path(c.cwd)))
+                    return false;
+                ws = c.cwd;
+            }
+            if (!same_path_ci(ws, c.cwd))
+                return false;
+            std::error_code ec;
+            return fs::is_directory(paths::sessions_dir(c.p.id) / key / sid, ec);
+        }
+        // 同一分组里最新的会话（按 messages.jsonl 的修改时间；空壳看目录时间）
+        static std::string newest_session_in_group(const std::string &pid, const std::string &key)
+        {
+            std::error_code ec;
+            const fs::path dir = paths::sessions_dir(pid) / key;
+            std::string best;
+            long long best_t = -1;
+            if (!fs::is_directory(dir, ec))
+                return best;
+            std::vector<fs::path> dirs;
+            for (auto &e : fs::directory_iterator(dir, ec))
+                if (!ec && e.is_directory(ec))
+                    dirs.push_back(e.path());
+            for (auto &p : dirs)
+            {
+                const std::string sid = p.filename().string();
+                if (!cell::is_valid_session_id(sid) || cell::session_prefix(sid) != key)
+                    continue;
+                std::error_code tec;
+                fs::path tf = p / "messages.jsonl";
+                if (!fs::is_regular_file(tf, tec))
+                    tf = p;
+                auto ft = fs::last_write_time(tf, tec);
+                long long t = 0;
+                if (!tec)
+                    t = (long long)std::chrono::duration_cast<std::chrono::seconds>(
+                            std::chrono::file_clock::to_sys(ft).time_since_epoch())
+                            .count();
+                if (t > best_t || (t == best_t && sid > best))
+                {
+                    best_t = t;
+                    best = sid;
+                }
+            }
+            return best;
+        }
+
+        // -----------------------------------------------------------------
+        //  旧版布局迁移（只跑一次，尽力而为）
+        // -----------------------------------------------------------------
+        // 旧版把自己的东西散在数据根里：personas/<id>/persona.json、全局
+        // sessions/<key>/、uploads/<pid>/、audio/<pid>-*.mp3、stickers/。
+        // 这里搬进 characters/<id>/（见 agent-paths.hpp）。搬不动的留在原地，
+        // 任何一步失败都只记日志 —— 迁移不能挡住启动。
+        void migrate_legacy_layout()
+        {
+            auto &log = cell::sys::logger::instance();
+            std::error_code ec;
+            const fs::path legacy_personas = cell::root / "personas";
+            if (!fs::is_directory(legacy_personas, ec))
+                return;
+            const fs::path legacy_sessions = cell::root / "sessions";
+            const fs::path legacy_uploads = cell::root / "uploads";
+            const fs::path legacy_audio = cell::root / "audio";
+            const fs::path legacy_stickers = cell::root / "stickers";
+            try
+            {
+                // 旧 agent.json 里的「上次会话」表（新布局存每个角色的 state.json）
+                nlohmann::json old_agent;
+                {
+                    std::ifstream f(cell::root / "agent.json", std::ios::binary);
+                    old_agent = nlohmann::json::parse(f, nullptr, false);
+                }
+                if (!old_agent.is_object())
+                    old_agent = nlohmann::json::object();
+                const nlohmann::json old_last =
+                    (old_agent.contains("sessions") && old_agent["sessions"].is_object())
+                        ? old_agent["sessions"] : nlohmann::json::object();
+
+                // 跨盘 rename 会失败：退回复制 + 删源
+                auto move_file = [&](const fs::path &src, const fs::path &dst)
+                {
+                    std::error_code e;
+                    if (!fs::is_regular_file(src, e) || fs::exists(dst, e))
+                        return;
+                    fs::create_directories(dst.parent_path(), e);
+                    fs::rename(src, dst, e);
+                    if (e)
+                    {
+                        e.clear();
+                        fs::copy_file(src, dst, fs::copy_options::overwrite_existing, e);
+                        if (!e)
+                            fs::remove(src, e);
+                    }
+                };
+                // 目录合并：目标里已有的文件不覆盖（新数据优先）
+                auto move_tree = [&](auto &&self, const fs::path &src, const fs::path &dst) -> void
+                {
+                    std::error_code e;
+                    if (!fs::is_directory(src, e))
+                        return;
+                    fs::create_directories(dst, e);
+                    std::vector<fs::path> entries;
+                    for (auto &it : fs::directory_iterator(src, e))
+                        if (!e)
+                            entries.push_back(it.path());
+                    for (auto &p : entries)
+                    {
+                        if (fs::is_directory(p, e))
+                            self(self, p, dst / p.filename());
+                        else
+                            move_file(p, dst / p.filename());
+                    }
+                };
+
+                std::vector<std::string> migrated;
+                for (auto &entry : fs::directory_iterator(legacy_personas, ec))
+                {
+                    if (ec)
+                        break;
+                    if (!entry.is_directory(ec))
+                        continue;
+                    const std::string id = entry.path().filename().string();
+                    if (!persona_id_ok(id))
+                        continue;
+                    const fs::path olddir = entry.path();
+                    const fs::path chardir = paths::character_dir(id);
+                    fs::create_directories(chardir, ec);
+                    migrated.push_back(id);
+
+                    // 1) 角色卡：新卡已经存在就不动它（迁移重跑时以新卡为准）
+                    const bool have_new_card = fs::is_regular_file(paths::agent_md(id), ec);
+                    bool legacy_card_read = false; // 旧 persona.json 真的读到了（才敢删）
+                    persona p;
+                    if (have_new_card)
+                        p = load_persona(id);
+                    else
+                    {
+                        std::ifstream f(olddir / "persona.json", std::ios::binary);
+                        auto j = nlohmann::json::parse(f, nullptr, false);
+                        if (j.is_object())
+                        {
+                            p = persona::from_json(id, j);
+                            legacy_card_read = true;
+                        }
+                        p.id = id;
+                        if (p.name.empty())
+                            p.name = id;
+                    }
+                    // 旧的提示词覆盖 / 关系记录
+                    if (!fs::exists(paths::prompt_json(id), ec) &&
+                        fs::is_regular_file(olddir / "prompt.json", ec))
+                        prompt_save_at(paths::prompt_json(id), prompt_load_at(olddir / "prompt.json"));
+                    // 旧头像：搬进角色目录。旧卡里通常已经写了 "avatar.png"（用户
+                    // 上传过一次就是这样），所以不能只在 p.avatar 为空时才搬 ——
+                    // 文件本身可能还躺在旧目录里；不搬走的话，删掉旧 persona.json
+                    // 之后头像就丢了，旧目录也永远清不空。
+                    bool avatar_changed = false;
+                    {
+                        std::vector<fs::path> avatars;
+                        for (auto &a : fs::directory_iterator(olddir, ec))
+                            if (!ec && a.is_regular_file(ec) && a.path().stem() == "avatar")
+                                avatars.push_back(a.path());
+                        for (auto &a : avatars)
+                        {
+                            auto dst = chardir / a.filename();
+                            std::error_code me;
+                            if (!fs::exists(dst, me))
+                            {
+                                fs::rename(a, dst, me);
+                                if (me)
+                                {
+                                    me.clear();
+                                    fs::copy_file(a, dst, fs::copy_options::overwrite_existing, me);
+                                    if (!me)
+                                        fs::remove(a, me);
+                                }
+                            }
+                            else
+                            {
+                                // 新目录里已有同名头像：新数据优先，旧源文件删掉
+                                std::error_code re;
+                                fs::remove(a, re);
+                            }
+                            std::error_code ce;
+                            if (p.avatar.empty() || !fs::is_regular_file(chardir / p.avatar, ce))
+                            {
+                                p.avatar = a.filename().string();
+                                avatar_changed = true;
+                            }
+                        }
+                    }
+                    // 旧长期记忆 / 角色表情包
+                    move_file(olddir / "memory.jsonl", paths::memory_file(id));
+                    move_tree(move_tree, olddir / "stickers", paths::stickers_dir(id));
+                    // 工作区先定下来（默认工作区），后面会话索引要用到它的绝对路径
+                    if (p.workspace.empty())
+                        p.workspace = paths::default_workspace(id).string();
+                    std::string ws_err;
+                    if (std::string resolved = resolve_workspace(p, &ws_err); !resolved.empty())
+                        p.workspace = resolved;
+                    else
+                        log.warn("migrate", std::format("persona={} workspace: {}", id, ws_err));
+
+                    // 2) 旧会话：旧分组 key = 旧角色目录的 cwd key
+                    const std::string old_key = cell::cwd_id_of(olddir);
+                    const fs::path old_group = legacy_sessions / old_key;
+                    const fs::path new_group = paths::sessions_dir(id) / old_key;
+                    if (fs::is_directory(old_group, ec))
+                    {
+                        fs::create_directories(paths::sessions_dir(id), ec);
+                        if (!fs::exists(new_group, ec))
+                            fs::rename(old_group, new_group, ec);
+                        else
+                            move_tree(move_tree, old_group, new_group);
+                        // 索引：旧 key 指向新工作区（之后新会话也落在同一组）
+                        auto idx = char_sessions_index(id);
+                        if (!idx.contains(old_key) || !idx[old_key].is_string())
+                        {
+                            idx[old_key] = p.workspace;
+                            cell::plat::write_file_atomic(paths::sessions_index(id), idx.dump(2));
+                        }
+                        // 上次打开的会话
+                        const std::string last = old_last.value(id, std::string());
+                        if (cell::is_valid_session_id(last) &&
+                            cell::session_prefix(last) == old_key &&
+                            fs::is_directory(new_group / last, ec))
+                            set_last_session(id, cell::cwd_id_of(fs::path(p.workspace)), last);
+                    }
+                    // 3) 附件 / 语音
+                    move_tree(move_tree, legacy_uploads / id, paths::uploads_dir(id));
+                    if (fs::is_directory(legacy_audio, ec))
+                    {
+                        std::vector<fs::path> clips;
+                        for (auto &a : fs::directory_iterator(legacy_audio, ec))
+                            if (!ec && a.is_regular_file(ec) &&
+                                a.path().filename().string().rfind(id + "-", 0) == 0)
+                                clips.push_back(a.path());
+                        for (auto &a : clips)
+                            move_file(a, paths::audio_dir(id) / a.filename());
+                    }
+                    // 卡片写回（新卡已经存在时保持原样，只搬了数据）。写盘成功
+                    // 之后才删旧的 persona.json —— 写失败就留着，宁可下次再迁一遍
+                    // 也不能把角色卡弄丢。
+                    if (!have_new_card)
+                    {
+                        std::string save_err;
+                        if (save_persona(p, &save_err))
+                        {
+                            std::error_code e;
+                            if (legacy_card_read || !fs::is_regular_file(olddir / "persona.json", e))
+                                fs::remove(olddir / "persona.json", e);
+                        }
+                        else
+                        {
+                            log.warn("migrate", std::format(
+                                                   "persona={} card save failed ({}), legacy persona.json kept",
+                                                   id, save_err));
+                        }
+                    }
+                    else
+                    {
+                        // 新卡本来就在：旧 persona.json 只是冗余，直接删。头像
+                        // 文件是在上面补搬的，卡片里的 avatar 字段可能要更新。
+                        if (avatar_changed)
+                        {
+                            std::string e2;
+                            if (!save_persona(p, &e2))
+                                log.warn("migrate", std::format("persona={} avatar card update failed: {}", id, e2));
+                        }
+                        std::error_code e;
+                        fs::remove(olddir / "persona.json", e);
+                    }
+                    // 旧 prompt.json 的内容已经复制到 characters/<id>/prompt.json（或新
+                    // 文件本来就在）：删掉它，否则 personas/<id>/ 永远非空、每次启动都
+                    // 重跑迁移。新文件没写出来时保留旧文件。
+                    {
+                        std::error_code e;
+                        if (fs::is_regular_file(olddir / "prompt.json", e) &&
+                            !fs::exists(paths::prompt_json(id), e))
+                            log.warn("migrate", std::format(
+                                                   "persona={} prompt copy missing, legacy prompt.json kept", id));
+                        else
+                            fs::remove(olddir / "prompt.json", e);
+                    }
+                }
+                // 4) 全局表情包归当前（没有就第一个）角色
+                if (fs::is_directory(legacy_stickers, ec))
+                {
+                    std::string owner = ac.active_persona;
+                    if (!persona_id_ok(owner) || !fs::is_directory(paths::character_dir(owner), ec))
+                    {
+                        auto all = migrated.empty() ? persona_ids() : migrated;
+                        owner = all.empty() ? std::string() : all.front();
+                    }
+                    if (!owner.empty())
+                        move_tree(move_tree, legacy_stickers, paths::stickers_dir(owner));
+                }
+                // 5) 清掉旧目录：旧的全局会话索引先删（映射已过时），然后把搬空的
+                //    目录自下而上删掉；非空的留着（说明还有搬不动的数据，别碰）。
+                {
+                    std::error_code e2;
+                    fs::remove(legacy_sessions / "sessions.json", e2);
+                }
+                auto remove_empty_tree = [&](auto &&self, const fs::path &p) -> void
+                {
+                    std::error_code e;
+                    if (!fs::is_directory(p, e))
+                        return;
+                    std::vector<fs::path> entries;
+                    for (auto &it : fs::directory_iterator(p, e))
+                        if (!e)
+                            entries.push_back(it.path());
+                    for (auto &c : entries)
+                        self(self, c);
+                    fs::remove(p, e); // 空了才删得掉
+                };
+                for (const fs::path &d : {legacy_personas, legacy_sessions, legacy_uploads,
+                                          legacy_audio, legacy_stickers})
+                    remove_empty_tree(remove_empty_tree, d);
+                fs::remove_all(cell::root / "mic", ec); // 旧版录音：一次性清掉
+                // 6) agent.json 里不再有 sessions 表
+                if (old_agent.contains("sessions"))
+                {
+                    old_agent.erase("sessions");
+                    cell::plat::write_file_atomic(cell::root / "agent.json", old_agent.dump(2));
+                }
+                log.info("migrate", std::format("legacy personas moved: {}", migrated.size()));
+            }
+            catch (const std::exception &e)
+            {
+                log.warn("migrate", std::format("legacy layout migration failed: {}", e.what()));
+            }
         }
         // 首次运行：默认是「空角色」状态，让用户自己建第一个角色。
         // 开发模式（--debug，以及 --smoke / --smoke-engine）自动生成一个测试角色，
@@ -1260,25 +2016,33 @@ namespace app
                     c->p = p;
             }
         }
-        // TTS 成品留最近两天（页面要播）；录音一律不留 —— 语音输入用完即弃，
-        // 这里顺手把上个版本攒在 .agent/mic/ 里的也清掉。
+        // TTS 成品留最近两天（页面要播），每个角色清自己的 characters/<id>/audio/；
+        // 录音一律不留 —— 语音输入用完即弃。顺手把旧版留下的全局 audio/、mic/ 清掉。
         void housekeeping()
         {
             std::error_code ec;
             auto now = std::chrono::system_clock::now();
-            for (auto &e : fs::directory_iterator(audio_dir(), ec))
+            for (auto &id : persona_ids())
             {
-                if (ec)
-                    break;
-                auto ft = fs::last_write_time(e.path(), ec);
-                if (ec)
+                const fs::path dir = paths::audio_dir(id);
+                if (!fs::is_directory(dir, ec))
                     continue;
-                auto sys = std::chrono::file_clock::to_sys(ft);
-                if (now - sys > std::chrono::hours(48))
-                    fs::remove(e.path(), ec);
+                std::vector<fs::path> files;
+                for (auto &e : fs::directory_iterator(dir, ec))
+                    if (!ec && e.is_regular_file(ec))
+                        files.push_back(e.path());
+                for (auto &p : files)
+                {
+                    auto ft = fs::last_write_time(p, ec);
+                    if (ec)
+                        continue;
+                    if (now - std::chrono::file_clock::to_sys(ft) > std::chrono::hours(48))
+                        fs::remove(p, ec);
+                }
             }
-            fs::remove_all(mic_dir(), ec);       // 旧版留下的录音
-            fs::remove_all(voice_tmp_dir(), ec); // 异常退出时没删掉的临时音频
+            fs::remove_all(cell::root / "audio", ec); // 旧版全局 TTS 目录
+            fs::remove_all(mic_dir(), ec);            // 旧版留下的录音
+            fs::remove_all(voice_tmp_dir(), ec);      // 异常退出时没删掉的临时音频
             fs::create_directories(voice_tmp_dir(), ec);
         }
 
@@ -1287,7 +2051,7 @@ namespace app
         // -----------------------------------------------------------------
         persona_ctx *open_named(const std::string &id, std::string *err, bool make_active = true)
         {
-            if (!persona_id_ok(id) || !fs::is_directory(persona_dir(id)))
+            if (!persona_id_ok(id) || !fs::is_regular_file(paths::agent_md(id)))
             {
                 if (err)
                     *err = "角色不存在：" + id;
@@ -1303,16 +2067,55 @@ namespace app
                 return it->second.get();
             }
             persona p = load_persona(id);
-            auto u = std::make_unique<persona_ctx>(p);
-            // 恢复上次会话（同一角色目录 => 同一个 cwd key）
-            std::string boot = ac.sessions.count(id) ? ac.sessions[id] : "";
-            std::string key = cell::cwd_id_of(persona_dir(id));
-            if (!boot.empty() && (!cell::is_valid_session_id(boot) || cell::session_prefix(boot) != key))
-                boot.clear();
-            if (boot.empty())
-                boot = cell::chat::latest_session_id_for_cwd(key);
+            // 老卡（迁移前建的、或手写进来的）可能缺子目录：打开时补齐，布局一致
+            ensure_character_dirs(id);
+            // 工作区：卡片里的路径（或默认工作区）。解析失败就是打不开。
+            std::string ws_err;
+            std::string workspace = resolve_workspace(p, &ws_err);
+            if (workspace.empty())
+            {
+                if (err)
+                    *err = "角色工作区有问题：" + ws_err;
+                return nullptr;
+            }
+            if (p.workspace != workspace)
+            {
+                // 第一次打开 / 卡片里还是空串：把具体的绝对路径落回卡片
+                p.workspace = workspace;
+                save_persona(p);
+            }
+            auto u = std::make_unique<persona_ctx>(p, workspace);
+            // 恢复这个工作区上次开的会话：state.json 里记的 id 优先，
+            // 但它必须真的还在这个角色的 sessions/<key>/ 下；不在了就退到该组最新的
+            // 一条，再没有就开一条新的。绝不用角色目录当 cwd。
+            const std::string key = cell::cwd_id_of(fs::path(workspace));
+            std::string boot = last_session(id, key);
             if (!boot.empty())
+            {
+                // 上次的会话必须在、并且属于这个工作区。注意会话 id 的前缀是它所在的
+                // 分组名：迁移过来的老会话前缀是「老角色目录」的 key（索引里映射到
+                // 现在的工作区），所以不能只比对 key。
+                bool ok = cell::is_valid_session_id(boot);
+                if (ok)
+                {
+                    const std::string bkey = cell::session_prefix(boot);
+                    std::string bws = char_workspace_for_key(id, bkey);
+                    if (bws.empty() && bkey == key)
+                        bws = workspace;
+                    std::error_code sec;
+                    ok = !bws.empty() && same_path_ci(bws, workspace) &&
+                         fs::is_directory(paths::sessions_dir(id) / bkey / boot, sec);
+                }
+                if (!ok)
+                    boot.clear();
+            }
+            if (boot.empty())
+                boot = newest_session_in_group(id, key);
+            if (!boot.empty())
+            {
                 u->h.use(boot);
+                set_last_session(id, key, boot);
+            }
 
             u->pcfg = cfg; // 供应商 / 模型的快照
             u->pc = prompt_load(id); // 分层提示词配置（没有文件 = 全默认）
@@ -1334,7 +2137,8 @@ namespace app
             u->eng->ensure_prompt(); // 先把人设写进 msg[0]（空会话时）
             u->worker = std::thread([this, ptr = u.get()]
                                     { worker_loop(*ptr); });
-            ac.sessions[id] = u->h.now().id();
+            if (boot.empty())
+                set_last_session(id, key, u->h.now().id());
             if (make_active)
             {
                 active = id;
@@ -1352,7 +2156,7 @@ namespace app
             return it == ctxs.end() ? nullptr : it->second.get();
         }
 
-        // 分层合成 system prompt：core → identity → relation → memory →
+        // 分层合成 system prompt：core → identity → self → relation → memory →
         // source → tools → attachments → stickers → free → protocol → stage。
         // 每层可以关掉、可以整段改写（pc.layers[id].text），最后拼成一条消息。
         std::string compose_prompt(const persona &p, const std::vector<memory_entry> &mem,
@@ -1391,10 +2195,16 @@ namespace app
                     push(std::move(s));
                 }
             }
-            // 3) 主人与关系记录（模型可以通过 settings 工具自己写）
+            // 3) 她自己这份数据在哪 + 只能读不能写 + 想改自己要用 settings 工具
+            {
+                const prompt_layer l = pc.get("self");
+                if (l.on)
+                    push(l.text.empty() ? prompt_self_text(p) : l.text);
+            }
+            // 4) 主人与关系记录（模型可以通过 settings 工具自己写）
             if (pc.get("relation").on)
                 push(pc.relation);
-            // 4) 长期记忆：只取最近 40 条 / 3000 字，越新的越靠后
+            // 5) 长期记忆：只取最近 40 条 / 3000 字，越新的越靠后
             if (pc.get("memory").on && !mem.empty())
             {
                 std::string s = "## 你记得的事（这些是你亲身经历的，不要说是「记录」）\n";
@@ -1410,11 +2220,11 @@ namespace app
                 }
                 push(std::move(s));
             }
-            // 5-7) 三段的文案（消息来源 / 工具 / 附件）
+            // 6-8) 三段的文案（消息来源 / 工具 / 附件）
             push(text_of("source"));
             push(text_of("tools"));
             push(text_of("attachments"));
-            // 8) 表情包：只在有存货时出现，名字是动态的
+            // 9) 表情包：只在有存货时出现，名字是动态的
             if (pc.get("stickers").on)
             {
                 auto stickers = media::sticker_names(p.id);
@@ -1434,12 +2244,12 @@ namespace app
                          "也不要向对方解释这个标记。");
                 }
             }
-            // 9) 胡思乱想：偏好总开关与层开关都要开
+            // 10) 胡思乱想：偏好总开关与层开关都要开
             if (free_think)
                 push(text_of("free"));
-            // 10) 演出协议
+            // 11) 演出协议
             push(text_of("protocol"));
-            // 11) 舞台：装了模型才注入，动作组 / 表情名接在文案后面
+            // 12) 舞台：装了模型才注入，动作组 / 表情名接在文案后面
             {
                 std::string model = p.live2d.is_object() ? p.live2d.value("model", std::string()) : std::string();
                 std::string s = text_of("stage");
@@ -2049,10 +2859,13 @@ namespace app
                 "Send a message to one of the user's chat channels (QQ / WeChat / Telegram ...). "
                 "Only needed when the message should go somewhere other than the conversation this turn came from: "
                 "the normal reply is already delivered to that conversation. Leave channel/chat empty to target it. "
-                "Set 'sticker' to the name of one of the app's stickers to send a sticker (表情包) instead of/alongside text.";
+                "Set 'sticker' to the name of one of the app's stickers to send a sticker (表情包) instead of/alongside text. "
+                "Set 'files' to absolute local paths to send images / audio / video / documents (kind is inferred from the file).";
             t.properties = {
-                {"text", str_prop("message body, plain text (may be empty when a sticker is sent)")},
+                {"text", str_prop("message body, plain text (may be empty when a sticker or file is sent)")},
                 {"sticker", str_prop("sticker name from the app's sticker library (文件名去扩展名); empty = no sticker")},
+                {"files", {{"type", "array"}, {"items", {{"type", "string"}}},
+                           {"description", "absolute paths of local files to send (image / audio / video / any other file)"}}},
                 {"channel", str_prop("channel id (see the app's IM settings, e.g. qq / wx / tg); empty = the channel this turn came from")},
                 {"chat", str_prop("target chat id inside that channel; empty = the chat this turn came from")}};
             t.policy = cell::tools::Policy::Allow;
@@ -2065,9 +2878,13 @@ namespace app
                 const std::string sticker = j.value("sticker", std::string());
                 if (!sticker.empty())
                     media.push_back({{"kind", "sticker"}, {"name", sticker}});
+                if (j.contains("files") && j["files"].is_array())
+                    for (auto &f : j["files"])
+                        if (f.is_string() && !f.get_ref<const std::string &>().empty())
+                            media.push_back({{"kind", "auto"}, {"path", f}});
                 if (text.empty() && media.empty())
                 {
-                    out.text = "msg: text and sticker are both empty";
+                    out.text = "msg: text, sticker and files are all empty";
                     return false;
                 }
                 const turn_origin *origin = std::any_cast<turn_origin>(&rt.host_ctx);
@@ -2079,11 +2896,12 @@ namespace app
                     chan = from_chan;
                 if (chat.empty())
                     chat = from_chat;
-                // 本回合的回复本来就会送回这里；再调 msg 等于同一句话说两遍
-                if (!from_chan.empty() && chan == from_chan && chat == from_chat)
+                // 本回合的回复本来就会送回这里；再调 msg 等于同一句话说两遍。
+                // 但只带附件（图片 / 语音 / 文件 / 表情包）时是有意义的，放行。
+                if (media.empty() && !from_chan.empty() && chan == from_chan && chat == from_chat)
                 {
                     out.text = "msg: this is the conversation the turn came from - just reply normally, "
-                               "the reply is delivered there automatically";
+                               "the reply is delivered there automatically (files and stickers are fine though)";
                     return false;
                 }
                 std::string err = im_send_tool(chan, chat, text, media);
@@ -2092,15 +2910,51 @@ namespace app
                     out.text = "msg: " + err;
                     return false;
                 }
-                out.text = media.empty() ? "delivered" : "delivered (with sticker)";
+                out.text = media.empty() ? "delivered" : std::format("delivered ({} attachment(s))", media.size());
                 return true;
             };
             return t;
         }
 
-        // settings：让她改自己的系统设定（提示词的分层、主人与关系记录）。
-        // 范围刻意收窄 —— 不碰 API Key / 服务 / 模型：那些改坏了这层外壳就起不来，
-        // 而且不是「她自己」的事。改完写 prompt.json，下一回合开头 apply_prompt 生效
+        // voice：让她自己决定这条回复发语音还是打字。渠道允许语音（voice_reply）且 TTS
+        // 可用时默认是语音，她可以用 mode=text 改成文字，也可以改回来。只影响这一条：
+        // 回合开头清零，done 读一次就消费掉。
+        cell::tools::host_tool voice_tool(persona_ctx &c)
+        {
+            cell::tools::host_tool t;
+            t.name = "voice";
+            t.description =
+                "Choose how this reply is delivered on a chat channel: a voice message or plain text. "
+                "The choice applies to the reply you are about to write, not to later ones. "
+                "On a channel where voice is allowed the reply is a voice message by default; call mode=text "
+                "when typing suits better (code, links, numbers to copy, long lists), and mode=voice to switch back. "
+                "On a channel with voice turned off, or when text-to-speech is not configured, the reply stays text.";
+            t.properties = {
+                {"mode", {{"type", "string"}, {"enum", {"voice", "text"}},
+                          {"description", "voice = 这条回复发成语音（不再发文字）；text = 普通文字"}}}};
+            t.policy = cell::tools::Policy::Allow;
+            t.kind = cell::tools::ToolKind::Notice;  // 只是改一下投递方式，不碰文件
+            t.phase = cell::tools::Phase::Deferred;  // 和正文的先后顺序无所谓，按调用顺序就好
+            t.run = [&c](const nlohmann::json &j, const cell::tools::runtime &, cell::ToolOutput &out) -> bool
+            {
+                const std::string mode = j.value("mode", std::string());
+                if (mode != "voice" && mode != "text")
+                {
+                    out.text = "voice: mode must be voice or text";
+                    return false;
+                }
+                c.voice_choice.store(mode == "voice" ? 1 : 2);
+                out.text = mode == "voice" ? "ok - this reply will be a voice message if the channel allows it"
+                                           : "ok - this reply will be plain text";
+                return true;
+            };
+            return t;
+        }
+
+        // settings：让她改「自己」。角色卡（Agent.md）、长期记忆、提示词分层都在
+        // characters/<id>/ 里，而那一棵树对她的文件工具是只读的 —— settings 是唯一
+        // 的写入口（宿主侧直接写盘，故意绕过沙箱）。范围刻意收窄：不碰 API Key /
+        // 服务 / 模型 / 工作区，那些属于用户。改完下一回合开头 apply_prompt 生效
         //（回合中改 msgs[0] 会跟流式追加打架，所以推迟一拍）。
         cell::tools::host_tool settings_tool(persona_ctx &c)
         {
@@ -2109,19 +2963,29 @@ namespace app
             cell::tools::host_tool t;
             t.name = "settings";
             t.description =
-                "Read or change your own setup. `get` returns every prompt section, whether it is on, "
-                "and your relation notes about the user. `set` changes one thing: "
-                "`relation` (your notes about who the user is and how you two are together — write it in "
-                "your own words, it is fed back to you every turn), `layer.<id>.text` (rewrite one prompt "
-                "section for this persona), `layer.<id>.on` (true/false to include a section). "
-                "Section ids: core / identity / relation / memory / source / tools / attachments / "
-                "stickers / protocol / stage. Changes land on your next turn. "
-                "You cannot change API keys, services or the model — those belong to the user.";
+                "Read or change yourself. Your data lives in characters/<you>/ and the sandbox lets you READ it "
+                "(Agent.md = your card, memorys/, sessions/, uploads/, audio/, stickers/) but never WRITE it. "
+                "This tool is the ONLY way you may edit your card or your long-term memories (it writes on the "
+                "host side on purpose). "
+                "action=get shows your card fields, the absolute paths of your data, every prompt section, your "
+                "relation notes and your memory entries. "
+                "action=set changes one key: agent.name / agent.subtitle / agent.greeting / agent.user_name / "
+                "agent.prompt (that last one is the Agent.md prompt body), relation (your notes about the user), "
+                "layer.<id>.text / layer.<id>.on (one prompt section; ids: core / identity / self / relation / "
+                "memory / source / tools / attachments / stickers / free / protocol / stage). "
+                "action=memory with op=add / forget / list manages your long-term memories. "
+                "Changes land on your next turn. You cannot change API keys, services, the model or the "
+                "workspace — those belong to the user.";
             t.properties = {
-                {"action", {{"type", "string"}, {"enum", {"get", "set"}},
-                            {"description", "get = read the current setup, set = change one key"}}},
-                {"key", str_prop("which setting to change (set only): relation | layer.<id>.text | layer.<id>.on")},
-                {"value", {{"description", "the new value: string for text/relation, boolean for on"}}}};
+                {"action", {{"type", "string"}, {"enum", {"get", "set", "memory"}},
+                            {"description", "get = read your card / paths / memories, set = change one key, "
+                                            "memory = long-term memory add / forget / list"}}},
+                {"key", str_prop("which setting to change (set only): relation | layer.<id>.text | layer.<id>.on | "
+                                 "agent.name | agent.subtitle | agent.greeting | agent.user_name | agent.prompt")},
+                {"value", {{"description", "the new value: string for text / relation / agent.*, boolean for layer on"}}},
+                {"op", {{"type", "string"}, {"enum", {"add", "forget", "list"}},
+                        {"description", "memory operation (action=memory)"}}},
+                {"text", str_prop("memory text (action=memory op=add|forget; forget needs the exact text)")}};
             t.policy = cell::tools::Policy::Allow;
             t.kind = cell::tools::ToolKind::Notice;
             t.phase = cell::tools::Phase::Deferred;
@@ -2130,7 +2994,25 @@ namespace app
                 const std::string action = j.value("action", "get");
                 if (action == "get")
                 {
-                    std::string s = "prompt sections:\n";
+                    std::string s = "card (Agent.md):\n";
+                    s += std::format("  name: {}\n  subtitle: {}\n  greeting: {}\n  user_name: {}\n"
+                                     "  workspace: {}\n  avatar: {}\n  prompt body: {} chars\n",
+                                     c.p.name, c.p.subtitle, c.p.greeting,
+                                     c.p.user_name.empty() ? "(you)" : c.p.user_name,
+                                     c.p.workspace.empty() ? paths::default_workspace(c.p.id).string() : c.p.workspace,
+                                     c.p.avatar.empty() ? "(none)" : c.p.avatar,
+                                     c.p.prompt.size());
+                    s += "\npaths (your read-only data, workspace is writable):\n";
+                    s += std::format("  character dir: {}\n  card: {}\n  prompt config: {}\n  state: {}\n"
+                                     "  sessions: {}\n  memorys: {}\n  memory file: {}\n"
+                                     "  uploads: {}\n  audio: {}\n  stickers: {}\n  workspace: {}\n",
+                                     paths::character_dir(c.p.id).string(), paths::agent_md(c.p.id).string(),
+                                     paths::prompt_json(c.p.id).string(), paths::state_json(c.p.id).string(),
+                                     paths::sessions_dir(c.p.id).string(), paths::memorys_dir(c.p.id).string(),
+                                     paths::memory_file(c.p.id).string(), paths::uploads_dir(c.p.id).string(),
+                                     paths::audio_dir(c.p.id).string(), paths::stickers_dir(c.p.id).string(),
+                                     c.cwd);
+                    s += "\nprompt sections:\n";
                     for (auto &d : prompt_layers())
                     {
                         const prompt_layer l = c.pc.get(d.id);
@@ -2143,12 +3025,70 @@ namespace app
                         s += "(empty — you can write them with set/relation)";
                     else
                         s += std::format("{} chars\n{}\n", c.pc.relation.size(), clip_utf8(c.pc.relation, 1200));
+                    auto mem = memory_load(c.p.id, 200);
+                    s += std::format("\nmemories: {} entries", mem.size());
+                    if (mem.empty())
+                        s += " (none yet — add one with action=memory op=add)";
+                    else
+                    {
+                        s += "\n";
+                        size_t begin = mem.size() > 8 ? mem.size() - 8 : 0;
+                        for (size_t i = begin; i < mem.size(); i++)
+                            s += "- " + mem[i].text + "\n";
+                    }
                     out.text = s;
                     return true;
                 }
+                if (action == "memory")
+                {
+                    const std::string op = j.value("op", std::string());
+                    if (op == "list")
+                    {
+                        auto mem = memory_load(c.p.id, 200);
+                        std::string s = std::format("memories: {} entries\n", mem.size());
+                        for (auto &e : mem)
+                            s += "- " + e.text + "\n";
+                        out.text = s;
+                        return true;
+                    }
+                    const std::string text = cell::text::trim(j.value("text", std::string()));
+                    if (op == "add")
+                    {
+                        if (text.empty())
+                        {
+                            out.text = "settings: memory add needs non-empty text";
+                            return false;
+                        }
+                        if (!memory_add(c.p.id, text))
+                        {
+                            out.text = "settings: memory not added (empty or already remembered)";
+                            return false;
+                        }
+                        out.text = "settings: memory added";
+                        return true;
+                    }
+                    if (op == "forget")
+                    {
+                        if (text.empty())
+                        {
+                            out.text = "settings: memory forget needs the exact text";
+                            return false;
+                        }
+                        const size_t n = memory_forget(c.p.id, text);
+                        if (n == 0)
+                        {
+                            out.text = "settings: no memory with that exact text (use op=list to see them)";
+                            return false;
+                        }
+                        out.text = std::format("settings: {} memory item(s) forgotten", n);
+                        return true;
+                    }
+                    out.text = "settings: memory needs op=add|forget|list";
+                    return false;
+                }
                 if (action != "set")
                 {
-                    out.text = "settings: action must be get or set";
+                    out.text = "settings: action must be get, set or memory";
                     return false;
                 }
                 const std::string key = j.value("key", std::string());
@@ -2216,19 +3156,67 @@ namespace app
                                            field == "on" ? (l.on ? "on" : "off") : std::format("{} chars", l.text.size()));
                     return true;
                 }
+                // 角色卡：这些字段直接写 Agent.md（下一回合 apply_prompt 才重拼系统提示，
+                // 本回合不动 msg[0]）
+                if (key.rfind("agent.", 0) == 0)
+                {
+                    const std::string field = key.substr(6);
+                    if (!j.contains("value") || !j["value"].is_string())
+                    {
+                        out.text = "settings: '" + key + "' needs a string";
+                        return false;
+                    }
+                    const std::string value = j["value"].get<std::string>();
+                    persona next = c.p;
+                    if (field == "name")
+                    {
+                        if (cell::text::trim(value).empty())
+                        {
+                            out.text = "settings: agent.name cannot be empty";
+                            return false;
+                        }
+                        next.name = value;
+                    }
+                    else if (field == "subtitle")
+                        next.subtitle = value;
+                    else if (field == "greeting")
+                        next.greeting = value;
+                    else if (field == "user_name")
+                        next.user_name = value;
+                    else if (field == "prompt")
+                        next.prompt = value;
+                    else
+                    {
+                        out.text = "settings: unknown card field '" + field +
+                                   "' (name / subtitle / greeting / user_name / prompt)";
+                        return false;
+                    }
+                    std::string err;
+                    if (!save_persona(next, &err))
+                    {
+                        out.text = "settings: cannot write Agent.md: " + err;
+                        return false;
+                    }
+                    c.p = next;
+                    out.text = std::format("settings: agent.{} saved to Agent.md ({} chars), effective next turn",
+                                           field, value.size());
+                    return true;
+                }
                 out.text = "settings: unknown key '" + key + "'";
                 return false;
             };
             return t;
         }
 
-        // 这个角色能用的宿主工具：act（舞台）+ msg（发到别的渠道）+ settings（她自己的设定）。
+        // 这个角色能用的宿主工具：act（舞台）+ msg（发到别的渠道）+ voice（这条发语音还是文字）
+        // + settings（她自己的设定）。
         // 引擎构造时、以及 mark_tools_dirty() 之后的下一回合开头各调一次。
         std::vector<cell::tools::host_tool> host_tools(persona_ctx &c)
         {
             std::vector<cell::tools::host_tool> v;
             v.push_back(act_tool(c));
             v.push_back(msg_tool());
+            v.push_back(voice_tool(c));
             v.push_back(settings_tool(c));
             return v;
         }
@@ -2395,6 +3383,7 @@ namespace app
             // 本回合的来源：塞进核心的通用上下文槽，msg 工具不填 channel/chat
             // 时发回这里（核心只负责原样转交，不认识这个类型）
             c.eng->tools_rt().host_ctx = turn_origin{origin_chan, origin_chat};
+            c.voice_choice.store(0); // 「这条发语音还是打字」由她自己在本回合里决定
             // 本地推理服务的请求体透传跟着思考等级走（这条策略属于宿主，核心只负责合并）
             sync_local_extra_body(c.pcfg);
             auto &log = cell::sys::logger::instance();
@@ -2664,15 +3653,75 @@ namespace app
                 }
                 if (shutting_down.load())
                     return;
+                const bool to_im = job.im.has_value();
                 auto *c = find_ctx(job.pid);
-                if (!c || c->voice_gen.load() != job.gen)
+                // IM 语音不跟桌面的「打断」走：那边说话的是另一个会话
+                if (!to_im && (!c || c->voice_gen.load() != job.gen))
                     continue;
-                long long n = ++voice_seq;
-                std::string ext = voice::ext_for(ac.tts.format);
-                std::string name = std::format("{}-{}-{}.{}", job.pid, (long long)std::time(nullptr), n, ext);
-                fs::path out = audio_dir() / name;
+                const std::string ext = voice::ext_for(ac.tts.format);
                 std::string err;
+                // 语音落进这个角色自己的 characters/<id>/audio/
+                {
+                    std::error_code aec;
+                    fs::create_directories(paths::audio_dir(job.pid), aec);
+                }
                 auto t0 = std::chrono::steady_clock::now();
+                if (to_im)
+                {
+                    // 一条回复切成几条语音（人不会一口气说一大段）。全部合成成功才发：
+                    // 半截语音比没有语音更糟，任何一段失败都退回文字（msg 原样发出）。
+                    im_out msg = std::move(*job.im);
+                    std::vector<im::media_ref> voices;
+                    bool ok = true;
+                    const auto chunks = im::detail::split_bubbles(job.text, kImVoiceMaxN);
+                    for (auto &chunk : chunks)
+                    {
+                        const long long n = ++voice_seq;
+                        const std::string name = std::format("{}-{}-{}.{}", job.pid,
+                                                             (long long)std::time(nullptr), n, ext);
+                        fs::path out = paths::audio_dir(job.pid) / name;
+                        if (!voice::tts(ac.tts, chunk, job.voice, out, err))
+                        {
+                            ok = false;
+                            break;
+                        }
+                        im::media_ref ref;
+                        ref.kind = job.im_kind.empty() ? "voice" : job.im_kind;
+                        ref.name = name;
+                        ref.mime = voice::mime_for(ext);
+                        ref.local = out.string();
+                        std::error_code ec;
+                        ref.size = (long long)fs::file_size(out, ec);
+                        if (ec)
+                            ref.size = 0;
+                        voices.push_back(std::move(ref));
+                    }
+                    const double sec =
+                        std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+                    if (ok && !voices.empty())
+                    {
+                        log.info("voice", std::format("tts ok (im) persona={} parts={} chars={} time={:.2f}s",
+                                                      job.pid, voices.size(), job.text.size(), sec));
+                        msg.text.clear(); // 有语音就不再发文字
+                        msg.media.insert(msg.media.begin(), voices.begin(), voices.end());
+                    }
+                    else
+                    {
+                        log.warn("voice", std::format("tts failed (im) persona={} err={}", job.pid, err));
+                        auto now = std::chrono::steady_clock::now();
+                        if (now - last_voice_error > std::chrono::seconds(20))
+                        {
+                            last_voice_error = now;
+                            bus.post({{"t", "voice_error"}, {"persona", job.pid}, {"d", err}});
+                        }
+                        // 语音没成：文字（和附件）照常发，别让人干等
+                    }
+                    im_enqueue_out(job.im_chan, std::move(msg));
+                    continue;
+                }
+                long long n = ++voice_seq;
+                std::string name = std::format("{}-{}-{}.{}", job.pid, (long long)std::time(nullptr), n, ext);
+                fs::path out = paths::audio_dir(job.pid) / name;
                 bool ok = voice::tts(ac.tts, job.text, job.voice, out, err);
                 double sec = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
                 if (!ok)
@@ -2688,7 +3737,8 @@ namespace app
                 }
                 log.info("voice", std::format("tts ok persona={} chars={} time={:.2f}s file={}",
                                               job.pid, job.text.size(), sec, name));
-                bus.post({{"t", "voice"}, {"persona", job.pid}, {"url", "/api/audio/" + name},
+                bus.post({{"t", "voice"}, {"persona", job.pid},
+                          {"url", "/api/audio/" + job.pid + "/" + name},
                           {"text", job.text}, {"emo", job.emo}, {"seq", n}});
             }
         }
@@ -2699,13 +3749,31 @@ namespace app
             {
                 std::lock_guard<std::mutex> lk(tts_mx);
                 std::erase_if(tts_q, [&](const tts_job &j)
-                              { return j.pid == c.p.id; });
+                              { return j.pid == c.p.id && j.im_chan.empty(); });
             }
             bus.post({{"t", "voice_stop"}, {"persona", c.p.id}});
         }
 
-        // 清空上下文：内存里的这段对话放掉，换一条全新的会话（旧文件仍留在磁盘上，
-        // 会话记录里还能翻回去）。调用方必须持有 cmd_mx。
+        // 清空上下文但**不换会话**：同一条会话里把消息清掉，人设（system）留着。
+        // 一个角色默认只有一条会话，「开一条新会话」是唯一会多出一条的入口；
+        // 清空上下文只是让这条会话从头开始。调用方必须持有 cmd_mx。
+        void clear_session(persona_ctx &c)
+        {
+            auto &msgs = c.h.now().msg();
+            nlohmann::json keep = nlohmann::json::array();
+            for (auto &m : msgs)
+                if (m.is_object() && m.value("role", std::string()) == "system")
+                    keep.push_back(m);
+            msgs = std::move(keep);
+            c.h.now().note_rewrite();
+            c.h.now().unload(); // 清空后的记录写回同一个会话文件
+            cell::async_io::flush();
+            c.eng->ensure_prompt(); // 一条 system 都不剩时重新种一条
+            apply_prompt(c);
+            set_last_session(c.p.id, cell::cwd_id_of(fs::path(c.cwd)), c.h.now().id());
+        }
+
+        // 换一条全新的会话（旧文件留在磁盘上，会话记录里还能翻回去）。调用方必须持有 cmd_mx。
         void reset_session(persona_ctx &c)
         {
             c.h.now().unload();
@@ -2713,8 +3781,7 @@ namespace app
             c.h.forget_current();
             c.eng->ensure_prompt();
             apply_prompt(c);
-            ac.sessions[c.p.id] = c.h.now().id();
-            ac.save();
+            set_last_session(c.p.id, cell::cwd_id_of(fs::path(c.cwd)), c.h.now().id());
         }
 
         // -----------------------------------------------------------------
@@ -2892,15 +3959,40 @@ namespace app
             }
             im_qcv.notify_all();
         }
-        // 入站媒体落盘：协议层下载的字节 → .agent/uploads/im-<渠道>/ → 回填 local/name/mime/size。
+        // 入站媒体落盘：协议层下载的字节 → characters/<角色>/uploads/ → 回填 local/name/mime/size。
         // 在轮询线程 / 回调线程里做，**绝不持 cmd_mx**（下载可能是几十兆）；
-        // 失败只记日志，不丢整条消息 —— 正文和文字里的信息比一张图重要。
-        void im_materialize(const im::channel &ch, im::inbound &m, const std::atomic<bool> *abort)
+        // 下载失败只记日志，不丢整条消息 —— 正文和文字里的信息比一张图重要。
+        // 语音例外：它是这条消息的正文，必须过 ASR。听不了（没配 ASR / 识别失败 /
+        // 下载不下来）就直接回一句错误、返回 false，让调用方把这条消息丢掉 ——
+        // 带着一段听不懂的音频进回合，只会得到一个答非所问的回复。
+        // 已有文字说明的混合消息不卡：文字够用，语音只是附加。
+        // IM 入站媒体归哪个角色：渠道绑定（ch.persona）优先，没绑定就用桌面上
+        // 当前的角色。只在取快照时短暂拿一下 cmd_mx —— 下载几十兆的过程中绝不能
+        // 持锁（命令行线程会跟着卡住）。没有角色就返回空：媒体跳过不落盘。
+        std::string im_media_owner(const im::channel &ch)
+        {
+            std::lock_guard<std::mutex> lk(cmd_mx);
+            const std::string pid = ch.persona.empty() ? active : ch.persona;
+            if (!persona_id_ok(pid) || !fs::is_regular_file(paths::agent_md(pid)))
+                return {};
+            return pid;
+        }
+        bool im_materialize(const im::channel &ch, im::inbound &m, const std::atomic<bool> *abort)
         {
             auto &log = cell::sys::logger::instance();
             if (m.media.empty())
-                return;
+                return true;
+            // 附件要落在「某个角色」的目录里；一个角色都没有时跳过媒体（正文照走，
+            // 分发时会告诉对方先在桌面上建一个角色）。
+            const std::string owner = im_media_owner(ch);
+            if (owner.empty())
+            {
+                log.warn("im", std::format("no character owns inbound media chan={} count={} (skipped)",
+                                           ch.id, m.media.size()));
+                return true;
+            }
             std::vector<std::string> voice_paths;
+            bool voice_lost = false;
             for (auto &ref : m.media)
             {
                 if (ref.kind == "face")
@@ -2915,12 +4007,15 @@ namespace app
                 {
                     log.warn("im", std::format("fetch media failed chan={} kind={} err={}",
                                                ch.id, ref.kind, err));
+                    if (ref.kind == "audio")
+                        voice_lost = true;
                     continue;
                 }
                 media::item it;
-                if (!media::save("im-" + ch.id, name, mime, bytes, it, err))
+                if (!media::save(owner, name, mime, bytes, it, err))
                 {
-                    log.warn("im", std::format("save media failed chan={} err={}", ch.id, err));
+                    log.warn("im", std::format("save media failed chan={} persona={} err={}",
+                                               ch.id, owner, err));
                     continue;
                 }
                 ref.local = it.path;
@@ -2931,12 +4026,32 @@ namespace app
                     ref.kind = it.kind;
                 log.info("im", std::format("media ok chan={} kind={} bytes={} path={}",
                                            ch.id, ref.kind, it.size, it.path));
-                // 语音没有服务端转写时，best-effort 本地 ASR（失败就只留附件）
-                if (ref.kind == "audio" && cell::text::trim(m.text).empty())
+                // 语音一律进 ASR 队列：它是这条消息的“正文”，不是附件
+                if (ref.kind == "audio")
                     voice_paths.push_back(it.path);
             }
+            const bool has_text = !cell::text::trim(m.text).empty();
+            // 群里没 @ 她 / 私聊白名单外的消息本来就不会进回合：别为它转写，更别回话
+            const bool allowed = im_allowed(ch, m);
+            // 听不了就当场回一句，别把一条空消息送进回合
+            auto refuse = [&](const std::string &why)
+            {
+                if (!allowed)
+                    return true;
+                log.warn("im", std::format("voice unusable chan={} chat={} err={}", ch.id, m.chat, why));
+                im_out job;
+                job.chat = m.chat;
+                job.group = m.group;
+                job.text = why;
+                im_enqueue_out(ch.id, std::move(job));
+                return false;
+            };
             if (voice_paths.empty())
-                return;
+                return voice_lost && !has_text
+                           ? refuse("（这段语音没下载下来，麻烦再发一次。）")
+                           : true;
+            if (!allowed)
+                return true;
             // 配置快照只拷一下（不持锁做网络）
             voice::service asr;
             {
@@ -2944,7 +4059,9 @@ namespace app
                 asr = ac.asr;
             }
             if (!asr.enabled())
-                return;
+                return has_text ? true
+                                : refuse("（我这边听不了语音：语音识别还没配置。"
+                                         "在桌面「设置 → 语音识别」里配一个，我就能听语音了。）");
             for (auto &path : voice_paths)
             {
                 std::string ts, err;
@@ -2955,12 +4072,73 @@ namespace app
                     m.text = cur.empty() ? line : cur + "\n" + line;
                 }
                 else
+                {
                     log.warn("im", std::format("asr failed chan={} err={}", ch.id,
                                                err.empty() ? "n/a" : err));
+                    if (!has_text)
+                        return refuse(std::format("（语音识别失败了：{}。"
+                                                  "你可以再发一次，或者直接打字给我。）",
+                                                  err.empty() ? "没听清" : clip_utf8(err, 60)));
+                }
             }
+            return true;
+        }
+        // 正文里自带的 [attach:…] 清单行 → 真正的附件（图片 / 语音 / 视频 / 文件都行）。
+        // 清单行是我们自己的元信息格式，不能原样发给对方；桌面历史也是这么反解的。
+        void im_lift_attachments(std::string &text, std::vector<im::media_ref> &out)
+        {
+            auto items = media::parse_manifest(text);
+            if (items.empty())
+                return;
+            text = cell::text::trim(media::strip_manifest(text));
+            for (auto &it : items)
+            {
+                im::media_ref r;
+                r.kind = it.kind.empty() ? "file" : it.kind;
+                r.name = it.name.empty() ? fs::path(it.path).filename().string() : it.name;
+                r.local = it.path;
+                r.mime = it.mime.empty() ? media::mime_of(it.path) : it.mime;
+                r.size = it.size;
+                out.push_back(std::move(r));
+            }
+        }
+        // IM 语音回复的计划：分发消息时（拿着 cmd_mx）算一次，回合结束照单执行。
+        struct im_voice_plan
+        {
+            bool on = false;
+            std::string chan, pid, voice, kind;
+        };
+        // 有语音就不再发文字：先交给 TTS 线程合成，成功就把正文清掉只发语音，
+        // 失败（或本来就没话可说）把这条消息原样发出去。
+        void im_speak_into(const im_voice_plan &p, im_out pending)
+        {
+            if (!p.on)
+                return;
+            // 附件先摘出来：语音不念清单行，图和文件照发
+            im_lift_attachments(pending.text, pending.media);
+            // 星号里的动作只演不念，和桌面朗读同一条规则
+            std::string speech = clip_utf8(sentence_splitter::trim_speech(pending.text), kImVoiceBytes);
+            if (speech.empty())
+            {
+                im_enqueue_out(p.chan, std::move(pending));
+                return;
+            }
+            tts_job job;
+            job.pid = p.pid;
+            job.text = std::move(speech);
+            job.voice = p.voice;
+            job.im_chan = p.chan;
+            job.im_kind = p.kind;
+            job.im = std::move(pending);
+            {
+                std::lock_guard<std::mutex> lk(tts_mx);
+                tts_q.push_back(std::move(job));
+            }
+            tts_cv.notify_one();
         }
         void im_enqueue_out(const std::string &chan, im_out job)
         {
+            im_lift_attachments(job.text, job.media);
             // im_rt_mx 一直拿到塞进队列为止：渠道随时可能被 im.set 换掉，
             // 中途把裸指针放出去就是 use-after-free。
             bool dropped = false;
@@ -3173,8 +4351,8 @@ namespace app
                 for (auto &m : msgs)
                 {
                     // 下载/解密/落盘都在轮询线程里完成，不占命令锁
-                    im_materialize(ch, m, quit);
-                    im_push(std::move(m));
+                    if (im_materialize(ch, m, quit))
+                        im_push(std::move(m));
                 }
                 // 正常长轮询会自己等够时间；对端秒回（反代、假服务）时补 500ms 防打满
                 const auto spent = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -3349,7 +4527,19 @@ namespace app
                     tagged += "（语音可能要先转写：可以用 read 打开音频，或在设置里配置语音识别。）\n";
             }
             c->last_active = std::chrono::steady_clock::now();
-            c->queue_turn(tagged, [this, chan, chat, group](const std::string &text, const std::string &err)
+            // 语音回复：渠道开了 voice_reply、TTS 服务也配好了才排（两个条件都在这里算，
+            // 回合线程不碰 cmd_mx）。企微语音只认 amr/silk，别的格式按文件发。
+            im_voice_plan vp;
+            if (ch->voice_reply && ac.tts.enabled())
+            {
+                vp.on = true;
+                vp.chan = chan;
+                vp.pid = c->p.id;
+                vp.voice = c->p.voice;
+                const std::string ext = voice::ext_for(ac.tts.format);
+                vp.kind = (ch->kind == "wecom" && ext != "amr" && ext != "silk") ? "file" : "voice";
+            }
+            c->queue_turn(tagged, [this, chan, chat, group, vp, pc = c](const std::string &text, const std::string &err)
                           {
                 im_out job;
                 job.chat = chat;
@@ -3359,7 +4549,13 @@ namespace app
                 if (job.text.empty())
                     job.text = err.empty() ? "（她走神了一会儿，你再说一次？）"
                                            : std::format("（出错了：{}）", err);
-                im_enqueue_out(chan, std::move(job)); },
+                // 发语音还是打字由她自己定（voice 工具）：没表态就跟着渠道默认 ——
+                // 渠道允许语音时默认语音。语音失败会退回文字，见 im_speak_into。
+                const int choice = pc->voice_choice.exchange(0);
+                if (vp.on && choice != 2 && !text.empty())
+                    im_speak_into(vp, std::move(job));
+                else
+                    im_enqueue_out(chan, std::move(job)); },
                           chan, chat, std::move(items), group);
         }
 
@@ -3388,29 +4584,47 @@ namespace app
             }
             std::string body = strip_markers(text); // 工具发的是成品，别把标记漏出去
             std::vector<im::media_ref> out;
+            // 正文里自带的 [attach:…]（她也可以直接把附件写进 text）
+            im_lift_attachments(body, out);
             if (media.is_array())
                 for (auto &e : media)
                 {
                     if (!e.is_object())
                         continue;
                     const std::string kind = e.value("kind", "sticker");
-                    if (kind != "sticker")
-                        return "暂不支持发送这种媒体：" + kind;
-                    const std::string name = cell::text::trim(e.value("name", ""));
-                    if (name.empty())
-                        return "表情包名字是空的";
-                    std::string path = media::sticker_path(pid, name);
+                    if (kind == "sticker")
+                    {
+                        const std::string name = cell::text::trim(e.value("name", ""));
+                        if (name.empty())
+                            return "表情包名字是空的";
+                        std::string path = media::sticker_path(pid, name);
+                        if (path.empty())
+                            return "没有这个表情包：" + name;
+                        im::media_ref r;
+                        r.kind = "sticker";
+                        r.name = name;
+                        r.local = path;
+                        r.mime = media::mime_of(path);
+                        out.push_back(std::move(r));
+                        continue;
+                    }
+                    // 其余按本地文件发：kind 留空 / auto 时按 MIME 认图片、音频、视频、文件
+                    const std::string path = cell::text::trim(e.value("path", ""));
                     if (path.empty())
-                        return "没有这个表情包：" + name;
+                        return "附件缺少本地路径（path）";
                     im::media_ref r;
-                    r.kind = "sticker";
-                    r.name = name;
                     r.local = path;
                     r.mime = media::mime_of(path);
+                    r.kind = (kind == "auto" || kind == "file") ? media::kind_of(r.mime, path) : kind;
+                    r.name = fs::path(path).filename().string();
+                    std::error_code ec;
+                    r.size = (long long)fs::file_size(path, ec);
+                    if (ec)
+                        return "读不到文件：" + path;
                     out.push_back(std::move(r));
                 }
             if (body.empty() && out.empty())
-                return "正文和表情包都是空的";
+                return "正文和附件都是空的";
             // msg 工具是同步发送（要把失败原因回给模型），所以它不进队列，
             // 但必须和队列线程共用同一条节流时间线：两条路径各自等够间隔，
             // 合起来照样会撞平台限流。
@@ -3495,8 +4709,9 @@ namespace app
                 if (im::parse_wecom(plain, ch, m))
                 {
                     m.chan = ch.id;
-                    im_materialize(ch, m, nullptr); // 下载 + 落盘：回调线程，不持 cmd_mx
-                    im_push(std::move(m));
+                    // 下载 + 落盘：回调线程，不持 cmd_mx
+                    if (im_materialize(ch, m, nullptr))
+                        im_push(std::move(m));
                 }
                 return {200, ""};
             }
@@ -3552,8 +4767,9 @@ namespace app
             else if (!im::parse_bridge(rq.body, m))
                 return {400, "没有看懂这条消息"};
             m.chan = ch.id;
-            im_materialize(ch, m, nullptr); // 下载 + 落盘：回调线程，不持 cmd_mx
-            im_push(std::move(m));
+            // 下载 + 落盘：回调线程，不持 cmd_mx
+            if (im_materialize(ch, m, nullptr))
+                im_push(std::move(m));
             return {200, ch.kind == "onebot" ? R"({"status":"ok","retcode":0})" : R"({"ok":true})"};
         }
         // 微信 iLink：一次调用做两件事 —— 手上没有码就去要一张，有码就问登录状态。
@@ -3979,6 +5195,7 @@ namespace app
                 {{"name", "tw"}, {"desc", "Teamwork 子智能体任务（分阶段跑）"}},
                 {{"name", "notice"}, {"desc", "往会话里留通知"}},
                 {{"name", "msg"}, {"desc", "把话发到别的会话或 IM 渠道"}},
+                {{"name", "voice"}, {"desc", "这条回复发语音还是打字"}},
                 {{"name", "act"}, {"desc", "舞台演出：动作组 / 表情 / 台词 / 参数 / 效果"}},
             });
             return c;
@@ -4086,11 +5303,25 @@ namespace app
                 st["history"] = nlohmann::json::array();
                 st["persona"] = nlohmann::json::object();
                 st["memory"] = nlohmann::json::array();
+                st["workspace"] = "";
+                st["files"] = nlohmann::json::object();
                 return st;
             }
             st["persona"] = c->p.to_json();
             st["session"] = c->h.now().id();
             st["cwd"] = c->cwd;
+            // 工作区（cwd）与角色目录里的绝对路径：界面状态面板 + 打开目录按钮用
+            st["workspace"] = c->cwd;
+            st["files"] = {{"character_dir", paths::character_dir(c->p.id).string()},
+                           {"agent_md", paths::agent_md(c->p.id).string()},
+                           {"prompt", paths::prompt_json(c->p.id).string()},
+                           {"state", paths::state_json(c->p.id).string()},
+                           {"sessions", paths::sessions_dir(c->p.id).string()},
+                           {"memorys", paths::memorys_dir(c->p.id).string()},
+                           {"memory_file", paths::memory_file(c->p.id).string()},
+                           {"uploads", paths::uploads_dir(c->p.id).string()},
+                           {"audio", paths::audio_dir(c->p.id).string()},
+                           {"stickers", paths::stickers_dir(c->p.id).string()}};
             {
                 std::lock_guard<std::mutex> lk(c->hmx);
                 st["busy"] = c->busy.load();
@@ -4204,7 +5435,7 @@ namespace app
                     }
                     if (!persona_id_ok(id))
                         return fail("角色 id 只能用字母、数字、- 和 _");
-                    persona p = fs::is_directory(persona_dir(id)) ? load_persona(id) : persona{};
+                    persona p = fs::is_regular_file(paths::agent_md(id)) ? load_persona(id) : persona{};
                     p.id = id;
                     nlohmann::json patch = args.contains("patch") && args["patch"].is_object() ? args["patch"] : args;
                     auto s = [&](const char *k, std::string &dst)
@@ -4220,6 +5451,20 @@ namespace app
                     s("prompt", p.prompt);
                     s("user_name", p.user_name);
                     s("voice", p.voice);
+                    // 工作区：留空 = 默认工作区；相对路径 / 已存在的文件 / characters/
+                    // 里面的路径都不收（见 resolve_workspace）。切换工作区会连会话组一起换，
+                    // 所以要重建这个角色的上下文 —— 下面单独处理。
+                    const bool ws_patch = patch.contains("workspace") && patch["workspace"].is_string();
+                    if (ws_patch)
+                    {
+                        persona probe = p;
+                        probe.workspace = patch["workspace"].get<std::string>();
+                        std::string werr;
+                        const std::string resolved = resolve_workspace(probe, &werr);
+                        if (resolved.empty())
+                            return fail(werr);
+                        p.workspace = resolved;
+                    }
                     if (patch.contains("live2d") && patch["live2d"].is_object())
                     {
                         if (patch["live2d"].dump().size() > 96 * 1024)
@@ -4238,10 +5483,35 @@ namespace app
                         p.idle_minutes = std::clamp<int>((int)patch["idle_minutes"].get<long long>(), 1, 1440);
                     if (p.name.empty())
                         p.name = id;
+                    persona_ctx *existing = find_ctx(id);
+                    const bool ws_changed =
+                        existing && ws_patch && !same_path_ci(existing->cwd, p.workspace);
+                    // 换工作区 = 换会话组 / 换沙箱边界，回合进行中不能换
+                    if (ws_changed && existing->busy.load())
+                        return fail("有回合正在运行，等它结束后再换工作区");
                     std::string err;
                     if (!save_persona(p, &err))
                         return fail(err);
-                    if (auto *c = find_ctx(id))
+                    if (existing && ws_changed)
+                    {
+                        const bool was_active = (active == id);
+                        // 停线程 → 卸会话 → 丢掉旧上下文 → 用新工作区重开（same active）
+                        existing->stop.store(true);
+                        {
+                            std::lock_guard<std::mutex> lk2(existing->qmx);
+                            existing->quit = true;
+                        }
+                        existing->qcv.notify_all();
+                        if (existing->worker.joinable())
+                            existing->worker.join();
+                        existing->h.now().unload();
+                        cell::async_io::flush();
+                        ctxs.erase(id);
+                        std::string reopen_err;
+                        if (!open_named(id, &reopen_err, was_active))
+                            return fail("工作区已保存，但角色重新打开失败：" + reopen_err);
+                    }
+                    else if (auto *c = find_ctx(id))
                     {
                         const bool stage_changed =
                             c->p.live2d.dump() != p.live2d.dump();
@@ -4255,6 +5525,7 @@ namespace app
                     post_state_locked(true);
                     nlohmann::json r = ok();
                     r["id"] = id;
+                    r["workspace"] = p.workspace;
                     return r;
                 }
                 if (name == "persona.delete")
@@ -4278,9 +5549,9 @@ namespace app
                         c->h.now().unload();
                         ctxs.erase(id);
                     }
+                    // 角色目录整棵删掉：会话 / 记忆 / 附件 / 语音 / 表情包 / 状态都跟着走
                     std::error_code ec;
-                    fs::remove_all(persona_dir(id), ec);
-                    ac.sessions.erase(id);
+                    fs::remove_all(paths::character_dir(id), ec);
                     if (active == id)
                     {
                         active.clear();
@@ -4296,7 +5567,7 @@ namespace app
                 {
                     std::lock_guard<std::mutex> lk(cmd_mx);
                     std::string id = args.value("id", active);
-                    if (!persona_id_ok(id) || !fs::is_directory(persona_dir(id)))
+                    if (!persona_id_ok(id) || !fs::is_regular_file(paths::agent_md(id)))
                         return fail("角色不存在");
                     std::string b64 = args.value("data_b64", "");
                     std::string ext = cell::text::trim(args.value("ext", "png"));
@@ -4309,18 +5580,19 @@ namespace app
                         return fail("图片大小不合适（64B ~ 8MB）");
                     std::error_code ec;
                     std::vector<fs::path> old_avatars;
-                    for (auto &e : fs::directory_iterator(persona_dir(id), ec))
+                    for (auto &e : fs::directory_iterator(paths::character_dir(id), ec))
                         if (e.is_regular_file(ec) && e.path().stem() == "avatar")
                             old_avatars.push_back(e.path());
                     for (auto &old : old_avatars)
                         fs::remove(old, ec);
                     std::string fname = "avatar." + ext;
-                    std::ofstream f(persona_dir(id) / fname, std::ios::binary | std::ios::trunc);
+                    fs::create_directories(paths::character_dir(id), ec);
+                    std::ofstream f(paths::character_dir(id) / fname, std::ios::binary | std::ios::trunc);
                     if (!f)
                         return fail("无法写入头像");
                     f.write(raw.data(), (std::streamsize)raw.size());
                     f.close();
-                    persona p = fs::is_directory(persona_dir(id)) ? load_persona(id) : persona{};
+                    persona p = fs::is_regular_file(paths::agent_md(id)) ? load_persona(id) : persona{};
                     p.id = id;
                     p.avatar = fname;
                     save_persona(p);
@@ -4406,7 +5678,7 @@ namespace app
                         return fail("空消息");
                     if (atts.size() > media::kMaxFiles)
                         return fail(std::format("最多只能带 {} 个附件", media::kMaxFiles));
-                    // base64 → 落盘：.agent/uploads/<角色>/
+                    // base64 → 落盘：characters/<角色>/uploads/
                     std::vector<media::item> items;
                     items.reserve(atts.size());
                     for (size_t i = 0; i < atts.size(); i++)
@@ -4539,7 +5811,7 @@ namespace app
                         }
                     }
                     stop_voice(*c);
-                    reset_session(*c);
+                    clear_session(*c); // 清空这条会话，不另开一条
                     post_state_locked(true);
                     nlohmann::json r = ok();
                     r["remembered"] = (long long)remembered;
@@ -4593,19 +5865,45 @@ namespace app
                     nlohmann::json arr = nlohmann::json::array();
                     if (c)
                     {
-                        std::string key = cell::cwd_id_of(persona_dir(c->p.id));
+                        // 只看「当前工作区」那几组：分组名 -> 工作区路径的映射在
+                        // characters/<id>/sessions/sessions.json 里，这里直接读文件，
+                        // 不依赖 cell.cpp 的进程级缓存（多个角色的索引不能共用）。
+                        const std::string cur_id = c->h.now().id();
+                        const std::string key_now = cell::cwd_id_of(fs::path(c->cwd));
+                        const fs::path root = paths::sessions_dir(c->p.id);
                         std::error_code ec;
-                        fs::path base = cell::root / "sessions" / key;
-                        if (fs::is_directory(base, ec))
-                            for (auto &e : fs::directory_iterator(base, ec))
+                        std::vector<fs::path> groups;
+                        if (fs::is_directory(root, ec))
+                            for (auto &e : fs::directory_iterator(root, ec))
+                                if (!ec && e.is_directory(ec))
+                                    groups.push_back(e.path());
+                        for (auto &g : groups)
+                        {
+                            const std::string key = g.filename().string();
+                            std::string ws = char_workspace_for_key(c->p.id, key);
+                            if (ws.empty())
                             {
-                                if (ec || !e.is_directory(ec))
+                                // 索引缺这一条（被删过 / 老会话没迁移到索引）：只认当前
+                                // 工作区的分组名，别的工作区照旧看不到
+                                if (key != key_now)
                                     continue;
-                                std::string id = e.path().filename().string();
-                                if (!cell::is_valid_session_id(id))
+                                ws = c->cwd;
+                            }
+                            if (!same_path_ci(ws, c->cwd))
+                                continue;
+                            std::vector<fs::path> dirs;
+                            for (auto &e : fs::directory_iterator(g, ec))
+                                if (!ec && e.is_directory(ec))
+                                    dirs.push_back(e.path());
+                            for (auto &d : dirs)
+                            {
+                                const std::string id = d.filename().string();
+                                if (!cell::is_valid_session_id(id) || cell::session_prefix(id) != key)
                                     continue;
                                 std::error_code tec;
-                                auto tf = e.path() / "messages.jsonl";
+                                fs::path tf = d / "messages.jsonl";
+                                if (!fs::is_regular_file(tf, tec))
+                                    tf = d; // 一句话都没说的空壳：按目录时间算
                                 auto ft = fs::last_write_time(tf, tec);
                                 long long mt = 0;
                                 if (!tec)
@@ -4615,8 +5913,33 @@ namespace app
                                 arr.push_back({{"id", id},
                                                {"mtime", mt},
                                                {"title", session_title(tf)},
-                                               {"current", id == c->h.now().id()}});
+                                               {"current", id == cur_id}});
                             }
+                        }
+                        // 当前会话永远在列表里（哪怕它所在分组的索引缺过一次）
+                        bool has_cur = false;
+                        for (auto &e : arr)
+                            if (e.value("current", false))
+                                has_cur = true;
+                        if (!has_cur)
+                        {
+                            std::error_code tec;
+                            const fs::path d = root / cell::session_prefix(cur_id) / cur_id;
+                            if (fs::is_directory(d, tec))
+                            {
+                                fs::path tf = d / "messages.jsonl";
+                                if (!fs::is_regular_file(tf, tec))
+                                    tf = d;
+                                auto ft = fs::last_write_time(tf, tec);
+                                long long mt = 0;
+                                if (!tec)
+                                    mt = (long long)std::chrono::duration_cast<std::chrono::seconds>(
+                                             std::chrono::file_clock::to_sys(ft).time_since_epoch())
+                                             .count();
+                                arr.push_back({{"id", cur_id}, {"mtime", mt},
+                                               {"title", session_title(tf)}, {"current", true}});
+                            }
+                        }
                     }
                     // 当前会话永远排最前；其余有内容的（有标题）按时间倒序，
                     // 一句话都没说的空壳沉到最后 —— 它们不该占着列表前排。
@@ -4653,9 +5976,11 @@ namespace app
                     }
                     else
                     {
-                        if (!cell::is_valid_session_id(sid) ||
-                            cell::session_prefix(sid) != cell::cwd_id_of(persona_dir(c->p.id)))
+                        // 会话必须属于这个角色的这个工作区（不能从别的角色 / 别的
+                        // 工作区里导出一条会话）
+                        if (!session_owned_by(*c, sid))
                             return fail("无效的会话 id");
+                        cell::exec_context_guard g({}, nullptr, paths::sessions_dir(c->p.id));
                         std::ifstream f(cell::session_file(sid), std::ios::binary);
                         if (!f)
                             return fail("读不到这条会话");
@@ -4736,15 +6061,19 @@ namespace app
                     if (c->busy.load())
                         return fail("回合进行中，等它结束");
                     std::string id = args.value("id", "");
-                    if (!cell::is_valid_session_id(id))
+                    if (!session_owned_by(*c, id))
                         return fail("无效的会话 id");
-                    c->h.now().unload();
-                    cell::async_io::flush();
-                    c->h.use(id);
+                    {
+                        // cell::session_dir / session_file 都按执行上下文里的会话根解析：
+                        // 这里是「这个角色」的 sessions/，不是数据根下的全局 sessions/
+                        cell::exec_context_guard g({}, nullptr, paths::sessions_dir(c->p.id));
+                        c->h.now().unload();
+                        cell::async_io::flush();
+                        c->h.use(id);
+                    }
                     c->eng->ensure_prompt();
                     apply_prompt(*c);
-                    ac.sessions[c->p.id] = id;
-                    ac.save();
+                    set_last_session(c->p.id, cell::cwd_id_of(fs::path(c->cwd)), id);
                     post_state_locked(true);
                     return ok();
                 }
@@ -4755,28 +6084,30 @@ namespace app
                     if (!c)
                         return fail("还没有打开角色");
                     std::string id = args.value("id", "");
-                    if (!cell::is_valid_session_id(id) || cell::session_prefix(id) != cell::cwd_id_of(persona_dir(c->p.id)))
+                    if (!session_owned_by(*c, id))
                         return fail("无效的会话 id");
                     bool current = (id == c->h.now().id());
-                    if (current)
-                    {
-                        if (c->busy.load())
-                            return fail("回合进行中，等它结束");
-                        c->h.now().unload();
-                        c->h.forget_current();
-                        cell::async_io::flush();
-                    }
+                    if (current && c->busy.load())
+                        return fail("回合进行中，等它结束");
                     std::error_code ec;
-                    fs::remove_all(cell::session_dir(id), ec);
+                    {
+                        cell::exec_context_guard g({}, nullptr, paths::sessions_dir(c->p.id));
+                        if (current)
+                        {
+                            c->h.now().unload();
+                            c->h.forget_current();
+                            cell::async_io::flush();
+                        }
+                        fs::remove_all(cell::session_dir(id), ec);
+                    }
                     if (ec)
                         return fail("删除失败：" + ec.message());
                     if (current)
                     {
                         c->eng->ensure_prompt();
                         apply_prompt(*c);
-                        ac.sessions[c->p.id] = c->h.now().id();
+                        set_last_session(c->p.id, cell::cwd_id_of(fs::path(c->cwd)), c->h.now().id());
                     }
-                    ac.save();
                     post_state_locked(true);
                     return ok();
                 }
@@ -4828,16 +6159,8 @@ namespace app
                     if (!c)
                         return fail("还没有打开角色");
                     std::string text = args.value("text", "");
-                    auto rows = memory_load(c->p.id, 4000);
-                    std::error_code ec;
-                    std::ofstream f(memory_file(c->p.id), std::ios::binary | std::ios::trunc);
-                    for (auto &e : rows)
-                    {
-                        if (e.text == text)
-                            continue;
-                        f << nlohmann::json{{"t", e.t}, {"text", e.text}}.dump() << '\n';
-                    }
-                    f.close();
+                    if (memory_forget(c->p.id, text) == 0)
+                        return fail("没有这条记忆（要完全一致的文本）");
                     apply_prompt(*c);
                     post_state_locked(true);
                     return ok();
@@ -4985,15 +6308,27 @@ namespace app
                     {
                         if (!ac.tts.enabled())
                             return fail("TTS 服务未启用");
+                        // 试听音频也落在「当前角色」的 characters/<id>/audio/ 里，
+                        // 所以得先有一个打开的角色（没角色就没有该往哪放）。
+                        std::string pid;
+                        {
+                            std::lock_guard<std::mutex> lk(cmd_mx);
+                            if (auto *c = find_ctx(active))
+                                pid = c->p.id;
+                        }
+                        if (pid.empty())
+                            return fail("还没有打开角色：试听音频要放进角色目录（characters/<角色>/audio/）");
                         long long n = ++voice_seq;
                         std::string ext = voice::ext_for(ac.tts.format);
                         std::string name_ = std::format("test-{}-{}.{}", (long long)std::time(nullptr), n, ext);
-                        fs::path out = audio_dir() / name_;
+                        std::error_code ec;
+                        fs::create_directories(paths::audio_dir(pid), ec);
+                        fs::path out = paths::audio_dir(pid) / name_;
                         std::string err;
                         if (!voice::tts(ac.tts, "你好，我在。", "", out, err))
                             return fail(err);
                         nlohmann::json r = ok();
-                        r["url"] = "/api/audio/" + name_;
+                        r["url"] = "/api/audio/" + pid + "/" + name_;
                         return r;
                     }
                     if (which == "asr")
@@ -5140,6 +6475,20 @@ namespace app
                             if (!c->busy.load())
                                 apply_prompt(*c);
                     }
+                    // sandbox：exec 能干什么（read-only 只读 / edit-only 可编辑 / full-access 全开）。
+                    // 改完立刻同步给全局与所有角色，下一回合就按新档位跑。
+                    if (args.contains("sandbox") && args["sandbox"].is_string())
+                    {
+                        const std::string mode = args["sandbox"].get<std::string>();
+                        auto m = cell::box::parse_mode(mode);
+                        if (!m)
+                            return fail("未知沙箱模式：" + mode);
+                        ac.sandbox = cell::box::mode_name(*m);
+                        cell::box::sandbox_mode() = *m;
+                        cfg.sandbox_mode = ac.sandbox;
+                        for (auto &[id, c] : ctxs)
+                            c->pcfg.sandbox_mode = ac.sandbox;
+                    }
                     ac.save();
                     nlohmann::json r = ok();
                     r["voice_reply"] = ac.voice_reply;
@@ -5148,6 +6497,7 @@ namespace app
                     r["compact_auto"] = ac.compact_auto;
                     r["free_think"] = ac.free_think;
                     r["mic_hotkey"] = ac.mic_hotkey;
+                    r["sandbox"] = cfg.sandbox_mode;
                     return r;
                 }
 
@@ -5167,7 +6517,8 @@ namespace app
                         const std::string_view kind(d.kind);
                         std::string def = kind == "core" ? cfg.system_prompt
                                           : kind == "identity" ? c->p.prompt
-                                                               : prompt_default_text(d.id);
+                                          : std::string_view(d.id) == "self" ? prompt_self_text(c->p)
+                                                                             : prompt_default_text(d.id);
                         // 这一层开着也可能因为全局偏好而不注入：说清楚，别让人以为坏了
                         std::string note;
                         if (kind == "text" || kind == "core")
@@ -5430,10 +6781,69 @@ namespace app
                     if (!c)
                         return fail("还没有打开角色");
                     std::error_code ec;
-                    fs::path dir = media::persona_stickers_dir(c->p.id);
+                    fs::path dir = paths::stickers_dir(c->p.id);
                     fs::create_directories(dir, ec);
                     if (ec)
                         return fail("无法创建表情包目录：" + ec.message());
+                    std::string cmd = "explorer.exe \"" + dir.string() + "\"";
+#ifdef __APPLE__
+                    cmd = "open \"" + dir.string() + "\"";
+#elif !defined(_WIN32)
+                    cmd = "xdg-open \"" + dir.string() + "\"";
+#endif
+                    std::string out, err;
+                    int code = -1;
+                    cell::plat::spawn_cmd(cmd, 10, out, code, err);
+                    nlohmann::json r = ok();
+                    r["path"] = dir.string();
+                    return r;
+                }
+                // 打开角色数据目录里的某一处：card / workspace / sessions / memorys /
+                // uploads / audio / stickers / root。界面上的「打开」按钮都走这一条。
+                if (name == "persona.open_dir")
+                {
+                    std::lock_guard<std::mutex> lk(cmd_mx);
+                    std::string id = args.value("id", active);
+                    if (id.empty())
+                        return fail("还没有打开角色");
+                    if (!persona_id_ok(id) || !fs::is_regular_file(paths::agent_md(id)))
+                        return fail("角色不存在：" + id);
+                    const std::string which = args.value("which", std::string("card"));
+                    fs::path dir;
+                    if (which == "card" || which == "root")
+                        dir = paths::character_dir(id);
+                    else if (which == "workspace")
+                    {
+                        persona p = load_persona(id);
+                        std::string werr;
+                        const std::string ws = resolve_workspace(p, &werr);
+                        if (ws.empty())
+                            return fail(werr);
+                        if (p.workspace != ws)
+                        {
+                            // 卡片里还是空串 / 旧路径：落成具体的绝对路径
+                            p.workspace = ws;
+                            save_persona(p);
+                        }
+                        dir = fs::path(ws);
+                    }
+                    else if (which == "sessions")
+                        dir = paths::sessions_dir(id);
+                    else if (which == "memorys")
+                        dir = paths::memorys_dir(id);
+                    else if (which == "uploads")
+                        dir = paths::uploads_dir(id);
+                    else if (which == "audio")
+                        dir = paths::audio_dir(id);
+                    else if (which == "stickers")
+                        dir = paths::stickers_dir(id);
+                    else
+                        return fail("未知目录：" + which +
+                                    "（card / workspace / sessions / memorys / uploads / audio / stickers / root）");
+                    std::error_code ec;
+                    fs::create_directories(dir, ec);
+                    if (ec)
+                        return fail("无法创建目录：" + dir.string() + "（" + ec.message() + "）");
                     std::string cmd = "explorer.exe \"" + dir.string() + "\"";
 #ifdef __APPLE__
                     cmd = "open \"" + dir.string() + "\"";

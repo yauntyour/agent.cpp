@@ -150,7 +150,8 @@ function openClearContext() {
     text: said
       ? `这次对话里你说了 ${said} 句话。清空之后，她就不再记得这次聊过什么。`
       : '这次对话还是空的；清空只是让上下文从头开始。',
-    note: said ? '「保存记忆并确认」会先让她把值得记住的事写进长期记忆，再清空上下文。' : '',
+    note: said ? '「保存记忆并确认」会先让她把值得记住的事写进长期记忆，再清空。'
+      + '清空只清这条会话（不会另开一条），这条的历史也会一起清掉 —— 想留档先导出。' : '只清这条会话的内容，不会新开一条。',
   }, [
     { label: '取消', value: null, cls: 'ghost' },
     { label: '确认', value: 'plain', cls: 'danger' },
@@ -264,7 +265,7 @@ function openMemory() {
 
 /* ---------------- 角色编辑 ---------------- */
 function openPersonaEditor(creating) {
-  const p = creating ? { name: '', subtitle: '', greeting: '', user_name: '', prompt: '', accent: '#8b7cff', voice: '', proactive: false, idle_minutes: 30 } : (S.persona || {});
+  const p = creating ? { name: '', subtitle: '', greeting: '', user_name: '', prompt: '', accent: '#8b7cff', voice: '', proactive: false, idle_minutes: 30, workspace: '' } : (S.persona || {});
   // 新建时的默认模型要扫描一次资源清单（空角色启动时舞台还没拿过）；
   // 等扫描回来再开抽屉，表单里才填得上模型路径
   const open = () => openDrawer(creating ? '新建角色' : '角色设定', 'persona', (body) => {
@@ -306,13 +307,27 @@ function openPersonaEditor(creating) {
       swatches.appendChild(s);
     }
     const idle = textInput(p.idle_minutes || 30, '30', 'number');
+    // 工作区：同一个角色可以在不同工作区里干活，会话按「角色 + 工作区」分组。
+    const ws = textInput(p.workspace, '留空 = 默认工作区（程序旁边的 workspaces/<角色>）');
+    const wsOpen = actionBtn('打开', async () => {
+      await cmd('persona.open_dir', { id: p.id, which: 'workspace' });
+    }, 'btn sm ghost');
+    if (creating) wsOpen.disabled = true; // 还没有 id，没有目录可开
+    const wsRow = el('div', 'field-row');
+    wsRow.append(ws, wsOpen);
     const models = (L2D.scan && L2D.scan.models) || [];
     form.append(
       field('名字', name),
       field('副标题', sub),
       field('开场白', hello, '只在空会话里由界面展示，不会占用上下文。'),
       field('她怎么称呼你', user),
-      field('人设', prompt, '写清楚性格、语气、边界。演出协议由程序自动追加。'),
+      field('人设', prompt,
+        '写清楚性格、语气、边界，存进 Agent.md；演出协议由程序自动追加。'
+        + '她的文件工具对角色目录只读，这段话只能由她用自己的 settings 工具改写。'),
+      field('工作区（cwd）', wsRow,
+        '她干活的地方。同一个角色可以配不同的工作区，会话按「角色 + 工作区」分组；'
+        + '留空 = 默认工作区（程序旁边的 workspaces/<角色>）。.agent/ 整棵树都不能当工作区 —— '
+        + '数据根对她只有读权限，工作区必须是她能写的地方。'),
       field('音色（可选）', voice, '对应语音服务里的 voice 参数；例如 alloy / zh-CN-XiaoxiaoNeural。'),
       field('主题色', swatches),
     );
@@ -339,6 +354,7 @@ function openPersonaEditor(creating) {
         greeting: hello.value.trim(),
         user_name: user.value.trim(),
         prompt: prompt.value,
+        workspace: ws.value.trim(),
         voice: voice.value.trim(),
         accent,
         proactive,
@@ -360,7 +376,7 @@ function openPersonaEditor(creating) {
 
     if (!creating) {
       const del = actionBtn('删除这个角色', async () => {
-        if (!confirm(`删除「${p.name}」以及她的会话与记忆？`)) return;
+        if (!confirm(`删除「${p.name}」？她的数据目录 characters/${p.id}/（角色卡 / 会话 / 记忆 / 附件）会一起删掉。`)) return;
         await cmd('persona.delete', { id: p.id });
         await refreshState();
         closeDrawer();
@@ -392,7 +408,12 @@ async function openSessions() {
   } catch (e) { toast(e.message, 'err'); }
   openDrawer('会话记录', 'sessions', (body) => {
     const sect = el('div', 'sect');
-    sect.appendChild(el('div', 'sect-h', '这个角色的会话'));
+    sect.appendChild(el('div', 'sect-h', '这个工作区的会话'));
+    // 会话是按「角色 + 工作区」分组的：换工作区就是换一组记录，这里显式说一声
+    const wsTip = el('div', 'tip', '工作区：' + (S.workspace || S.cwd || '—')
+      + '（同一个角色在不同工作区各有各的会话）');
+    wsTip.style.cssText = 'font-size:11px;color:var(--faint);line-height:1.7;margin:0 0 8px;word-break:break-all';
+    sect.appendChild(wsTip);
     if (!S.sessions.length) sect.appendChild(el('div', 'empty', '还没有记录'));
     // 顺序由服务端给：当前会话 → 有内容的（新到旧）→ 空壳
     for (const s of S.sessions) {

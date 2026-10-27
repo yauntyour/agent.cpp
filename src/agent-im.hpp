@@ -156,6 +156,12 @@ namespace app::im
         int send_delay_ms = 600; // 0 = 不限速（不建议）
         int queue_limit = 64;    // 出站队列上限，满了丢最旧的（新的更该送到）
 
+        // ---- 回复形态 ---------------------------------------------------
+        // 允许她发语音（TTS 配好才有效）。开着时回复默认是语音，她自己可以用 voice
+        // 工具把某一条改成打字。和桌面的「自动朗读」是两个开关：那边是本地播放，
+        // 这边是往会话里发语音条。
+        bool voice_reply = false;
+
         // 凭据 —— 只进加密库（.agent/.crypt），agent.json 里一个都不留。
         // 内存里是 secure_string：mlock + 析构清零，见上面的 secret。
         secret token;            // telegram bot token | onebot access token | wecom 回调 Token | bridge secret
@@ -177,6 +183,7 @@ namespace app::im
             return {{"id", id}, {"kind", kind}, {"enabled", enabled}, {"api_base", api_base},
                     {"proxy", proxy}, {"persona", persona}, {"limit", limit},
                     {"send_delay_ms", send_delay_ms}, {"queue_limit", queue_limit},
+                    {"voice_reply", voice_reply},
                     {"private_mode", private_mode}, {"private_allow", private_allow},
                     {"group_mode", group_mode}, {"group_allow", group_allow},
                     {"group_ids", group_ids}, {"allow", allow},
@@ -233,6 +240,9 @@ namespace app::im
             auto ql = j.find("queue_limit");
             if (ql != j.end() && ql->is_number_integer())
                 queue_limit = std::clamp<int>((int)ql->get<long long>(), 1, 2000);
+            auto vr = j.find("voice_reply");
+            if (vr != j.end() && vr->is_boolean())
+                voice_reply = vr->get<bool>();
             // 白名单列表：字符串或数字 id，去空
             auto list = [&](const char *k, std::vector<std::string> &dst) -> bool
             {
@@ -739,6 +749,7 @@ namespace app::im
             if (kind == "image") return "photo.jpg";
             if (kind == "sticker") return "sticker.webp";
             if (kind == "audio") return "voice.ogg";
+            if (kind == "voice") return "voice.mp3";
             if (kind == "video") return "video.mp4";
             return "file.bin";
         }
@@ -915,6 +926,115 @@ namespace app::im
             }
             std::erase_if(out, [](const std::string &s)
                           { return s.empty(); });
+            return out;
+        }
+
+        inline size_t u8_chars(const std::string &s)
+        {
+            size_t n = 0;
+            for (unsigned char c : s)
+                if ((c & 0xC0) != 0x80)
+                    ++n;
+            return n;
+        }
+        // 「人是怎么发消息的」：一句话一条。断点只认三种句末标点 ——
+        // 中文的 。！？ 和英文的 . ! ?；逗号、分号、省略号、换行都不断句。
+        //   - 英文句点要往后看一眼：URL（a.com）、小数（3.14）后面不是空白 / 结尾 / 中文，
+        //     就不算句末，免得把地址拆成两半；
+        //   - ``` 围起来的代码块整块保留，里面的标点不算断点；
+        //   - 句子数超过 max_n 时，多出来的并进最后一条：宁可最后一条长，也不丢字。
+        inline std::vector<std::string> split_bubbles(const std::string &text, size_t max_n)
+        {
+            if (max_n < 1)
+                max_n = 1;
+            std::vector<std::string> out;
+            std::string cur;
+            bool in_fence = false;
+            auto put = [&]
+            {
+                std::string u = cell::text::trim(cur);
+                cur.clear();
+                if (!u.empty())
+                    out.push_back(std::move(u));
+            };
+            // 英文句末标点后面必须跟空白 / 结尾 / 标点 / 中文，才算这一句说完了
+            auto ascii_end_ok = [&](size_t j)
+            {
+                if (j >= text.size())
+                    return true;
+                const unsigned char c = (unsigned char)text[j];
+                if (c == ' ' || c == '\t' || c == '\r' || c == '\n')
+                    return true;
+                if (c >= 0x80)
+                    return true; // 中文紧跟着也算（"Really?是的"）
+                return c == '"' || c == '\'' || c == '(' || c == '[' || c == '{' || c == ')' ||
+                       c == ']' || c == '}' || c == '.' || c == '!' || c == '?';
+            };
+            size_t i = 0, n = text.size();
+            while (i < n)
+            {
+                // 行首的 ``` 开 / 关代码块
+                if ((i == 0 || text[i - 1] == '\n') && text.compare(i, 3, "```") == 0)
+                {
+                    if (in_fence)
+                    {
+                        // 收尾：整块（含这一行的 ```）算一条
+                        cur.append("```");
+                        i += 3;
+                        while (i < n && text[i] != '\n')
+                        {
+                            cur.push_back(text[i]);
+                            ++i;
+                        }
+                        in_fence = false;
+                        put();
+                    }
+                    else
+                    {
+                        put();
+                        cur.append("```");
+                        i += 3;
+                        in_fence = true;
+                    }
+                    continue;
+                }
+                const size_t len = std::min(utf8_len((unsigned char)text[i]), n - i);
+                const std::string_view ch(text.data() + i, len);
+                cur.append(ch);
+                i += len;
+                if (in_fence)
+                    continue; // 代码里的标点不算断句
+                const bool cjk_end = (ch == "。" || ch == "！" || ch == "？");
+                const bool ascii_end = (ch == "." || ch == "!" || ch == "?") && ascii_end_ok(i);
+                if (!cjk_end && !ascii_end)
+                    continue;
+                // 连着几个句末标点（"？！"、"!!!"）算同一句；紧跟的引号 / 括号也归这一句
+                while (i < n)
+                {
+                    const size_t l2 = std::min(utf8_len((unsigned char)text[i]), n - i);
+                    const std::string_view q(text.data() + i, l2);
+                    if (q != "。" && q != "！" && q != "？" && q != "." && q != "!" && q != "?" &&
+                        q != "”" && q != "’" && q != "」" && q != "』" && q != "）" && q != ")" &&
+                        q != "\"")
+                        break;
+                    cur.append(q);
+                    i += l2;
+                }
+                put();
+            }
+            put();
+            if (out.size() > max_n)
+            {
+                std::string tail;
+                for (size_t k = max_n - 1; k < out.size(); ++k)
+                {
+                    if (!tail.empty())
+                        tail.push_back('\n');
+                    tail += out[k];
+                }
+                out.resize(max_n - 1);
+                out.push_back(std::move(tail));
+            }
             return out;
         }
     } // namespace detail
@@ -1463,6 +1583,22 @@ namespace app::im
             {
                 method = "sendPhoto";
                 field = "photo";
+            }
+        }
+        else if (kind == "voice")
+        {
+            // 语音条：sendVoice 只吃 ogg/opus、mp3、m4a；TTS 配成 wav/flac 时只能退回音频文件
+            if (ext == "ogg" || ext == "opus" || ext == "mp3" || ext == "m4a" ||
+                low_mime.starts_with("audio/ogg") || low_mime == "audio/mpeg" ||
+                low_mime == "audio/mp4")
+            {
+                method = "sendVoice";
+                field = "voice";
+            }
+            else
+            {
+                method = "sendAudio";
+                field = "audio";
             }
         }
         else if (kind == "audio")
@@ -2095,7 +2231,7 @@ namespace app::im
             return false;
         }
         nlohmann::json seg;
-        if (kind == "audio")
+        if (kind == "audio" || kind == "voice")
             seg = {{"type", "record"}, {"data", {{"file", path}}}};
         else if (kind == "video")
             seg = {{"type", "video"}, {"data", {{"file", path}}}};
@@ -2621,7 +2757,7 @@ namespace app::im
             up_type = "image";
             msg_type = "image";
         }
-        else if (kind == "audio")
+        else if (kind == "audio" || kind == "voice")
         {
             up_type = "voice";
             msg_type = "voice";
@@ -3737,7 +3873,7 @@ namespace app::im
             media_type = 1;
         else if (kind == "video")
             media_type = 2;
-        else if (kind == "audio")
+        else if (kind == "audio" || kind == "voice")
             media_type = 4;
         else if (kind != "file")
         {
@@ -4034,7 +4170,10 @@ namespace app::im
     // 节流回调：返回 false = 中止（正在退出 / 渠道被停用）
     using pace_fn = std::function<bool()>;
 
-    // 一条回复：按平台上限自动分条（最多 4 条，多的截断）
+    // 一条消息最多分成几条「气泡」：人的一段话大概也就这么多句
+    inline constexpr size_t kTextBubbleMax = 6;
+
+    // 一条回复：先按「人怎么说话」切成气泡，再按平台上限兜底分条
     // pace 在每次真正调用平台 API 之前被问一次（含分条），返回 false 表示中止。
     // 节流放在这里而不是调用方，是因为「一次 send 会变成几条 API 调用」只有
     // 这一层知道。
@@ -4054,26 +4193,30 @@ namespace app::im
                     : ch.kind == "onebot" ? 4000
                     : ch.kind == "wecom"  ? 1800
                                           : 3500;
-        auto parts = detail::split(text, limit, bytes);
-        if (parts.size() > 4)
-        {
-            parts.resize(4);
-            parts.back() += "…";
-        }
-        if (parts.empty())
+        auto bubbles = detail::split_bubbles(text, kTextBubbleMax);
+        if (bubbles.empty())
         {
             err = "空消息";
             return false;
         }
-        for (auto &p : parts)
+        for (auto &b : bubbles)
         {
-            if (pace && !pace())
+            auto parts = detail::split(b, limit, bytes); // 单条气泡撞上平台上限才会多于一条
+            if (parts.size() > 4)
             {
-                err = "已取消";
-                return false;
+                parts.resize(4);
+                parts.back() += "…";
             }
-            if (!send_chunk(ch, chat, group, p, err, abort))
-                return false;
+            for (auto &p : parts)
+            {
+                if (pace && !pace())
+                {
+                    err = "已取消";
+                    return false;
+                }
+                if (!send_chunk(ch, chat, group, p, err, abort))
+                    return false;
+            }
         }
         return true;
     }
@@ -4123,7 +4266,8 @@ namespace app::im
         return true;
     }
 
-    // 发一段本地媒体（绝对路径）。kind: image|sticker|audio|video|file
+    // 发一段本地媒体（绝对路径）。kind: image|sticker|audio|voice|video|file
+    //   audio = 音频文件；voice = 语音条（各平台对格式的门槛不同，见各 send_*_media）
     inline bool send_media(const channel &ch, const std::string &chat, bool group,
                            const std::string &kind, const std::string &path,
                            const std::string &name, const std::string &mime,
@@ -4157,7 +4301,8 @@ namespace app::im
         if (ch.kind == "wechat")
             return ilink_send_media(ch, chat, kind, path, nm, mm, err, abort);
         if (ch.kind == "bridge")
-            return send_bridge_media(ch, chat, kind, path, nm, mm, err, abort);
+            // 桥只认 image / sticker / audio / video / file：语音条按 audio 过去
+            return send_bridge_media(ch, chat, kind == "voice" ? "audio" : kind, path, nm, mm, err, abort);
         err = "渠道没有启用";
         return false;
     }

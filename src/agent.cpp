@@ -13,11 +13,17 @@
 //
 // 结构与 cell-app 一致：
 //   cell.cpp（单文件智能体内核，main 改名后整份编进来）
+//   agent-paths.hpp  每个角色自己的数据目录（characters/<角色>/…）
 //   agent-core.hpp   角色内核 + 命令总线 + 事件总线
 //   agent-voice.hpp  TTS / ASR / 原生录音
 //   agent-im.hpp     IM 接入：Telegram / QQ(OneBot) / 企业微信 / HTTP 桥
 //   agent-http.hpp   HTTP + SSE + 音频/头像静态资源
 //   agent-ui.hpp     内嵌的界面（build_ui.py 生成）
+//
+// 角色数据全部落在 characters/<角色>/：Agent.md（角色卡）、avatar、prompt.json、
+// state.json、sessions/（按工作区分组）、memorys/、uploads/、audio/、stickers/。
+// 这棵树对文件工具只读，宿主工具 settings 是唯一写入口；角色可以在不同的
+// 工作区（cwd）里干活，会话跟着工作区分组。
 //
 // 线程：每个角色一个回合工作线程；命令在 HTTP 工作线程上串行执行；所有事件
 // 通过 event_bus 广播，SSE 订阅者各自排队，慢客户端不会阻塞引擎。
@@ -253,7 +259,9 @@ namespace app
         printf("冒烟测试（独立数据根，自动退出）：\n");
         printf("  --smoke           窗口 → 页面 → 第一条 state 命令\n");
         printf("  --smoke-engine    再加一次完整回合\n\n");
-        printf("数据根：<exe 目录>\\.agent（角色、会话、语音成品、日志）\n");
+        printf("数据根：<exe 目录>\\.agent\n");
+        printf("  characters/<角色>/  Agent.md（角色卡）· sessions/ · memorys/ · uploads/ · audio/ · stickers/\n");
+        printf("  workspaces/<角色>/  默认工作区（角色的 cwd，可以在界面里改）\n");
     }
 
     static std::atomic<bool> g_signal_stop{false};
@@ -341,6 +349,12 @@ namespace app
         cell::root = cell::plat::executable_dir() / ".agent";
         if (smoke)
             cell::root = std::filesystem::temp_directory_path() / "agent-smoke";
+
+        // 角色数据是「可读、不可写」的：characters/<角色>/ 里放着角色卡（Agent.md）、
+        // 长期记忆、会话、附件……她可以用 read / ls / rg 读自己的资料，但 write /
+        // edit / exec 一律改不了 —— 想改自己只能调宿主工具 settings（那一条直接
+        // 走宿主写盘，绕过文件沙箱）。工作区（角色的 cwd）不在这棵树里，照常可写。
+        cell::box::set_protected_write_roots({cell::root / "characters"});
 
         auto &log = cell::sys::logger::instance();
         cell::sys::install_handlers();

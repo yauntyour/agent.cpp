@@ -33,6 +33,10 @@ const S = {
   sessions: [],
   session: '',
   cwd: '',
+  // 当前角色自己的数据位置（服务端 state 的新字段，见「数据目录」契约）：
+  // workspace = 她干活的工作区；files = 角色目录 / Agent.md / 会话 / 记忆 / 附件等绝对路径
+  workspace: '',
+  files: {},
   sandbox: '',
   port: 0,
   root: '',
@@ -214,6 +218,8 @@ function applyState(st, rebuild) {
   if (st.free_think !== undefined) S.free_think = !!st.free_think;
   if (st.session !== undefined) S.session = st.session;
   if (st.cwd !== undefined) S.cwd = st.cwd;
+  if (st.workspace !== undefined) S.workspace = String(st.workspace || '');
+  if (st.files && typeof st.files === 'object') S.files = st.files;
   applyAccent(S.persona && S.persona.accent);
   if (rebuild) paintAll();
 }

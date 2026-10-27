@@ -375,6 +375,28 @@ function prefSection() {
     '默认 Alt。单独按 Alt 在部分浏览器里会被菜单栏吃掉 —— 按住没反应就换成 Alt+M / F2 这类组合。'
     + '录音时要一直按着，松开即结束并开始转写。'));
 
+  // 沙箱档位：决定 exec / write / edit 能不能用。改完立刻同步给所有角色。
+  const sbSel = document.createElement('select');
+  for (const [v, t] of [['read-only', '只读：只能看，不能写、不能跑命令'],
+                        ['edit-only', '可编辑：能读写文件，仍然不能跑命令'],
+                        ['full-access', '完全访问（默认）：读写 + 跑命令']]) {
+    const o = document.createElement('option');
+    o.value = v; o.textContent = t;
+    if ((S.sandbox || 'full-access') === v) o.selected = true;
+    sbSel.appendChild(o);
+  }
+  sbSel.onchange = async () => {
+    try {
+      const r = await cmd('ui.pref', { sandbox: sbSel.value });
+      S.sandbox = r.sandbox || sbSel.value;
+      sbSel.value = S.sandbox;
+      toast('沙箱已切换为「' + (SANDBOX_ZH[S.sandbox] || S.sandbox) + '」，下一句话就按新档位跑', 'ok');
+    } catch (e) { toast(e.message, 'err'); sbSel.value = S.sandbox || 'full-access'; }
+  };
+  sect.appendChild(field('沙箱模式（exec 的权限）', sbSel,
+    '只读：ls / read / rg / find 可用，写文件和跑命令都被拦；可编辑：多一个 write / edit；'
+    + '完全访问：默认，读写与 exec 都不拦。改完立刻生效，不用重启。'));
+
   sect.appendChild(switchRow('允许工具自动执行（autoallow）',
     '开启后，她调用工具（读写文件、跑命令、查资料）不需要你逐次点确认；'
     + '关掉则每次都要批准，更安全但更打断。',
@@ -406,22 +428,37 @@ function prefSection() {
     sect.appendChild(toolTip);
   }
 
+  // 每个角色的数据都在自己的目录里；这几个按钮直接把她自己的目录打开
   const row = el('div', 'btn-row');
   row.appendChild(actionBtn('打开数据目录', async () => { await cmd('open.data_dir'); }, 'btn sm'));
+  if (S.active) {
+    const pid = S.active;
+    const openWhich = (label, which) => actionBtn(label, async () => {
+      await cmd('persona.open_dir', { id: pid, which });
+    }, 'btn sm');
+    row.appendChild(openWhich('打开角色目录', 'card'));
+    row.appendChild(openWhich('打开记忆目录', 'memorys'));
+    row.appendChild(openWhich('打开工作区', 'workspace'));
+  }
   row.appendChild(actionBtn('刷新状态', async () => { await refreshState(); }, 'btn sm ghost'));
   sect.appendChild(row);
 
   const tip = el('div', 'tip');
   tip.style.cssText = 'margin-top:14px;font-size:11px;color:var(--faint);line-height:1.7';
-  tip.innerHTML = '数据都在 <code>.agent/</code>：<br>'
-    + 'personas/ 角色卡与记忆 · sessions/ 会话 · audio/ 语音成品<br>'
-    + 'config.json 模型与密钥 · agent.json 服务与界面偏好';
+  tip.innerHTML = '数据都在 <code>.agent/</code>，每个角色一个目录：<br>'
+    + '<code>characters/&lt;角色&gt;/</code> Agent.md 角色卡 · prompt.json 提示词覆盖 · memorys/ 记忆<br>'
+    + '角色目录里还有 sessions/ 会话（按工作区分组） · uploads/ 附件 · audio/ 语音成品 · stickers/ 表情包<br>'
+    + 'config.json 模型 · .crypt 密钥 · agent.json 界面偏好<br>'
+    + '默认工作区在<strong>程序旁边</strong>：<code>workspaces/&lt;角色&gt;/</code>（不在 .agent 里 —— '
+    + '数据根对她只读，工作区必须能写）<br>'
+    + '她的文件工具对角色目录只读（能看不能改）；要改角色卡 / 提示词 / 记忆，走她的 '
+    + '<code>settings</code> 工具，由宿主代写。';
   sect.appendChild(tip);
   return sect;
 }
 
 /* ---------------- 表情包管理 ----------------
-   文件在 .agent/personas/<pid>/stickers/（优先）与 .agent/stickers/（全局）；
+   文件在 .agent/characters/<pid>/stickers/（每个角色自己一份，没有全局目录了）；
    名字 = 文件名去扩展名。这里只管上传 / 删除 / 打开目录，发不发由模型决定。 */
 function stickerSection() {
   const sect = el('div', 'sect');
@@ -482,15 +519,17 @@ function stickerSection() {
 
   const row = el('div', 'btn-row');
   row.appendChild(actionBtn('上传表情包', pickSticker, 'btn primary sm'));
-  row.appendChild(actionBtn('打开表情包目录', async () => { await cmd('open.stickers_dir'); }, 'btn sm ghost'));
+  row.appendChild(actionBtn('打开表情包目录', async () => {
+    await cmd('persona.open_dir', { id: S.active, which: 'stickers' });
+  }, 'btn sm ghost'));
   row.appendChild(actionBtn('刷新', async () => { await refreshState(); }, 'btn sm ghost'));
   sect.appendChild(row);
 
   const tip = el('div', 'tip');
   tip.style.cssText = 'margin-top:12px;font-size:11px;color:var(--faint);line-height:1.7';
   tip.innerHTML = '支持 png / jpg / gif / webp，单个不超过 ' + fmtSize(STICKER_MAX_BYTES) + '；名字就是文件名。'
-    + '<br>当前角色的在 <code>.agent/personas/&lt;角色&gt;/stickers/</code>，'
-    + '全局的 <code>.agent/stickers/</code> 对所有角色可见。';
+    + '<br>存在角色自己的目录 <code>.agent/characters/&lt;角色&gt;/stickers/</code>，'
+    + '跟着角色走（删角色就一起删掉），不再有全局表情包目录。';
   sect.appendChild(tip);
   return sect;
 }
@@ -749,7 +788,9 @@ function statusSection() {
   const s3 = el('div', 'sect');
   s3.appendChild(el('div', 'sect-h', '运行时'));
   s3.appendChild(statusKV('数据根', S.root, true));
-  s3.appendChild(statusKV('工作目录', S.cwd, true));
+  s3.appendChild(statusKV('工作区', S.workspace || S.cwd, true));
+  s3.appendChild(statusKV('角色目录', (S.files || {}).character_dir, true));
+  s3.appendChild(statusKV('角色卡', (S.files || {}).agent_md, true));
   s3.appendChild(statusKV('当前会话', S.session, true));
   s3.appendChild(statusKV('端口', S.port ? 'http://127.0.0.1:' + S.port + '/' : '—', true));
   s3.appendChild(statusKV('舞台', L2D.status === 'ready'

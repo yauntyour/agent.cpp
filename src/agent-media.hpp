@@ -3,7 +3,10 @@
 // 一次对话里可能出现的东西不止文字：桌面粘贴的截图、拖进来的 PDF、IM 里发来的
 // 图片 / 语音 / 视频 / 文件 / 表情包。它们在这层的命运是一样的：
 //
-//   字节 → .agent/uploads/<角色>/<时间-随机-名> → 一行清单 → 进上下文
+//   字节 → characters/<角色>/uploads/<时间-随机-名> → 一行清单 → 进上下文
+//
+// 附件和表情包都只落在角色自己的目录里（没有全局 uploads / stickers 了）：
+// 角色换掉、删掉就是整个目录一起走，不会在数据根里留下无主的字节。
 //
 // 清单是纯文本（`[attach:image] 名字 | 绝对路径`）。这样做的三个理由：
 //   1. 会话是 JSONL，base64 塞进去会长得没法看；路径只有几十字节；
@@ -26,6 +29,8 @@
 
 #include <sodium.h>
 
+#include "agent-paths.hpp"
+
 namespace app::media
 {
     // 一个附件在内存里的样子（path 为空 = 还没落地，只有远端地址）
@@ -42,12 +47,10 @@ namespace app::media
     inline constexpr size_t kMaxUpload = 48ull * 1024 * 1024;
     inline constexpr size_t kMaxFiles = 8; // 一条消息最多带几个附件
 
-    inline std::filesystem::path uploads_root() { return cell::root / "uploads"; }
-    inline std::filesystem::path uploads_dir(const std::string &pid) { return uploads_root() / pid; }
-    inline std::filesystem::path stickers_root() { return cell::root / "stickers"; }
-    inline std::filesystem::path persona_stickers_dir(const std::string &pid)
+    // 附件目录就是角色目录下的 uploads/（agent-paths.hpp 是唯一的一份定义）
+    inline std::filesystem::path uploads_dir(const std::string &pid)
     {
-        return cell::root / "personas" / pid / "stickers";
+        return paths::uploads_dir(pid);
     }
 
     inline std::string lower(std::string s)
@@ -325,13 +328,12 @@ namespace app::media
 
     // ---- 表情包 --------------------------------------------------------
     // 目录里放图（png / jpg / gif / webp），文件名（去扩展名）就是表情包的名字。
-    // 角色自己的目录优先，其次是全局的 .agent/stickers/。
+    // 只有角色自己的 characters/<角色>/stickers/，没有全局目录了。
     inline std::vector<std::filesystem::path> sticker_dirs(const std::string &pid)
     {
         std::vector<std::filesystem::path> out;
         if (!pid.empty())
-            out.push_back(persona_stickers_dir(pid));
-        out.push_back(stickers_root());
+            out.push_back(paths::stickers_dir(pid));
         return out;
     }
 
@@ -412,7 +414,8 @@ namespace app::media
         return "/api/stickers/" + pid + "/" + url_encode(name);
     }
 
-    // 附件绝对路径 → 页面地址；不在 uploads/<pid>/ 下的（比如表情包）返回空。
+    // 附件绝对路径 → 页面地址；不在 characters/<角色>/uploads/ 下的（比如表情包）
+    // 返回空。路径必须正好是 characters 根下面三层：<角色>/uploads/<文件>。
     // history_json 与 IM 清单都靠这一条决定 attachments[].url。
     inline std::string url_for_path(const std::string &path)
     {
@@ -422,22 +425,25 @@ namespace app::media
         auto file = std::filesystem::weakly_canonical(std::filesystem::path(path), ec);
         if (ec || file.empty())
             return {};
-        auto root = std::filesystem::weakly_canonical(uploads_root(), ec);
+        auto root = std::filesystem::weakly_canonical(paths::characters_dir(), ec);
         if (ec || root.empty())
             return {};
         auto rel = file.lexically_relative(root);
         if (rel.empty() || rel == ".")
             return {};
-        auto first = rel.begin();
-        if (first->string() == "..")
+        auto it = rel.begin();
+        if (it->string() == "..")
             return {};
-        std::string pid = first->string();
-        ++first;
-        if (first == rel.end())
+        std::string pid = it->string();
+        ++it;
+        if (it == rel.end() || it->string() != "uploads")
             return {};
-        std::string fname = first->string();
-        ++first;
-        if (first != rel.end())
+        ++it;
+        if (it == rel.end())
+            return {};
+        std::string fname = it->string();
+        ++it;
+        if (it != rel.end())
             return {};
         return "/api/uploads/" + pid + "/" + url_encode(fname);
     }
@@ -483,7 +489,7 @@ namespace app::media
             return false;
         }
         std::error_code ec;
-        auto dir = persona_stickers_dir(pid);
+        auto dir = paths::stickers_dir(pid);
         std::filesystem::create_directories(dir, ec);
         if (ec)
         {
@@ -516,7 +522,7 @@ namespace app::media
         return true;
     }
 
-    // 删掉一个表情包（角色目录优先，全局目录里的同名也一起删）。
+    // 删掉一个表情包（在角色自己的 stickers 目录里找）。
     inline bool sticker_remove(const std::string &pid, const std::string &name, std::string &err)
     {
         if (!sticker_name_ok(name))
