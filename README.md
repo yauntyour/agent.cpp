@@ -173,6 +173,15 @@ CMake 选项：
 
 工具链下限由 `cell.cpp` 决定：它无条件 `#include <generator>` / `<expected>`，所以要有 libstdc++ ≥ 14（GCC 14）或 libc++ ≥ 19（Xcode ≥ 16.3）—— 这不是「退回 `-std=c++23` 就能过」的事，老 libc++ 根本没有这个头文件。每个 job 先用 `#include <generator>` 探一次，探不到立刻报错（别等编三分钟）；macOS 上会先切到镜像里最新的 Xcode，还不够新就退到 brew 的 llvm。
 
+macOS 退到 brew llvm 时有个坑：`brew install llvm` 的 clang++ **默认不用它自己那份 libc++**。llvm 是 keg-only，libc++ 头文件在 `$(brew --prefix llvm)/include/c++/v1`、库在 `lib/c++`，都不在 clang 的默认搜索路径里，所以它照样去读 macOS SDK 那份 —— 探针会以同样的方式再失败一次。必须显式：
+
+```
+CXXFLAGS="-nostdinc++ -isystem $(brew --prefix llvm)/include/c++/v1 -D_LIBCPP_DISABLE_AVAILABILITY"
+LDFLAGS="-L$(brew --prefix llvm)/lib/c++ -L$(brew --prefix llvm)/lib/unwind -lunwind"
+```
+
+（`_LIBCPP_DISABLE_AVAILABILITY` 是 brew 自己在 caveats 里给的：不然新 libc++ 里比系统版本新的 API 会被 availability 标注挡掉。）这样编出来的二进制会链 `/opt/homebrew/opt/llvm/lib/c++/libc++.1.dylib`，和已经硬链的 brew libsodium 一样，是台机器上的产物，不是可分发产物。
+
 `#embed` 是另一回事：要 GCC ≥ 15 / Clang ≥ 19。拿不到时 `build_live2d.py` 把 `kAssetCount` 置 0，exe 里不自带默认 Live2D 模型，其余功能不变。
 
 ---

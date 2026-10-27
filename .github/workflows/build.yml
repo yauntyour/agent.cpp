@@ -12,6 +12,8 @@ name: build
 # 所以工具链的下限是 libstdc++ >= 14（GCC 14）或 libc++ >= 19（Xcode >= 16.3）。
 # 这不是「-std=c++23 就能退」的事 —— 老 libc++ 根本没有这个头文件。每个 job 都
 # 先用 `#include <generator>` 探一次，探不到直接报错，别等到编了三分钟才炸。
+# 注意 macOS：brew 的 llvm 是 keg-only，它的 libc++ 头/库都不在默认搜索路径里，
+# 光 `brew install llvm` 不改搜索路径等于没换（详见 macos job 里那一步的注释）。
 # 另外 CMakeLists 默认 AGENT_CXX_STANDARD=26，而 #embed 要 GCC >= 15 / Clang >= 19，
 # 拿不到 #embed 时 build_live2d.py 会把 kAssetCount 置 0（exe 不带默认 Live2D 模型）。
 
@@ -211,34 +213,84 @@ jobs:
       - name: Install dependencies
         run: brew install ninja libsodium boost nlohmann-json
 
+      # 注意：`brew install llvm` 的 clang++ 默认**不会**用它自己那份 libc++ ——
+      # llvm 是 keg-only，libc++ 头文件在 $LLVM/include/c++/v1、库在 $LLVM/lib/c++，
+      # 都不在 clang 的默认搜索路径里，于是它照样去读 SDK 那份 libc++，等于白装。
+      # 要真用上必须显式 -nostdinc++ + -isystem，链接侧再补 -L lib/c++ 和 -lunwind。
       - name: Pick a compiler that has <generator>
         id: cc
         run: |
+          set -uo pipefail
+
+          # 成功返回 0；失败时把编译器原话留在 /tmp/probe.log（别再 >/dev/null 吞掉，
+          # 上一版就是吞掉了才只能靠猜「libc++ 太旧」）。
           probe() {
-            printf '#include <generator>\n#include <expected>\nint main(){}\n' \
-              | "$1" -std=c++26 -x c++ -fsyntax-only - >/dev/null 2>&1
+            local cxx="$1"; shift
+            printf '#include <generator>\n#include <expected>\n#include <format>\nint main(){}\n' \
+              | "$cxx" -std=c++26 -x c++ -fsyntax-only "$@" - >/tmp/probe.log 2>&1
           }
-          cxx=$(xcrun -f clang++)
+          dump() {
+            echo "---- $1 的原话 ----"
+            sed -e 's/^/  | /' /tmp/probe.log | head -20
+            echo "-------------------"
+          }
+
+          cxx=""; cxxflags=""; ldflags=""
+
           echo "Xcode: $(xcodebuild -version | tr '\n' ' ')"
-          echo "default: $($cxx --version | head -1)"
-          if probe "$cxx"; then
+          xcxx="$(xcrun -f clang++)"
+          echo "default: $($xcxx --version | head -1)"
+          if probe "$xcxx"; then
             echo "使用 Xcode 的 clang++"
+            cxx="$xcxx"
           else
-            echo "Xcode 的 libc++ 太旧（<generator> 要 Xcode >= 16.3），改用 brew llvm"
+            dump "Xcode 的 clang++"
+            echo "Xcode 这份 libc++ 不行（<generator> 要 Xcode >= 16.3），改用 brew llvm"
             brew install llvm
-            cxx="$(brew --prefix llvm)/bin/clang++"
-            if ! probe "$cxx"; then
+            llvm="$(brew --prefix llvm)"
+            cxx="$llvm/bin/clang++"
+            # -nostdinc++ 之后必须自己把 libc++ 头目录补回去，否则 C++ 头一个都找不到。
+            cxxflags="-nostdinc++ -isystem $llvm/include/c++/v1 -D_LIBCPP_DISABLE_AVAILABILITY"
+            # brew 把 libc++/libc++abi 装在 lib/c++、libunwind 装在 lib/unwind；
+            # rpath 是给 Smoke 那一步用的（否则 @rpath/libc++.1.dylib 找不到）。
+            ldflags="-L$llvm/lib/c++ -L$llvm/lib/unwind -lunwind"
+            ldflags="$ldflags -Wl,-rpath,$llvm/lib/c++ -Wl,-rpath,$llvm/lib/unwind"
+            echo "brew llvm: $($cxx --version | head -1)"
+            echo "cxxflags: $cxxflags"
+            if ! probe "$cxx" $cxxflags; then
+              dump "brew llvm"
               echo "::error::brew llvm 也编不了 <generator>：$($cxx --version | head -1)"
               exit 1
             fi
+            # 探针过了还得确认拿的真是 brew 那份头文件，不是又绕回 SDK 去了
+            inc=$(printf '#include <generator>\n' \
+                  | "$cxx" $cxxflags -std=c++26 -x c++ -E -v - 2>&1 >/dev/null \
+                  | sed -n '/#include <...> search starts here:/,/End of search list/p' \
+                  | grep -m1 'c++/v1')
+            echo "libc++ headers: $inc"
+            if [ -n "$inc" ]; then
+              case "$inc" in
+                *"$llvm"*) ;;
+                *) echo "::error::还在用 $inc，不是 brew llvm 的 libc++"; exit 1 ;;
+              esac
+            else
+              echo "::warning::没解析出 libc++ 头搜索路径，跳过这项自检"
+            fi
           fi
-          echo "cxx=$cxx" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "cxx=$cxx"
+            echo "cxxflags=$cxxflags"
+            echo "ldflags=$ldflags"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Configure
         run: |
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CXX_COMPILER="${{ steps.cc.outputs.cxx }}" \
+            -DCMAKE_CXX_FLAGS="${{ steps.cc.outputs.cxxflags }}" \
+            -DCMAKE_EXE_LINKER_FLAGS="${{ steps.cc.outputs.ldflags }}" \
             -DAGENT_CXX_STANDARD=26
 
       - name: Build
