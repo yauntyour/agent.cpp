@@ -28,3 +28,4 @@ _CPack_Packages
 __pycache__
 *.pyc
 .workbuddy
+.cell
